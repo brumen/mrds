@@ -1,5 +1,4 @@
 # ONLY USED DATE POSSIBLE: 20150401
-import config
 import numpy as np
 import scipy.interpolate
 import matplotlib.pyplot as plt

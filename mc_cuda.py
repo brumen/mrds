@@ -2,6 +2,7 @@ import config
 import numpy as np
 import scipy.integrate
 from numpy.random import multivariate_normal as mn
+
 if config.CUDA_PRESENT:
     import pycuda.cumath
     import cuda_ops 

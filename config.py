@@ -1,7 +1,5 @@
 # configuration file
 import sys
-import numpy as np
-from subprocess import call 
 from subprocess import Popen, PIPE
 
 # cuda check
@@ -28,9 +26,6 @@ cython_include_dirs = []  # '/usr/local/lib/python2.7/dist-packages/numpy/core/i
 cython_extra_link_args = []  # '-L/usr/local/lib/python2.7/dist-packages/numpy/core/lib']
 
 if CUDA_PRESENT:  # cuda modules
-    import pycuda.gpuarray as gpa
-    import pycuda.driver as cuda
     import pycuda.autoinit
-    from pycuda.curandom import rand as curand
     from pycuda.compiler import SourceModule
     pycuda.compiler.DEFAULT_NVCC_FLAGS = ['--use_fast_math']

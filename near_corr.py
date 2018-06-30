@@ -2,7 +2,7 @@
 # as defined in a paper by
 # Nicholas Higham  "Computing the Nearest Correlation matrix - A Problem in Finance"
 #
-import config
+
 import numpy as np
 from numpy import diag, eye, dot, sqrt, zeros
 import scipy
@@ -19,23 +19,18 @@ def u_proj(A, W):
 
 def s_proj(A, W):
     """
-    computes S proj
+    computes the projection matrix
+
     """
+
     # positive part of A as defined
-    def mat_positive(A):
-        # spectral decomp. of A
-        A_eig_v, A_eig_m = scipy.linalg.eig(A)
-        return dot(A_eig_m, dot(diag(0.5 * (A_eig_v + np.abs(A_eig_v))), A_eig_m.transpose()))
+    U,S,VT = scipy.linalg.svd(W)
+    W_one_half = dot(dot(U, diag(sqrt(S))), VT)
+    W_inv_one_half = scipy.linalg.inv(W_one_half)
+    A_eig_v, A_eig_m = scipy.linalg.eig(dot(W_one_half, dot(A, W_one_half)))
+    W_positive = dot(A_eig_m, dot(diag(0.5 * (A_eig_v + np.abs(A_eig_v))), A_eig_m.transpose()))
 
-    # W^(0.5), W^(-0.5) returned
-    def mat_inv_sqrt(A):
-        U,S,VT = scipy.linalg.svd(A)
-        # D = diag (sqrt(S))
-        res = dot(dot(U, diag(sqrt(S))), VT)
-        return res, scipy.linalg.inv(res)
-
-    W_one_half, W_inv_one_half = mat_inv_sqrt(W)
-    return dot(W_inv_one_half, dot(mat_positive(dot(W_one_half, dot(A, W_one_half))), W_inv_one_half))
+    return dot(W_inv_one_half, dot(W_positive, W_inv_one_half))
 
 
 def near_corr(A, W, nb_iter):
@@ -54,6 +49,8 @@ def near_corr(A, W, nb_iter):
 
 def near_corr_simple(A, nb_iter=10):
     """
-    same as above, W is identity matrix
+    same as in the function near_corr, with W is identity matrix
+
     """
+
     return near_corr(A, eye(A.shape[0]), nb_iter)

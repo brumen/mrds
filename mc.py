@@ -3,11 +3,10 @@ import numpy as np
 import scipy.integrate
 from numpy.random import multivariate_normal as mn_cpu
 import vtpm_cpu  # avx & omp analysis
+
 if config.CUDA_PRESENT:
-    import pycuda.cumath
     import cuda_ops as co
     import pycuda.gpuarray as gpa
-    import pycuda.cumath as cumath
     import curand
     rn_gen_global = curand.create_gen_simple()  # generator of random numbers
 else:

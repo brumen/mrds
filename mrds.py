@@ -11,7 +11,7 @@ import scipy.special
 import scipy.stats 
 import scipy.optimize 
 import scipy.interpolate  # spline package
-import openopt  # optimization solver
+import openopt
 import multiprocessing as mp
 import csv
 import os
@@ -32,7 +32,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
 from matplotlib.figure import Figure
-import Tkinter as tk
+import tkinter as tk
 
 import vols
 import vols_fast
@@ -44,6 +44,8 @@ if config.CUDA_PRESENT:
     import cuda_ops
 import opd_avx   # for speedups
 
+import logging
+
 # F skew implementation
 if config.CUDA_PRESENT: 
     F_skew_el = open(config.work_dir + 'cuda/skew_tsf.c', 'r').read()
@@ -54,6 +56,7 @@ if config.CUDA_PRESENT:
 class MrdsError(Exception):
     """
     Base class for MRDS exceptions
+
     """
     pass
 
@@ -63,6 +66,7 @@ class InputError(MrdsError):
     Exception raised for errors in the input
     Attributes:
     :param msg -- explanation of the error
+
     """
     def __init__(self, msg):
         self.msg = msg
@@ -71,24 +75,35 @@ class InputError(MrdsError):
 class market_model():
     """
     abstrct market model class
+
     """
     pass
 
+
 class mouse_press_state_machine():
+    """
+    TODO: FILL WHAT THIS IS DOING
+
+    """
+
     pass
 
 
 def opt_fct_skew_wrap(arg, **kwarg):
     """
-    # wrapper for the skew MRD model calibration function
+    wrapper for the skew MRD model calibration function
+
     """
+
     return mrd_skew.opt_fct_skew(*arg, **kwarg)
 
 
 class mrd_skew(market_model):
     """
-    # nb_assets ... number of assets
-    # tenors_list ... a _list_ of tenors of the forward contracts, each tenor curve is a numpy.array
+    :param nb_assets: number of assets in the skew model
+    :type nb_assets: int
+    :param tenors_list: a _list_ of tenors of the forward contracts, each tenor curve is a numpy.array
+    :type tenors_list:
     # forward_curves ... one forward curve for each tenors from the respective forward curve
     # atm_vols ... a list of atm vols for every forward curve
     # delta_vecs ... deltas for the vol surface (2nd argument in the vol_surface matrix), for each curve respectively
@@ -118,12 +133,19 @@ class mrd_skew(market_model):
                  for asset_2 in range(self.nb_assets)]
                 for asset_1 in range (self.nb_assets)]
 
-    def __init__(self, nb_assets, date_today,
-                 multi_thread_ind=False, model_skew_ln_ind='skew',
-                 subset_idx=-1, solver_init=None,
-                 max_iter=None, verbose='none', debug_mode=False,
-                 black_vol_inverse_tol=1e-4, seed=None,
-                 cuda_ind=False):
+    def __init__( self
+                , nb_assets
+                , date_today
+                , multi_thread_ind  = False
+                , model_skew_ln_ind = 'skew'
+                , subset_idx        = -1
+                , solver_init       = None
+                , max_iter          = None
+                , verbose           = 'none'
+                , debug_mode        = False
+                , black_vol_inverse_tol = 1e-4
+                , seed              = None
+                , cuda_ind          = False ):
 
         if solver_init is None:
             self.solver = 'scipy_cobyla'  # initial solver
@@ -136,12 +158,6 @@ class mrd_skew(market_model):
         else:
             self.max_iter = max_iter
 
-        # verbosity, implies verbosity throughout the class operation
-        # verbose in 'none', 'low', 'med', 'high'
-        # 'none' - prints only the essentials
-        # 'low' - prints some intermediary
-        # 'med' - NOT used yet
-        # 'high' - print also some of the intermediary results w/ optimization, etc.
         self.verbose = verbose
         if verbose == 'none':
             self.iprint = -1 
@@ -266,10 +282,12 @@ class mrd_skew(market_model):
 
     def map_coms_to_nbs(self, com_fwd_list):
         """
-        maps com_fwd_list to numbers, i.e. [com
+        Maps com_fwd_list to numbers, i.e. [com
+
         :param com_fwd_list:
         :return self.coms_to_nbs: dict of coms to numbers {'WTI': 0, 'BRENT': 1, ...
         """
+
         self.coms_to_nbs = {com: com_nb for (com, com_nb)
                             in zip(com_fwd_list, range(len(com_fwd_list)))}
         self.nbs_to_coms = {com_nb: com for (com, com_nb)
@@ -277,9 +295,11 @@ class mrd_skew(market_model):
 
     def set_cash_vols(self, asset_nb, cash_vols):
         """
-        sets the cash vols for the particular asset.
+        Sets the cash vols for the particular asset.
+
         req: len(cash_vols) == len(fwd_curve_list[asset_nb])
         """
+
         self.cash_vol_list[asset_nb] = cash_vols
 
     def update_sim_times(self, st_init):
@@ -368,9 +388,11 @@ class mrd_skew(market_model):
         self.fwd_curve_name[asset_nb] = fwd_curve
         self.vol_curve_name[asset_nb] = vol_curve
         self.vol_surface_name_list[asset_nb] = ds.vol_hash[vol_curve]
-        fwd_vol_matched = ds.read_data_matched_tenors(date_, fwd_curve, vol_curve,
-                                                      adj_fwd_tenors_days=adj_fwd_tenors_days,
-                                                      adj_vol_tenors_days=adj_vol_tenors_days)
+        fwd_vol_matched = ds.read_data_matched_tenors( date_
+                                                     , fwd_curve
+                                                     , vol_curve
+                                                     , adj_fwd_tenors_days = adj_fwd_tenors_days
+                                                     , adj_vol_tenors_days = adj_vol_tenors_days )
 
         self.forward_tenors_list[asset_nb] = fwd_vol_matched['fwd_tenors']
         self.forward_curve_list[asset_nb] = fwd_vol_matched['fwd_curve']
@@ -512,7 +534,7 @@ class mrd_skew(market_model):
         #    print "Overwritten corr. vec. length does not match original corr. vec."
         #else:
         if self.debug_mode:
-            print "Corr. vec overwritten with", overwr
+            print ("Corr. vec overwritten with", overwr)
         self.market_corr_list[asset_1][asset_2] = overwr
 
     def _construct_corr (self, mtx_size, theta_vector):
@@ -702,9 +724,9 @@ class mrd_skew(market_model):
                                    for fwd in range(self.forward_curve_len[asset_nb])])
         diff = scipy.linalg.norm(model_atm_vols - self.atm_vol_list[asset_nb])
         if diff > 1e-2:
-            print "Calibration of ATM vols for asset nb. ", asset_nb, " FAILED. Diff=", diff
+            print ("Calibration of ATM vols for asset nb. ", asset_nb, " FAILED. Diff=", diff)
         else:
-            print "Calibration of ATM vols for asset nb. ", asset_nb, " succeeded. Diff=", diff
+            print ("Calibration of ATM vols for asset nb. ", asset_nb, " succeeded. Diff=", diff)
 
     def __default_corr_mat__(self, asset_nb, exp_nb):
         """
@@ -1606,7 +1628,7 @@ class mrd_skew(market_model):
         # 2-rd dimension: repeats of the curve
         """
         if self.simulation_times[-1] > self.forward_tenors_list[0][-1]:
-            print "Last simulation time is larger than the largest forward tenor."
+            print ("Last simulation time is larger than the largest forward tenor.")
             self.simulated_curves = [] 
         else:
             self.simulate_curves(nb_simulations, set_seed)  # simulate curves
@@ -2137,7 +2159,7 @@ def read_mm_hash(multi_single_ind):
         mm_calib_file = single_asset_mm_calib
     else:
         mm_calib_file = multi_asset_mm_calib
-    print "Reading prev. calibrated market models from", mm_calib_file
+    print ("Reading prev. calibrated market models from", mm_calib_file)
 
     mm_hash = dict()
     if os.stat(mm_calib_file)[6] != 0:  # is file empty
@@ -2421,8 +2443,14 @@ def mrds_calib_db_multiple(com_fwd_l, com_vol_l, date_, nb_fwd_l,
     return mm
 
 
-def compute_partial_deltas (mm, pricer, params, nb_sim, subset_idx,
-                            delta=0.01, seed=None, verbose=None):
+def compute_partial_deltas ( mm
+                           , pricer
+                           , params
+                           , nb_sim
+                           , subset_idx
+                           , delta=0.01
+                           , seed=None
+                           , verbose=None ):
     """
     # computes partial deltas for all assets
     # mm ... calibrated market model
@@ -2439,14 +2467,13 @@ def compute_partial_deltas (mm, pricer, params, nb_sim, subset_idx,
     #nb_sim = mm.simulated_curves[0].shape[2] # simulations from t
     deltas = mm._empty_list_fct (mm.nb_assets) # empty list of deltas
 
-    # WOULD BE BETTER INTERPRETED AS A DICTIONARY CORRECT CORRECT CORRECT 
+    # TODO: WOULD BE BETTER INTERPRETED AS A DICTIONARY CORRECT CORRECT CORRECT 
     for asset_nb in range(mm.nb_assets):
         deltas[asset_nb] = np.zeros(len(subset_idx))
         for idx in range(len(subset_idx)):
-            if verbose is not None:
-                print "Computing deltas for asset", asset_nb, "and fwd. idx.", subset_idx[idx]
-                print "Original price of future's", subset_idx[idx], "for asset", asset_nb, "=", \
-                    mm.forward_curve_list[asset_nb][subset_idx[idx]]
+            logging.debug("Computing deltas for asset", asset_nb, "and fwd. idx.", subset_idx[idx])
+            logging.debug("Original price of future's", subset_idx[idx], "for asset", asset_nb, "=", \
+                    mm.forward_curve_list[asset_nb][subset_idx[idx]])
             mm.forward_curve_list[asset_nb][subset_idx[idx]] *= (1.0+delta)
             mm.simulate_curves(nb_sim, seed)
             deltas[asset_nb][idx] = pricer(mm, params)  # pricer with forward curves bumped
@@ -2454,10 +2481,9 @@ def compute_partial_deltas (mm, pricer, params, nb_sim, subset_idx,
             mm.simulate_curves(nb_sim, seed)
             price2 = pricer(mm, params)
             deltas[asset_nb][idx] -= price2
-            if verbose is not None:
-                print "Bumped price", mm.forward_curve_list[asset_nb][subset_idx[idx]]
-                print "price 1:", deltas[asset_nb][idx]
-                print "price 2:", price2
+            logging.debug("Bumped price", mm.forward_curve_list[asset_nb][subset_idx[idx]])
+            logging.debug("price 1:", deltas[asset_nb][idx])
+            logging.debug("price 2:", price2)
     return np.array(deltas)
 
 
@@ -2477,10 +2503,10 @@ def compute_partial_vegas(mm, pricer, params, nb_sim, subset_idx,
             vegas[asset_nb][idx] -= pricer(mm, params)
             vegas[asset_nb][idx] *= 100.0 # scaling
             if verbose is not None:
-                print "Computing vegas for asset", asset_nb, "and fwd. idx.", subset_idx[idx]
-                print "Bumped vol curve", mm.atm_vol_list[asset_nb]
-                print "up", vegas[asset_nb][idx]
-                print "down", pricer(mm, params)
+                print ("Computing vegas for asset", asset_nb, "and fwd. idx.", subset_idx[idx])
+                print ("Bumped vol curve", mm.atm_vol_list[asset_nb])
+                print ("up", vegas[asset_nb][idx])
+                print ("down", pricer(mm, params))
     return vegas 
 
 
