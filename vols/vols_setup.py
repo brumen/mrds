@@ -12,6 +12,3 @@ setup(name = 'volatility functions fast',
       cmdclass = {'build_ext': build_ext},
       ext_modules = ext_modules
     )
-
-
-# compile using python vols_setup.py build_ext --inplace

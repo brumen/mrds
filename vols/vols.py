@@ -1,6 +1,7 @@
 # volatilities' module
+
 import config
-import numpy as np
+import logging
 from numpy import double, log, exp, sqrt
 import scipy
 import scipy.stats
@@ -12,18 +13,26 @@ mpl.use('TkAgg')
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
-from matplotlib.figure import Figure
-import Tkinter as tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import tkinter as tk
+
 if config.CUDA_PRESENT:
     import pycuda.gpuarray as gpa
 
 import ds
-import pricers
+import pricers.pricers
 import vols_fast
+
+logger = logging.Logger(__name__)
 
 
 def norm_strike(S0, K, sigma, ttm):
+    """
+    Normalized strike if the forward is S0, strike is K, atm vol is sigma and time to maturity is ttm
+
+    :param S0:
+    """
+
     return log(double(K) / double(S0)) / (sigma * sqrt(double(ttm)))
 
 
@@ -31,12 +40,17 @@ def norm_strike_v(S0, K_v, sigma, ttm_v):
     """
     vectorized form of norm_strike
     K_v, ttm_v can be any shape
+
     """
+
     return log(double(K_v.reshape(1, len(K_v))) / double(S0)) / \
            (sigma * sqrt(double(ttm_v)))
 
 
 def norm_strike_v_inv(delta_v, sigma, ttm):
+    """
+
+    """
     return exp(scipy.stats.norm.ppf(delta_v) * sigma * sqrt(double(ttm))
                - 0.5 * sigma**2 * ttm)
 
@@ -44,12 +58,11 @@ def norm_strike_v_inv(delta_v, sigma, ttm):
 def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
     """
     array with forwards and vol params
+
     """
+
     fvm = ds.read_data_matched_tenors(date_, fwd_name, vol_name)
-    if nb_fwds_taken == -1:
-        nb_fwds = len(fvm['fwd_curve'])
-    else:
-        nb_fwds = nb_fwds_taken
+    nb_fwds = len(fvm['fwd_curve']) if nb_fwds_taken == -1 else nb_fwds_taken
 
     fwd_curve = fvm['fwd_curve'][:nb_fwds]
     option_tenors_dt = fvm['option_tenors_dt'][:nb_fwds]
@@ -60,14 +73,19 @@ def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
 
 
 
-class vol_param():
+class vol_param(object):
     """
-    abstract class for vol parametrization
+    Base class for vol parametrization
+
     """
+
     def extract_ind(p_mat):
         return p_mat
 
-    def __init__(self, params=None, date_fwd_vol_name=(None, None, None)):
+    def __init__( self
+                , params=None
+                , date_fwd_vol_name=(None, None, None) ):
+
         date_, fwd_name, vol_name = date_fwd_vol_name
 
         if params is not None:
@@ -83,8 +101,8 @@ class vol_param():
         try:
             return self.p_mat[fwd_idx, :]
         except IndexError:  # returns the last index
-            print "Invalid index:", fwd_idx
-            print "Returning the last fwd contract."
+            print ('Invalid index:', fwd_idx)
+            print ("Returning the last fwd contract.")
             return self.p_mat[-1, :]
 
     def set_params(self, fwd_idx, c):
@@ -95,17 +113,21 @@ class vol_param():
             self.p_mat[fwd_idx, :] = c
             self.extract_ind(self.p_mat)  # update params
         except ValueError:  # dont set anything
-            print "Length of array has to be 8."
+            print ("Length of array has to be 8.")
         except IndexError:  # wrong index
-            print "Wrong fwd. contract."
+            print ("Wrong fwd. contract.")
 
     def call_future_K(self, K, ttm):
         """
         WRONG WRONG WRONG WRONG
         derivative of the call option with respect to strike dC/dK
         """
-        pr_0 = pricers.black_greeks_no_branching(S0, K, -log(disc_fact) / double(T),
-                                                 self.implied_vol(S0, K, ttm), T, 0)[0]
+        pr_0 = pricers.black_greeks_no_branching( S0
+                                                , K
+                                                , -log(disc_fact) / double(T)
+                                                , self.implied_vol(S0, K, ttm)
+                                                , T
+                                                , 0)[0]
         pr_delta = pricers.black_greeks_no_branching(S0,
                                                      K + delta_K,
                                                      -log(disc_fact) /
@@ -135,7 +157,10 @@ class vol_param():
         generic, fairly imprecise computation of local vol
         based on difference methods
         LV^2 = 2 * DC/DT / K^2 / D^2C/DK^2
+
+        :params dT:
         """
+
         sigma = self.impl_vol(K, T)  # CORRECT THIS HERE
         up_part = pricers.black_greeks(S_0, K, r, sigma, T, 0)[4]  # dC/dT
         down_part = (pricers.black_greeks(S_0, K + dK, r, sigma, T, 0)[1] -
@@ -145,15 +170,18 @@ class vol_param():
 
     def gen_impl_surf(self, fwd, ttm_grid, K_grid):
         """
-        generates the implied vol surface for
-        fwd ... number of the forward contract
-        ttm_grid ... grid of expiry times
-        K_grid ... list of strikes
+        Generates the implied vol surface for the following parameters:
+
+        :param fwd: number of the forward contract
+        :param ttm_grid: grid of expiry times
+        :param K_grid: list of strikes
         """
+
         self.impl_surf = np.empty((len(ttm_grid), len(K_grid)))
         for ttm_ind, ttm in enumerate(ttm_grid):
             for K_ind, K in enumerate(K_grid):
                 self.impl_surf[ttm_ind, K_ind] = self.implied_vol(fwd, K, ttm)
+
         return self.impl_surf
 
     def gen_lv_surf(self, ttm_grid, K_grid, dT, dK):
@@ -168,8 +196,10 @@ class vol_param():
 
 class jw7_params(vol_param):
     """
-    jw parametrization (inherits from vol_param)
+    JumpWing parametrization (inherits from vol_param)
+
     """
+
     def __init__(self, date_, fwd_name, vol_name, nb_fwds_taken=-1):
         """
         reads from database and constructs vol object
@@ -205,11 +235,8 @@ class jw7_params(vol_param):
         leaves in the object only the tenors specified in tenors_list
         :param tenors_list: list [3, 4, 5]
         """
-        # print "BEF", self.p_mat
         self.p_mat = self.p_mat[tenors_list, :]
-        # print "AF", self.p_mat, self.S0
         self.S0 = self.S0[tenors_list]
-        # print "OOK", self.S0
         self.fwd_curve = self.fwd_curve[tenors_list]
         self.sigma_0 = self.sigma_0[tenors_list]
         self.skew = self.skew[tenors_list]
@@ -270,6 +297,10 @@ class jw7_params(vol_param):
 
     @staticmethod
     def _vol_compute(z, alphaC, alphaP, sigma_0, A, B, C, P):
+        """
+        Computes the volatility given the following parameters:
+
+        """
         hC = z / (1.0 + z * z) ** (alphaC/2)
         hP = z / (1.0 + z * z) ** (alphaP/2)
         return sigma_0 * sqrt(1. + A * log(B * exp(C*hC) + (1. - B) * exp(-P*hP)))
@@ -392,7 +423,7 @@ class jw7_params(vol_param):
 
         # catching nan-s
         if (up_part / down_part < 0.0):
-            print "Caution: Imaginary local vol., returning ATM vol."
+            logger.info("Caution: Imaginary local vol., returning ATM vol.")
             return sigma_0
         else:
             return sqrt(up_part / down_part)
@@ -400,10 +431,14 @@ class jw7_params(vol_param):
         # return (up_part / down_part < 0.0) * self.sigma_0 + (up_part /
         # down_part >= 0.0) * sqrt (up_part/down_part)
 
-    # derivative of Black's call (with expirty time  T) on a futures contract with maturity ttm (cond: T < ttm)
-    # fwd ... forward index that we are drawing the vol of
     def call_future_T(self, fwd, S0, K, ttm):
+        """
+        Derivative of Black's call (with expirty time  T) on a futures contract 
+           with maturity ttm (cond: T < ttm)
+        :param fwd: forward index that we are drawing the vol of
 
+        """
+        
         S0, sigma_0, A, B, C, P, alphaC, alphaP = self.get_params(
             fwd).transpose()
 
