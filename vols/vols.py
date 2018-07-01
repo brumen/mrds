@@ -2,7 +2,10 @@
 
 import config
 import logging
+
+import numpy as np
 from numpy import double, log, exp, sqrt
+
 import scipy
 import scipy.stats
 from scipy.stats import norm
@@ -10,14 +13,17 @@ import scipy.interpolate  # spline package
 import openopt
 import matplotlib as mpl
 mpl.use('TkAgg')
-import numpy as np
+
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import tkinter as tk
 
 if config.CUDA_PRESENT:
+    import pycuda.autoinit  # this needs to be here.
     import pycuda.gpuarray as gpa
+    from pycuda.gpuarray import to_gpu
+    from pycuda.compiler import SourceModule
 
 import ds
 import pricers.pricers
@@ -30,7 +36,16 @@ def norm_strike(S0, K, sigma, ttm):
     """
     Normalized strike if the forward is S0, strike is K, atm vol is sigma and time to maturity is ttm
 
-    :param S0:
+    :param S0: initial stock (forward) price
+    :type S0: double
+    :param K: strike price
+    :type K: double
+    :param sigma: ATM volatility of the stock price
+    :type sigma: double
+    :param ttm: time to maturity
+    :type ttm: double
+    :returns: normalized strike of the option
+    :rtype: double
     """
 
     return log(double(K) / double(S0)) / (sigma * sqrt(double(ttm)))
@@ -38,7 +53,7 @@ def norm_strike(S0, K, sigma, ttm):
 
 def norm_strike_v(S0, K_v, sigma, ttm_v):
     """
-    vectorized form of norm_strike
+    Vectorized form of norm_strike
     K_v, ttm_v can be any shape
 
     """
@@ -49,15 +64,22 @@ def norm_strike_v(S0, K_v, sigma, ttm_v):
 
 def norm_strike_v_inv(delta_v, sigma, ttm):
     """
+    Inverse of the normalized strike.
 
+    :param delta_v: vector of delta
+    :type delta_v: np.array[double]
+    :param sigma: volatility of stock/forward
+    :type sigma:
+    :param ttm: time to maturity
+    :type ttm: double
     """
-    return exp(scipy.stats.norm.ppf(delta_v) * sigma * sqrt(double(ttm))
-               - 0.5 * sigma**2 * ttm)
+
+    return exp(scipy.stats.norm.ppf(delta_v) * sigma * sqrt(double(ttm)) - 0.5 * sigma**2 * ttm)
 
 
 def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
     """
-    array with forwards and vol params
+    Array with forwards and vol params
 
     """
 
@@ -69,8 +91,8 @@ def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
     vol_surface_params = fvm['vol_surface_params'][:nb_fwds]
     fv_array = np.append(np.array(fwd_curve).reshape((nb_fwds, 1)),
                          np.array(vol_surface_params), axis=1)
-    return fv_array, option_tenors_dt
 
+    return fv_array, option_tenors_dt
 
 
 class vol_param(object):
@@ -78,9 +100,6 @@ class vol_param(object):
     Base class for vol parametrization
 
     """
-
-    def extract_ind(p_mat):
-        return p_mat
 
     def __init__( self
                 , params=None
@@ -94,34 +113,43 @@ class vol_param(object):
             # number of forward contracts in the vol. surface
             self.fwd_nbs = len(params)
 
+    def extract_ind(p_mat):
+        return p_mat
+
     def get_params(self, fwd_idx):
         """
         returns all the params for fwd_idx
         """
+
         try:
             return self.p_mat[fwd_idx, :]
         except IndexError:  # returns the last index
-            print ('Invalid index:', fwd_idx)
-            print ("Returning the last fwd contract.")
+            logger.info('Invalid index:', fwd_idx)
+            logger.info("Returning the last fwd contract.")
+
             return self.p_mat[-1, :]
 
     def set_params(self, fwd_idx, c):
         """
-        set params of the fwd_idx forward to c
+        Set params of the fwd_idx forward to c
+
         """
+
         try:
             self.p_mat[fwd_idx, :] = c
             self.extract_ind(self.p_mat)  # update params
         except ValueError:  # dont set anything
-            print ("Length of array has to be 8.")
+            logger.info("Length of array has to be 8.")
         except IndexError:  # wrong index
-            print ("Wrong fwd. contract.")
+            logger.info("Wrong fwd. contract.")
 
     def call_future_K(self, K, ttm):
         """
         WRONG WRONG WRONG WRONG
         derivative of the call option with respect to strike dC/dK
+
         """
+
         pr_0 = pricers.black_greeks_no_branching( S0
                                                 , K
                                                 , -log(disc_fact) / double(T)
@@ -154,7 +182,7 @@ class vol_param(object):
 
     def local_vol_generic(self, K, T, dT, dK):
         """
-        generic, fairly imprecise computation of local vol
+        Generic, fairly imprecise computation of local vol
         based on difference methods
         LV^2 = 2 * DC/DT / K^2 / D^2C/DK^2
 
@@ -178,6 +206,7 @@ class vol_param(object):
         """
 
         self.impl_surf = np.empty((len(ttm_grid), len(K_grid)))
+
         for ttm_ind, ttm in enumerate(ttm_grid):
             for K_ind, K in enumerate(K_grid):
                 self.impl_surf[ttm_ind, K_ind] = self.implied_vol(fwd, K, ttm)
@@ -263,6 +292,7 @@ class jw7_params(vol_param):
         p_mat in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
         p_mat in jw7: [S0, atm, A, B, C, P, alphaC, alphaP]
         """
+
         S0 = double(p_mat[:, 0])
         sigma_0 = double(p_mat[:, 1])
         skew = double(p_mat[:, 2])
@@ -279,6 +309,7 @@ class jw7_params(vol_param):
         P = put_slope / A
         alphaC = call_bend
         alphaP = put_bend
+
         return {'S0': S0,
                 'sigma_0': sigma_0,
                 'skew': skew,
@@ -315,7 +346,8 @@ class jw7_params(vol_param):
         """
         solution to N(d1) = delta_val, where d1(vol)
         """
-        fct = lambda K: vols_fast.invert_delta(K, delta_val,
+        fct = lambda K: vols_fast.invert_delta(K,
+                                               delta_val,
                                                self.ttm_opt[fwd],
                                                self.fwd_curve[fwd],
                                                self.alphaC[fwd],
@@ -325,6 +357,7 @@ class jw7_params(vol_param):
                                                self.C[fwd], self.P[fwd])
         optim_pr = openopt.NLP(fct, self.fwd_curve[fwd], lb=0.001, ub=np.inf,
                                maxIter=150, iprint=-9)
+
         return optim_pr.solve('scipy_cobyla').xf[0]
 
     def implied_vol_all_fwd_standard(self, delta_v):
@@ -362,8 +395,10 @@ class jw7_params(vol_param):
 
     def gen_lv_surf_cuda(self, fwd, ttm_grid, K_grid):
         """
-        computes local vol on cuda
+        Computes local vol on cuda
+
         """
+
         c_d = gpa.to_gpu(self.get_params(fwd)).astype(np.float32)
 
         self.comp_local_vol(self.lv_surf_d, c_d, self.K_grid_d, self.ttm_grid_d,
@@ -372,7 +407,8 @@ class jw7_params(vol_param):
 
     def local_vol(self, fwd, S, T, ttm):
         """
-        # TO FINISH YOU HAVE TO FIX THE double (entries
+        Local volatility of the parametrization.
+
         # local vol from implied vol
         # ttm ... option ttm
         # lv (S, T)
@@ -574,7 +610,9 @@ class c0c1c2_vols(vol_param):
     c0-c1-c2 volatility parametrization
     smooth_ind is the smoothness indicator
     alpha is the smoothness factor
+
     """
+
     # extracts the model parameters
     def extract_ind(self, p_mat):
         self.name = 'c0c1c2'  # adds the name of the model
@@ -727,7 +765,9 @@ class ci_param(vol_param):
 class ci7_params(ci_param):
     """
     FX type parametrization of ATM, RR, WG at different deltas - 75, 90, 95
+
     """
+
     def __init__(self, date_, fwd_name, vol_name,
                  nb_fwds_taken=-1,
                  omega=1.):
@@ -1006,8 +1046,8 @@ def draw_surface(model, fwd_idx, Sd, Su, Sstep, Tmin, Tmax,
     K_size = len(K_grid)
     ttm_size = len(ttm_grid)
     if cuda_ind:
-        K_grid_d = config.gpuarray.to_gpu(K_grid).astype(np.float32)  # K, ttm grid on device
-        ttm_grid_d = config.gpuarray.to_gpu(ttm_grid).astype(np.float32)
+        K_grid_d = to_gpu(K_grid).astype(np.float32)  # K, ttm grid on device
+        ttm_grid_d = to_gpu(ttm_grid).astype(np.float32)
 
     K_mesh, ttm_mesh = np.meshgrid(K_grid, ttm_grid)
     impl_surf = np.zeros((len(ttm_grid), len(K_grid)))
@@ -1016,12 +1056,11 @@ def draw_surface(model, fwd_idx, Sd, Su, Sstep, Tmin, Tmax,
     c = model.get_params(fwd_idx)  # constructs the param array
 
     if cuda_ind:
-        impl_surf_d = config.gpuarray.to_gpu(impl_surf).astype(np.float32)  # impl. surf on cuda
-        lv_surf_d = config.gpuarray.to_gpu(
-            lv_surf).astype(np.float32)  # lv surf. on cuda
-        c_d = config.gpuarray.to_gpu(c).astype(np.float32)
+        impl_surf_d = to_gpu(impl_surf).astype(np.float32)  # impl. surf on cuda
+        lv_surf_d = to_gpu(lv_surf).astype(np.float32)  # lv surf. on cuda
+        c_d = to_gpu(c).astype(np.float32)
         imp_vol_kern_string = open(config.work_dir + "imp_vol_kern.cu").read()
-        imp_vol_mod = config.SourceModule(
+        imp_vol_mod = SourceModule(
             imp_vol_kern_string % {
                 "K_size": K_size,
                 "ttm_size": ttm_size})
@@ -1233,13 +1272,24 @@ def sam_int(s, t, T_i, beta, sigma_L):
     return sqrt((t1 + t2 + t3) / (t - s))
 
 
-# forward vols in the Samuelson model.
-# sigma_v ... (atm) vols for maturities Ti
-# T ... forward time
-# Ti_v ... forward tenors
-# taui_v ... option tenors
-# beta, sigma_L ... samuelson parameters
 def forward_vols_sam(sigma_v, T, Ti_v, taui_v, beta, sigma_L):
+    """
+    Forward vols in the Samuelson model.
+
+    :param sigma_v: (atm) vols for maturities Ti
+    :type sigma_v: np.array[double]
+    :param T: forward time
+    :type T: double
+    :param Ti_v: array of forward tenors
+    :type Ti_v: np.array[double]
+    :param taui_v: option tenors
+    :param beta: beta in the samuelson parametrization
+    :type beta: np.double
+    :param sigma_L: sigma_L in the samuelson parameters
+    :type sigma_L: np.double
+    :returns:
+    :rtype:
+    """
 
     return sigma_v * np.array([sam_int(0., T, Ti_v[et], beta, sigma_L) / \
         sam_int(0., taui_v[et], Ti_v[et], beta, sigma_L) for et in range(len(Ti_v))])
