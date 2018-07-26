@@ -1,5 +1,4 @@
-import config
-from numpy import *
+# TODO: THIS LINE HERE IS WEAK, ONLY IMPORT FILES THAT 
 cimport numpy as np
 
 # declarations of external functions 
@@ -15,12 +14,10 @@ cdef extern from "math.h":
 # EXTERNAL LIBRARY DEPENDENCY USE 
 # perhaps these two fcs. can also be obtained from the 
 cdef double pdf(double x):
-    return exp(-x**2 / 2.0) / sqrt(2 * pi)
+    return exp(-x**2 / 2.0) / sqrt(2 * np.pi)
 
 cpdef double cdf(double x):
     cdef double L, K, w
-    cdef double a1 = 0.31938153, a2 = -0.356563782, a3 = 1.781477937
-    cdef double a4 = -1.821255978, a5 = 1.330274429
 
     # optimized L = abs (x) 
     if x < 0:
@@ -29,10 +26,10 @@ cpdef double cdf(double x):
         L = x
 
     K = 1.0 / (1.0 + 0.2316419 * L)
-    w = 1.0 - 1.0 / sqrt(2 * pi) * exp(-L *L / 2) * (a1 * K + a2 * K *K + a3 * K**3 + a4 * K**4 + a5 * K**5)
+    w = 1.0 - 1.0 / sqrt(2 * np.pi) * exp(-L *L / 2) * (0.31938153 * K - 0.356563782 * K*K + 1.781477937 * K**3 -1.821255978 * K**4 + 1.330274429 * K**5)
 
     if x < 0 :
-        w = 1.0 - w
+        return 1. - w
 
     return w
 
@@ -109,10 +106,10 @@ cpdef spread_option_kirk_mat (np.ndarray[np.float64_t, ndim=2] F_1_m,
     cdef int ttm_ind 
     cdef int K_ind 
 
-    cdef np.ndarray[np.float64_t, ndim=2] res_mat = zeros ( (shape(F_1_m)[0], len(T_v)) )
+    cdef np.ndarray[np.float64_t, ndim=2] res_mat = np.zeros ( (np.shape(F_1_m)[0], len(T_v)) )
 
     for ttm_ind in range(len(T_v)):
-        for K_ind in range (shape(F_1_m)[0]):
+        for K_ind in range (np.shape(F_1_m)[0]):
             res_mat[K_ind,ttm_ind] = spread_option_kirk_fast (F_1_m[K_ind,ttm_ind], 
                                                               F_2_m[K_ind,ttm_ind], 
                                                               K, 
@@ -137,11 +134,11 @@ cpdef spread_option_kirk_mat_simple (np.ndarray[np.float64_t, ndim=2] F_1_m,
     cdef int K_ind 
     cdef double DF_u
 
-    cdef np.ndarray[np.float64_t, ndim=2] res_mat = zeros ( (shape(F_1_m)[0], len(T_v)) )
+    cdef np.ndarray[np.float64_t, ndim=2] res_mat = np.zeros ( (np.shape(F_1_m)[0], len(T_v)) )
 
     for ttm_ind in range(len(T_v)):
         print "ttm_idx ", ttm_ind
-        for K_ind in range (shape(F_1_m)[0]):
+        for K_ind in range (np.shape(F_1_m)[0]):
             DF_u = DF_v[ttm_ind] 
             res_mat[K_ind,ttm_ind] = spread_option_kirk_fast (F_1_m[K_ind,ttm_ind], 
                                                               F_2_m[K_ind,ttm_ind], 
@@ -181,13 +178,13 @@ cpdef double spread_option_appx(double F_1, double F_2, double K,
                                 double T, double DF):
 
     cdef np.ndarray[np.float64_t, ndim=1] p_integ = \
-        array([-3.66847085e+00,  -2.78329010e+00,   3.66847085e+00,
+        np.array([-3.66847085e+00,  -2.78329010e+00,   3.66847085e+00,
                -2.02594802e+00,  -1.32655708e+00,  -6.56809567e-01,
                -1.06611759e-16,   6.56809567e-01,   1.32655708e+00,
                2.78329010e+00,   2.02594802e+00])
 
     cdef np.ndarray[np.float64_t, ndim=1] w_integ = \
-        array([1.43956039e-06,   3.46819466e-04,   1.43956039e-06,
+        np.array([1.43956039e-06,   3.46819466e-04,   1.43956039e-06,
                1.19113954e-02,   1.17227875e-01,   4.29359752e-01,
                6.54759287e-01,   4.29359752e-01,   1.17227875e-01,
                3.46819466e-04,   1.19113954e-02])
@@ -215,7 +212,7 @@ def trivariate_spread_exact_integrat_fast2 (double X_3, double Y_2, np.ndarray[n
     return black_greeks_fast ( F_v[0] * exp ( mu[0] + rho[1] * X_3 * nu[0] + rho_Y1_Y2 * Y_2 * nu_1_d + 0.5 * nu_1_d ** 2 * ( 1 - rho_Y1_Y2**2 ) ), \
                                K + F_v[2] * exp (X_3 * nu[2] + mu[2] ) + F_v[1] * exp (Y_2 * nu_2_d + mu[1] + rho[2] * X_3 * nu[1] ) , \
                                - log (DF) / T, nu_1_d * sqrt(1 - rho_Y1_Y2**2) / sqrt(T), T, 0)[0]  \
-                               / ( 2 * pi ) * exp ( - ( X_3**2 + Y_2 **2) / 2.0 )
+                               / ( 2 * np.pi ) * exp ( - ( X_3**2 + Y_2 **2) / 2.0 )
 
 
 
@@ -255,32 +252,32 @@ cpdef np.ndarray[np.float64_t, ndim=2] comp_skew_strikes(np.ndarray[np.float64_t
                                                          np.ndarray[np.float64_t, ndim=1] tau_i, 
                                                          double T, double K, double beta, double sigma_L):
     cdef int i, sim 
-    cdef np.ndarray[np.float64_t, ndim=2] K_skew = zeros ( (len(tau_i), shape(F_sim)[1] ), dtype=double )
+    cdef np.ndarray[np.float64_t, ndim=2] K_skew = np.zeros ( (len(tau_i), np.shape(F_sim)[1] ), dtype=np.double )
 
     for i,tenor in zip (range(len(ext_tenors)), ext_tenors):
-        for sim in range (shape (F_sim)[1]):
+        for sim in range (np.shape (F_sim)[1]):
             K_skew[i,sim] = F_sim[tenor,sim] * exp( \
                 sam_int_fast(0., tau_i[tenor], tau_i[tenor], beta, sigma_L) / \
                 sam_int_fast(0., T, tau_i[tenor], beta, sigma_L) \
                 * sqrt(tau_i[tenor] / T) \
-                * log(average(F_sim[ext_tenors,sim]) / K))
+                * log(np.average(F_sim[ext_tenors,sim]) / K))
 
     return K_skew
 
 # compute skew vols
-cpdef np.ndarray[np.float64_t, ndim=2] comp_skew_vols (np.ndarray[np.float64_t, ndim=2] F_sim, 
-                                                       np.ndarray[np.float64_t, ndim=2] K_skew, 
-                                                       np.ndarray[np.float64_t, ndim=1] sigma_atm, 
-                                                       np.ndarray[np.float64_t, ndim=1] tau_i, 
-                                                       ):
+#cpdef np.ndarray[np.float64_t, ndim=2] comp_skew_vols (np.ndarray[np.float64_t, ndim=2] F_sim, 
+#                                                       np.ndarray[np.float64_t, ndim=2] K_skew, 
+#                                                       np.ndarray[np.float64_t, ndim=1] sigma_atm, 
+#                                                       np.ndarray[np.float64_t, ndim=1] tau_i, 
+#                                                       ):
     
-    for i in ext_tenors:
-        for sim in range (nb_sims): 
+#    for i in ext_tenors:
+#        for sim in range (nb_sims): 
             # tau_i is WRONG WRONG WRONG WRONG 
             # sigma_skew = skew_fct ( tau_i[i], \ 
             #                        log (F_sim[i, sim] / K_skew[i,sim] ) / sigma_atm[i] / sqrt (tau_i[i] ) )
-            sigma_skew = 0
-    return sigma_skew 
+#            sigma_skew = 0
+#    return sigma_skew 
     
 
 
@@ -307,17 +304,17 @@ cpdef double apo_long_fast (np.ndarray[np.float64_t, ndim=1] F_c, double K, doub
     cdef int N = len (F_c)
     cdef int i, j
 
-    M_1 = average (F_c)
+    M_1 = np.average (F_c)
     
-    M_2_term1 = sum (F_c**2 * array([exp (A(Ti_c[i], Ti_c[i], t, Ti_c[i], sigma_L, beta) \
+    M_2_term1 = sum (F_c**2 * np.array([exp (A(Ti_c[i], Ti_c[i], t, Ti_c[i], sigma_L, beta) \
                                           * sigma_c[i]**2 * (ti_c[i] - t) ) for i in range(N) ] ) )
 
-    M_2_matrix_term = sum (array ([ 2 * F_c[i] * F_c[j] * \
+    M_2_matrix_term = sum (np.array ([ 2 * F_c[i] * F_c[j] * \
                                     exp ( A( Ti_c[i], Ti_c[j], t, min (Ti_c[i], Ti_c[j]), sigma_L, beta ) * \
                                           rho_mat[i][j] * sigma_c[i] * sigma_c[j] * (ti_c[i] - t) ) \
                                     for i in range(N) for j in range(i+1, N ) ] ) \
                            )
-    cdef double M_2 = (M_2_term1 + M_2_matrix_term ) / ( double (N**2) )
+    cdef double M_2 = (M_2_term1 + M_2_matrix_term ) / ( np.double (N**2) )
 
     return cp_ind * black_call_fast (M_1, K, -log (df)/T, sqrt ( log (M_2 / M_1 **2) ) / sqrt (T), T) + \
            (1. - cp_ind ) * black_put_fast (M_1, K, -log (df)/T, sqrt ( log (M_2 / M_1 **2) ) / sqrt (T), T)

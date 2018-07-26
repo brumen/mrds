@@ -4,7 +4,7 @@ PROC_DIR = -funroll-all-loops -falign-functions=16 -O3
 PROC_DIR_AVX = -funroll-all-loops -falign-functions=32 -O3
 XMM = $(PROC_DIR) -msse4a
 AVX2 = $(PROC_DIR) -mavx2
-PYTHON_INCLUDE = -I/usr/include/python2.7/
+PYTHON_INCLUDE = -I/usr/include/python3.5/
 
 opd_xmm: opd_xmm.i opd_xmm.c
 	$(SWIG) -python -o cxx/opd_xmm_wrap.c -I. -Wall opd_xmm.i 

@@ -1,6 +1,5 @@
-import config
 import numpy as np
-import opd_avx
+from opd import opd_avx
 SMALL_EPS = 1e-5
 
 
@@ -35,11 +34,13 @@ def opd_1fuel(block_nb,
               cashflow_per_path,
               cs):
     """
-    computes one period optimization,
+    Computes one period tolling optimization.
+
     :param pp: power prices (on device)
     :param fp: fuel prices (on device)
     :param cuda_ind: indicator whether to do the computation on CUDA
     """
+
     # unpacking of params
     hr_at_max, hr_at_min, max_cap, min_disp, \
         start_fuel, start_fuel_cold, \
@@ -120,8 +121,7 @@ def opd_1fuel(block_nb,
     # totalCost = fuel_cost + variable_cost + startup_cost + ramp_cost
     # cashflow = revenue - totalCost
     # cashflow_per_path[:] = cashflow
-    opd_avx.add4(revenue, fuel_cost, variable_cost, startup_cost, ramp_cost, cashflow_per_path,
-                 nb_paths)
+    opd_avx.add4(revenue, fuel_cost, variable_cost, startup_cost, ramp_cost, cashflow_per_path, nb_paths)
 
     # new unit state
     nus_hours_in_state[:] = state_hours_in_state * (~state_change) + hours_in_block

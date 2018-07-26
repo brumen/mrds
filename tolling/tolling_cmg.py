@@ -1,9 +1,11 @@
 # simulation tolling model
-import config
+
+import datetime
 import numpy as np
 import mrds
 import ds
 import opd_1fuel
+
 if config.CUDA_PRESENT: 
     import pycuda.gpuarray as gpa
     import cuda_ops
@@ -208,7 +210,8 @@ def tolling_power_fuel_process_reduced(toll_start, toll_end,
             'power_fuel_foms': power_fuel_foms}
 
 
-class tolling_model_CMG():
+class tolling_model_CMG(object):
+
     def __init__(self,
                  fwd_date,
                  toll_start, toll_end,
@@ -218,27 +221,40 @@ class tolling_model_CMG():
                  hours_partition, hours_partition_names,
                  cash_vols,
                  params,
-                 debug_ind=False,
-                 cash_vols_overwrite=False,
-                 revenue_put=False,
-                 power_spot_model_given=None,
-                 model_ind='skew',
-                 adj_fwd_tenors_days=None,
-                 adj_vol_tenors_days=None,
-                 cash_fwd_tenors_days=None,
-                 cash_vol_tenors_days=None,
-                 manual_adj=None,
-                 cash_corr_adj=None,
-                 cuda_ind=False,
-                 mm_overwrite=None):
-        self.params = params
-        self.debug_ind = debug_ind
+                 debug_ind              = False,
+                 cash_vols_overwrite    = False,
+                 revenue_put            = False,
+                 power_spot_model_given = None,
+                 model_ind              = 'skew',
+                 adj_fwd_tenors_days    = None,
+                 adj_vol_tenors_days    = None,
+                 cash_fwd_tenors_days   = None,
+                 cash_vol_tenors_days   = None,
+                 manual_adj             = None,
+                 cash_corr_adj          = None,
+                 cuda_ind               = False,
+                 mm_overwrite           = None):
+        """
+        The basic tolling model.
+
+        :param fwd_date: the date that the forward model will run as
+        :type fwd_date: datetime.date
+        :param toll_start: Start of the tolling deal.
+        :type toll_start: datetime.date
+        :param toll_end: End of the tolling deal
+        :type toll_end: datetime.date
+
+
+        """
+
+        self.params      = params
+        self.debug_ind   = debug_ind
         self.revenue_put = revenue_put
-        self.nb_sim = nb_sim
-        self.nb_days = params.nb_days
-        self.fwd_date = fwd_date
-        self.toll_start = toll_start
-        self.toll_end = toll_end
+        self.nb_sim      = nb_sim
+        self.nb_days     = params.nb_days
+        self.fwd_date    = fwd_date
+        self.toll_start  = toll_start
+        self.toll_end    = toll_end
         self.power_blocks_names = power_blocks_names
         self.adj_fwd_tenors_days = adj_fwd_tenors_days
         self.adj_vol_tenors_days = adj_vol_tenors_days
@@ -262,6 +278,7 @@ class tolling_model_CMG():
         self.hours_partition_names = hours_partition_names
         self.cash_vols = cash_vols
         self.cash_vols_overwrite = cash_vols_overwrite
+
         if self.fuel_idx_name is not 'FIXED':
             fixed_monthly_val = None
         else:
@@ -278,13 +295,13 @@ class tolling_model_CMG():
                                            self.fuel_idx_name,
                                            self.cash_vols,
                                            self.nb_days,
-                                           debug_ind=self.debug_ind,
-                                           fixed_monthly=fixed_monthly_val,
-                                           cash_vols_overwrite=self.cash_vols_overwrite,
-                                           parallel=True,
-                                           model_ind=model_ind,
-                                           adj_fwd_tenors_days=self.adj_fwd_tenors_days,
-                                           adj_vol_tenors_days=self.adj_vol_tenors_days,
+                                           debug_ind           = self.debug_ind,
+                                           fixed_monthly       = fixed_monthly_val,
+                                           cash_vols_overwrite = self.cash_vols_overwrite,
+                                           parallel            = True,
+                                           model_ind           = model_ind,
+                                           adj_fwd_tenors_days = self.adj_fwd_tenors_days,
+                                           adj_vol_tenors_days = self.adj_vol_tenors_days,
                                            cash_fwd_tenors_days=self.cash_fwd_tenors_days,
                                            cash_vol_tenors_days=self.cash_vol_tenors_days,
                                            manual_adj=self.manual_adj,
@@ -356,7 +373,11 @@ class tolling_model_CMG():
     def generate_spots(self, m):
         """
         generates spots from month m
+
+        :param m: month in the tolling process.
+        :type m: int
         """
+
         days_tuple = (self.days_toll, self.days_d_toll, self.days_diff_toll, self.days_diff_l_toll)
         spot_blocks_m = [self.power_models.simulate_spot_blocks_from_fom(self.fom_sims_all,
                                                                          asset_nb,
@@ -367,6 +388,7 @@ class tolling_model_CMG():
                                                                          tenors_chosen=self.tenors_chosen,
                                                                          cuda_ind=self.cuda_ind)
                          for asset_nb in range(self.power_models.nb_assets)]
+
         # power fuel spots for month m
         pf_spots_m = [[(spot_blocks_m[self.power_gas_block_idx[mo]],
                         spot_blocks_m[self.power_gas_block_idx[self.fuel_idx_name]])
@@ -404,10 +426,23 @@ class tolling_model_CMG():
 
         return power_sim, fuel_sim
 
-    def startup_decision(self, cs, params, dispatch_mode='cmg', ci=False):
+    def startup_decision( self
+                        , cs
+                        , params
+                        , dispatch_mode = 'cmg'
+                        , ci            = False):
         """
-        routine deciding whether startup is done
+        Decision whether to start up
+
+        :param cs: current state
+        :type cs: TODO: INSERT HERE.
+        :param params: additional parameters to make the decision
+        :param dispatch_mode: which type of dispatch would one want.
+        :type dispatch_mode: str
+        :param ci: indicator of whether cuda is used
+        :type ci: bool
         """
+
         if dispatch_mode == 'cmg':
             if not ci:
                 cnd_1 = cs.total_starts < params.maxMonthlyStarts
@@ -421,26 +456,25 @@ class tolling_model_CMG():
             cnd_2 = cs.block_name == 'peak'
             cnd_1 = cs.total_starts < params.maxMonthlyStarts
             cnd_3 = cs.hours_shut >= params.minDownTime
-            if not ci:
-                return cnd_1 & cnd_2 & cnd_3
-            else:
-                return cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
+
+            return cnd_1 & cnd_2 & cnd_3 if not ci else cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
+
         elif dispatch_mode == 'offpeak_only':
             cnd_2 = cs.block_name != 'peak'
             cnd_1 = cs.total_starts < params.maxMonthlyStarts
             cnd_3 = cs.hours_shut >= params.minDownTime
-            if not ci:
-                return cnd_1 & cnd_2 & cnd_3
-            else:
-                return cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
+
+            return cnd_1 & cnd_2 & cnd_3 if not ci else cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
 
     def forced_startup(self, cs, pp, fp, dv=None, dispatch_mode='cmg', ci=False):
         """
-        try to force power plant to start
+        Try to force power plant to start
+
         :param cs: current state object
         :param dispatch_mode: which dispatch to follow
         :param ci: cuda indicator (True or False)
         """
+
         if dispatch_mode == 'mrg':
             decision_1 = pp - self.params.hrAtMax * fp
             cs.force_start = 2 * (decision_1 > dv[1]) + (decision_1 > dv[0]) & (decision_1 < dv[1])
@@ -451,10 +485,13 @@ class tolling_model_CMG():
 
     def shutdown_decision(self, cs, params, dispatch_mode='cmg', ci=False):
         """
-        decision whether it is sensible to shut down
+        Decision whether it is sensible to shut down
+
         :param cs: current state, cs.can_shut is filled by this routine
            cs.can_shut is array of bools
+
         """
+
         if dispatch_mode == 'cmg':
             if not ci:
                 cs.can_shut = cs.hours_run >= params.minRunTime
@@ -492,55 +529,60 @@ class tolling_model_CMG():
     def set_other_params(self, cs, pl, dispatch_mode='cmg', ci=False):
         """
         set up the cs.force_ and cs.can_ parameters
+
         """
+
         if dispatch_mode == 'cmg' or dispatch_mode == 'mrg':
+
             if not ci:
                 cs.force_start = np.ones(pl, dtype=np.short)
-                cs.force_shut = np.ones(pl, dtype=np.short)
-                cs.can_start = np.empty(pl, dtype=np.short)  # CHECK THIS ONE
-                cs.can_shut = np.empty(pl, dtype=np.short)
+                cs.force_shut  = np.ones(pl, dtype=np.short)
+                cs.can_start   = np.empty(pl, dtype=np.short)  # CHECK THIS ONE
+                cs.can_shut    = np.empty(pl, dtype=np.short)
             else:  # cuda
-                # cs.force_start = gpa.zeros(pl, dtype=np.int32) + 1  # (bottom two lines implement this)
-                cs.force_start = gpa.empty(pl, dtype=np.int32)
-                cs.force_start.fill(1)
-                # cs.force_shut = gpa.zeros(pl, dtype=np.int32) + 1
-                cs.force_shut = gpa.empty(pl, dtype=np.int32)
-                cs.force_shut.fill(1)
-                cs.can_start = gpa.empty(pl, dtype=bool)
-                cs.can_shut = gpa.empty(pl, dtype=bool)
+                cs.force_start = gpa.empty(pl, dtype=np.int32).fill(1)
+                cs.force_shut  = gpa.empty(pl, dtype=np.int32).fill(1)
+                cs.can_start   = gpa.empty(pl, dtype=bool)
+                cs.can_shut    = gpa.empty(pl, dtype=bool)
         elif dispatch_mode == 'always_run':
             if not ci:  # cpu
-                cs.force_start = np.empty(pl, dtype=np.short)
-                cs.force_start.fill(2)
-                cs.force_shut = np.zeros(pl, dtype=np.short)
-                cs.can_start = np.empty(pl, dtype=np.short)
-                cs.can_start.fill(1)
-                cs.can_shut = np.empty(pl, dtype=np.short)
-                cs.can_shut.fill(0)
+                cs.force_start = np.empty(pl, dtype=np.short).fill(2)
+                cs.force_shut  = np.zeros(pl, dtype=np.short)
+                cs.can_start   = np.empty(pl, dtype=np.short).fill(1)
+                cs.can_shut    = np.empty(pl, dtype=np.short).fill(0)
             else:  # cuda
-                cs.force_shut = gpa.empty(dtype=np.int32)  # force shut done once
-                cs.force_shut.fill(0)
-                cs.force_start = gpa.empty(dtype=np.int32)  # force start set here
-                cs.force_start.fill(2)
-                cs.can_shut = gpa.zeros(pl, dtype=bool)
-                cs.can_start = gpa.zeros(pl, dtype=bool) + 1
+                cs.force_shut  = gpa.empty(dtype=np.int32).fill(0)  # force shut done once
+                cs.force_start = gpa.empty(dtype=np.int32).fill(2)  # force start set here
+                cs.can_shut    = gpa.zeros(pl, dtype=bool)
+                cs.can_start   = gpa.zeros(pl, dtype=bool) + 1
         else:  # peak & offpeak only
             if not ci:  # cpu
                 cs.force_start = np.empty(pl, dtype=np.short)
-                cs.force_shut = np.empty(pl, dtype=np.short)
-                cs.can_start = np.empty(pl, dtype=np.short)
-                cs.can_shut = np.empty(pl, dtype=np.short)
+                cs.force_shut  = np.empty(pl, dtype=np.short)
+                cs.can_start   = np.empty(pl, dtype=np.short)
+                cs.can_shut    = np.empty(pl, dtype=np.short)
             else:  # cuda
-                cs.force_start = 1  # TO FIX FIX FIX FIX
-                cs.force_shut = 1
-                cs.can_start = 1
-                cs.can_shut = 1
+                cs.force_start = 1  # TODO: FIX FIX FIX FIX
+                cs.force_shut  = 1
+                cs.can_start   = 1
+                cs.can_shut    = 1
 
-    def dispatch_month(self, m, conseq_hours, conseq_block_names,
-                       pl, power_spots, fuel_spots, dv=None,
-                       dispatch_mode='cmg'):
+    def dispatch_month( self
+                      , m
+                      , conseq_hours
+                      , conseq_block_names
+                      , pl
+                      , power_spots
+                      , fuel_spots
+                      , dv            = None
+                      , dispatch_mode = 'cmg'):
         """
+        Calculate the dispatch for month m
+
+        :param m: month number
+        :dtype m: int
         :param dv: decision variable, for optimization
+
         """
         cs = tolling_params()
         if not self.cuda_ind:  # CPU
@@ -706,4 +748,4 @@ class tolling_model_CMG():
                                                           self.power_gas_block_idx,
                                                           self.nb_days)
         self.power_spots = resimulating['power_spot']
-        self.fuel_spots = resimulating['fuel_spot']
+        self.fuel_spots  = resimulating['fuel_spot']

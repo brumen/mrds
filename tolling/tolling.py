@@ -1,23 +1,27 @@
 # independent tolling model
-import config
+from config import CUDA_PRESENT
 import numpy as np
 import multiprocessing as mp
 import matplotlib.pyplot as plt
-if config.CUDA_PRESENT: 
+if CUDA_PRESENT:
     import pycuda.autoinit
     import pycuda.gpuarray as gpa
     import cublas
     import pycuda.cumath
-    from pycuda.elementwise import ElementwiseKernel
+
 
 # my modules
 import lattice
 from pricers import cdf_vec
 from cond_prob import transition_mtx_ln_blocks_fast, transition_mtx_ln_blocks_fast_internal
 import sg  # sparse grids for fast integration
-if config.CUDA_PRESENT: 
+
+if CUDA_PRESENT:
     import cuda_ops as co
 
+import logging
+
+logger = logging.Logger(__name__)
 
 # structure for tolling parameters
 class tolling_params():
@@ -28,14 +32,17 @@ def maximum_2(x, y, keep_dec=False, ci=False):
     """
     computes the maximum and the indices:
       0 for 1st, 1 for 2nd)
-    :param x, y: maximum over these two taken
+
+    :param x: maximum over these and y is taken
+    :type x: gpa.GPUArray or np.array
+    :param y: the second vector over which max is taken
+    :type y: gpa.GPUArray or np.array
     :param ci: cuda indicator
+    :type ci: bool
     :param keep_dec: keep the decision variables
+    :type keep_dec: bool
     """
-    if ci:
-        xy_max = gpa.maximum(x, y)
-    else:
-        xy_max = np.maximum(x, y)
+    xy_max = gpa.maximum(x, y) if ci else np.maximum(x, y)
 
     if keep_dec:
         xy_ind = (xy_max == y)
@@ -52,50 +59,43 @@ def maximum_3(x, y, z, keep_dec=False, ci=False):
       2 - maximum in z
     """
     xy_max, xy_ind = maximum_2(x, y, keep_dec=keep_dec, ci=ci)
-    if ci:
-        xyz_max = gpa.maximum(xy_max, z)
-    else:
-        xyz_max = np.maximum(xy_max, z)
-
-    if keep_dec:
-        xyz_ind = (xyz_max == xy_max) * xy_ind + (xyz_max == z) * 2
-    else:
-        xyz_ind = 0
+    xyz_max = gpa.maximum(xy_max, z) if ci else xyz_max = np.maximum(xy_max, z)
+    xyz_ind = (xyz_max == xy_max) * xy_ind + (xyz_max == z) * 2 if keep_dec else 0
 
     return xyz_max, xyz_ind
-
-# multi-threading version of tensor product
-# tens_fast_mt_raw = ctypes.CDLL("/home/brumen/workspace/mrds/tp.so").tensor_prod_2
-# def tens_fast_mt(P_m, H_m, G_m, res_m):
-#    tens_fast_mt_raw(ctypes.py_object(P_m),
-#                     ctypes.py_object(H_m),
-#                     ctypes.py_object(G_m),
-#                     ctypes.py_object(res_m))
 
 
 def compute_val_one_month_wrap(arg, **kwarg):
     """
     helper function for multiprocessing (compute_val_one_month)
     """
+
     o, m = arg
     return o.compute_val_one_month(m)
 
 
 class tolling_model_lattice():
     """
-    backward induction algorithm on the lattice
-    params: parameters, which contain
-      .cuda ... indicator whether CUDA is present or not
-      .F0 ... forward price
-      .K  ... cost of running a PP for that month
-      .sigma_F ... forward vol
-      .sigma_C ... cash vol
-      .SC ... fixed startup costs
-    debug_ind ... indicator whether debug is desired
+    Backward induction algorithm on the lattice.
+
     """
+
     def __init__(self, params, blocks, debug_ind=False,
                  keep_dec=False, cuda_ind=False,
                  sg_level=15, dtype_used=np.float):
+        """
+        backward induction algorithm on the lattice
+
+        params: parameters, which contain
+          .cuda ... indicator whether CUDA is present or not
+          .F0 ... forward price
+          .K  ... cost of running a PP for that month
+          .sigma_F ... forward vol
+          .sigma_C ... cash vol
+          .SC ... fixed startup costs
+        debug_ind ... indicator whether debug is desired
+        """
+
         self.tolling_fast = params.tolling_fast  # using the fast tensor routine from tolling_fast.pyx
         self.tolling_fast_mt = params.tolling_fast_mt  # using raw multi-threading
         self.params = params  # THIS CAN PERHAPS BE REMOVED LATER
@@ -254,17 +254,11 @@ class tolling_model_lattice():
                       p_dash, op, F_P, F_OP,
                       sigma_P, sigma_OP, rho, t, delta_t) / sqrt_pi
         if not self.cuda:
-            print "111", g_v
-            res = np.sum(self.sg_weights * g_v, axis=1)
-            # print "R", res
-            return res
+            return np.sum(self.sg_weights * g_v, axis=1)
         else:
             # implement self.weights * g_v (weights: row vec, g_v: mtx row x col)
             co.vtpm(self.sg_weights, g_v, tm_ind='t', new_mtx_gen=False)
-            print "111", g_v
-            res = co.rowsum_cuda_backup(g_v)
-            # print "R", res
-            return res
+            return co.rowsum_cuda_backup(g_v)
 
     def transition_mtx_ln_blocks_all(self, step_nb):
         """
@@ -285,7 +279,6 @@ class tolling_model_lattice():
                 P_m = gpa.empty((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
                 P_m_tmp = gpa.zeros(self.lattice_size + 1, dtype=self.dtype_used)
             for (F_curr_idx, F_curr) in enumerate(F_curr_v):
-                # print "MM", F_next_v.reshape((self.lattice_size, 1)).dtype, type(F_curr), type(self.market_seq[step_nb+1]["sigma_C"]), type(self.market_seq[step_nb]["fwd"])
                 P_m[F_curr_idx, :] = self.tm_ln_blocks_sg_fast(F_next_v.reshape((self.lattice_size, 1)),
                                                                F_curr,
                                                                self.market_seq[step_nb+1]["fwd"],
@@ -299,9 +292,7 @@ class tolling_model_lattice():
                 #     P_m_tmp[1:] = P_m[F_curr_idx, :] / P_m[F_curr_idx, -1]  # normalization - CHECK CHECK
                 # P_m[F_curr_idx, :] = np.diff(P_m_tmp)
 
-            # if self.debug_ind:
-            # print "Finished generating matrix = ", np.sum(P_m, axis = 1)
-            #    print "Finished generating matrix = ", np.sum(P_m[-1,:])
+            logger.debug("Finished generating matrix = ", np.sum(P_m, axis = 1))
             return P_m
 
     def transit_val(self, P_m, H_m, G_m):
@@ -342,7 +333,6 @@ class tolling_model_lattice():
                                          zip(self.blocks.hours_partition, self.blocks.days_partition,
                                              self.blocks.market, self.lattice_blocks) if day_week in dp][0]
             hours_for_day_week, market_for_day_week, lattice_for_day_week = hours_market_for_day_week
-            print "SS", hours_for_day_week
             # market_for_day_week = [mp for (hp, mp) in hours_market_for_day_week]
             days = np.append(days, days[-1] + np.cumsum(hours_for_day_week) / (24. * 365.))
             hours_seq.extend(hours_for_day_week)
@@ -354,18 +344,18 @@ class tolling_model_lattice():
         days_diff[0] = 0.
         days_diff[1:] = np.diff(days)
 
-        return {"blocks_tdiff": days_diff, "hours_seq": hours_seq,
-                "market_seq": market_seq, "lattice_seq": lattice_seq}
+        return { 'blocks_tdiff': days_diff
+               , 'hours_seq'   : hours_seq
+               , 'market_seq'  : market_seq
+               , 'lattice_seq' : lattice_seq}
 
     def running_profit(self, blocks_nb):
         """
         running profit function
         """
-        if not self.fuel_ind:  # fixed tolling
-            profit_cap_indep = (self.lattice_seq[blocks_nb] - self.blocks.K) * self.hours_seq[blocks_nb]
 
-        else:  # gas tolling TO CORRECT TO CORRECT TO CORRECT
-            profit_cap_indep = (self.lattice_seq[blocks_nb] - self.blocks.K) * self.hours_seq[blocks_nb]
+        # fixed tolling  TODO: gas tolling TO CORRECT TO CORRECT TO CORRECT
+        profit_cap_indep = (self.lattice_seq[blocks_nb] - self.blocks.K) * self.hours_seq[blocks_nb]
 
         return profit_cap_indep * self.max_cap, profit_cap_indep * self.min_cap
 
@@ -399,15 +389,6 @@ class tolling_model_lattice():
         start_nb ... number of startups of the PP in that month NOT IMPLEMENTED YET
         """
         profit_max, profit_min = self.running_profit(block_nb)
-        #  print "F", profit_min.dtype
-        #if block_nb == 57 or block_nb == 58:
-        #    print "BLOCK, UT, DT:", block_nb, Ut_curr, Dt_curr
-        #    print 'WORK PP NEXT', self.work_pp_next
-        #    print "WORK CURR", self.work_pp_curr
-        #    print "IDLE CURR", self.idle_pp_curr
-        #    print "IDLE NEXT", self.idle_pp_next
-
-        # print "PRFIT", profit_max, profit_min
 
         if not self.P_m_seq.has_key(block_nb):
             self.P_m_seq[block_nb] = self.transition_mtx_ln_blocks_all(block_nb)
@@ -443,10 +424,6 @@ class tolling_model_lattice():
                 self.transit_val(Pm, self.work_pp_next["max"][Ut_curr + 1], profit_min) - self.ramp_up_cost,
                 keep_dec=self.keep_dec, ci=self.cuda)
             self.work_pp_curr_ind[block_nb]["min"][Ut_curr].fill(True)
-            if block_nb==58:
-                print "Pm", Pm
-                print "D3", self.work_pp_curr['max'][Ut_curr]
-                print "D4", self.work_pp_curr['min'][Ut_curr]
 
         if Dt_curr == self.MDT:  # min. downtime reached; can be restarted
             self.idle_pp_curr[Dt_curr], self.idle_pp_curr_ind[block_nb][Dt_curr] = maximum_3(
@@ -459,18 +436,8 @@ class tolling_model_lattice():
             self.idle_pp_curr[Dt_curr] = self.transit_val(Pm, self.idle_pp_next[Dt_curr + 1], self.zero_matrix)
             self.idle_pp_curr_ind[block_nb][Dt_curr] = np.zeros(self.lattice_size)  # 0 is the IDLE indicator
 
-        # print "RES", block_nb, Ut_curr, Dt_curr#, self.work_pp_curr['min'][Ut_curr][:3], self.work_pp_curr['max'][Ut_curr][:3]
-
-        #if block_nb == 57 or block_nb == 58:
-        #    print "AFTER"
-        #    print 'WORK PP NEXT', self.work_pp_next
-        #    print "WORK CURR", self.work_pp_curr
-        #    print "IDLE CURR", self.idle_pp_curr
-        #    print "IDLE NEXT", self.idle_pp_next
-
     # all steps for 1 time step
     def all_one_steps(self, block_nb):
-        print "BLOCK ", block_nb
         self.step(0, 0, block_nb=block_nb)
         for Ut in range(1, self.MUT + 1):
             self.step(Ut, 0, block_nb=block_nb)
@@ -526,17 +493,16 @@ class tolling_model_lattice():
 
     def multiple_steps(self, nb_blocks):
         for block_nb in range(nb_blocks - 1, -1, -1):  # walking over blocks
-            if self.debug_ind:
-                print "Block ", block_nb, "of", nb_blocks
+            logger.debug("Block ", block_nb, "of", nb_blocks)
             self.all_one_steps(block_nb)
             self.overwrite_next_w_curr()
-            if self.debug_ind:
-                print "Step ", block_nb, " finished in."
+            logger.debug("Step ", block_nb, " finished in.")
 
     def tolling_value(self):
         """
         compute the tolling value from partial tolls for the given month
         """
+
         self.multiple_steps(self.nb_steps)  # do the steps within the month
 
         # compute average over the values here self.work_pp_curr[0]
@@ -562,8 +528,6 @@ class tolling_model_lattice():
             results_min = self.work_pp_curr["min"][0].get()
             results_idle = self.idle_pp_curr[0].get()
 
-        print "RES", results_max, results_min, results_idle
-
         best_strategy = np.maximum(np.maximum(results_min - self.fixed_startup_cost,
                                               results_max - self.fixed_startup_cost),
                                    results_idle)
@@ -571,14 +535,22 @@ class tolling_model_lattice():
         return np.dot(pdf_Tm, best_strategy)  # works faster than np.sum
 
 
-class tolling_model_lattice_all():
+class tolling_model_lattice_all(object):
     """
-        summing over all the months in the previous model
+    Summing over all the months in the previous model
 
     """
-    def __init__(self, params, blocks, nb_months, keep_dec=False,
-                 mp_ind=False, cuda_ind=False):
+
+    def __init__( self
+                , params
+                , blocks
+                , nb_months
+                , keep_dec = False
+                , mp_ind   = False
+                , cuda_ind = False ):
         """
+
+
         params ... same format as for tolling_model_lattice
         market ... market_v.Fv = vector of forward prices
                    market_v.sigma_Fv ... vec. of vols
@@ -588,6 +560,7 @@ class tolling_model_lattice_all():
         :param mp_ind: multiprocessing indicator
         :param cuda_ind: cuda indicator
         """
+
         self.params = params
         self.nb_months = nb_months
         self.blocks = blocks  # list of block objects
@@ -611,9 +584,7 @@ class tolling_model_lattice_all():
         self.total_val = 0.
         if not mp_ind:
             for m in range(self.nb_months):
-                print "Computing month:", m
                 tm_curr_val = self.compute_val_one_month(m)
-                # print "TV1 = ", tm_curr_val
                 self.total_val += tm_curr_val
             # dec_from_idle_mtx = tm_curr.decisions_from_idle()
             # if display:

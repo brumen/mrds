@@ -1,8 +1,7 @@
-import config
 import numpy as np
 from scipy.misc import comb
 import quad1d  # my own 1d quadrature only for sparse grids
-import opd_xmm
+import opd.opd_avx as opd_avx
 
 # 
 # My own sparse grid implementation
@@ -146,4 +145,4 @@ def sg_quad(D, l, f, one_d_discret='gauss_hermite',
     if not xmm_use:
         return np.sum(weights*vals)
     else:
-        return opd_xmm.num_quad(weights, vals, len(vals))
+        return opd_avx.num_quad(weights, vals, len(vals))

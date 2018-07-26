@@ -1,4 +1,4 @@
-import config  # general configuration
+from config import CUDA_PRESENT # general configuration
 import numpy as np
 import scipy.optimize
 import scipy.integrate
@@ -8,28 +8,31 @@ import scipy.optimize
 import scipy.linalg
 import multiprocessing as mp
 import copy
-if config.CUDA_PRESENT:
+
+if CUDA_PRESENT:
     import pycuda.autoinit
-    import pycuda.gpuarray as gpa
-    import pycuda.cumath
     import cuda_ops as co
 
 # abstract classes
 import ds
 import sg
-import pricers_fast  # fast libs in cython
+import pricers.pricers_fast as pricers_fast  # fast libs in cython
 import vols
 
 
 def cdf_vec(x, ci=False):
     """
-    computes the cdf of either x which is on the host or the device
+    Computes the cdf of either x which is on the host or the device
+
     on 100.000 elts, the gpu is approximately 10x faster than cpu
+
+    :param ci: indicator whether to use cuda
+    :type ci: bool
+    :returns: vector of cdf, if ci = False, then the memory allocation is on CPU, else on GPU
+    :rtype:
     """
-    if not ci:
-        return cdf_vec_cpu(x)
-    else:
-        return co.cdf_vec_gpu(x)
+
+    return cdf_vec_cpu(x) if not ci else co.cdf_vec_gpu(x)
 
 
 def cdf_vec_cpu(x):
@@ -38,31 +41,34 @@ def cdf_vec_cpu(x):
     works for both vectors and matrices
     :param ci: cuda indicator
     """
-    a1 = 0.31938153
-    a2 = -0.356563782
-    a3 = 1.781477937
-    a4 = -1.821255978
-    a5 = 1.330274429
 
-    l = np.abs(np.array(x))
-    k = 1. / (1. + 0.2316419 * l)
+    l  = np.abs(np.array(x))
+    k  = 1. / (1. + 0.2316419 * l)
     k2 = k**2
     k4 = k2**2
+
     # 0.39 = 1/sqrt(2*pi)
-    w = 1. - 0.3989422804 * np.exp(-l*l / 2) * (a1 * k + a2 * k2 +
-                                                a3 * k2 * k + a4 * k4 + a5 * k4 * k)
+    w = 1. - 0.3989422804 * np.exp(-l*l / 2) * (0.31938153 * k -0.356563782 * k2 +
+                                                1.781477937 * k2 * k + -1.821255978 * k4 + 1.330274429 * k4 * k)
 
     return w * (x >= 0.) + (1. - w) * (x < 0.)
 
 
 def pdf_vec(x):
+    """
+    Standardized normal vector of pdfs.
+
+    """
+
     return np.exp(-x**2/2.)/np.sqrt(2. * np.pi)
 
 
 def bvnd(dh, dk, r):
     """
-    bivariate distribution function at (dh, dk) for standard normals, correlated with r
+    Bivariate distribution function at (dh, dk) for standard normals, correlated with r
+
     """
+
     return bvnu(-dh, -dk, r)
 
 
@@ -72,7 +78,9 @@ def bvnu(dh, dk, r):
         Alan Genz
         described in "On the computation of the bivariate normal integral",
         Journal of Statist. Comput. Simul. 35, pp 101-107
+
     """
+
     tp = 2. * np.pi
     h = dh
     k = dk
@@ -165,11 +173,13 @@ def apo_long_f(args):
                                       t, beta, sigma_L, cp_ind)
 
 
-def black_greeks(S_0, K, r, sigma, T, cp_ind='c',
-                 price_only=False,
-                 fast_appx=True):
+def black_greeks( S_0, K, r, sigma, T
+                , cp_ind     = 'c'
+                , price_only = False
+                , fast_appx  = True ):
     """
-    Black's formula implementation
+    Black's formula implementation.
+
     the return arguments are
       Black ... value of the option
       Delta, Gamma, Vega, Theta, Rho
@@ -177,17 +187,21 @@ def black_greeks(S_0, K, r, sigma, T, cp_ind='c',
                       p for PUT
                       b for BINARY
     """
+
     sqrtt = np.sqrt(T)
     d1 = (np.log(S_0/K) + 0.5 * sigma**2 * T)/(sigma*sqrtt)
     d2 = d1 - sigma * sqrtt
+
     if not fast_appx:
         n11 = scipy.stats.norm.cdf(d1)
         n22 = scipy.stats.norm.cdf(d2)
     else:
         n11 = cdf_vec(d1)
         n22 = cdf_vec(d2)
+
     disc = np.exp(- r * T)
     black = disc * (S_0 * n11 - K * n22)
+
     if price_only:
         if cp_ind == 'c':
             return black
@@ -225,6 +239,7 @@ def black_simple(date_, com, exp_, strike, quant=1.):
                         for t in tenor_v])
     S0 = F_v[tenor_idx]
     vol_type = str(ds.vol_hash[com])
+
     if vol_type == 'JWSS7':
         vol_o = vols.jw7_params(date_, com, com)
         sigma_u = vol_o.implied_vol(tenor_idx, strike, T)
@@ -234,20 +249,18 @@ def black_simple(date_, com, exp_, strike, quant=1.):
     elif vol_type == 'ATM':
         sigma_u = sigma_v[tenor_idx]
 
-    df = ds.DF(date_, exp_)
-    r = -np.log(df)/T
-
-    return quant * black_greeks(S0, strike, r, sigma_u, T)
+    return quant * black_greeks(S0, strike, -np.log(ds.DF(date_, exp_))/T, sigma_u, T)
 
 
 def trivariate_spread_kirk(F_v, K, sigma_v, rho, T, DF,
-                           lu_int_b=[-20., 20.]):
+                           lu_int_b=(-20., 20.) ):
     """
     trivariate spread option based on Kirk formula
       F_v = [F_1, F_2, F_3]
       sigma_v is a vector of sigmas [sigma_1, sigma_2, sigma_3]
       rho_v = [rho_12, rho_13, rho_23]
     """
+
     nu = sigma_v * np.sqrt(T)
     mu = - 0.5 * nu ** 2  # + np.log (F_v)
     nu_1_d = nu[0] * np.sqrt(1. - rho[1]**2)
@@ -315,6 +328,7 @@ def multivariate_spread_mm(multi_option_fct, l, K, sim_t_i, T, mm, fwd_idx):
     """
     computes the spread F_1 - F_2 - F_3 - ... F_K for multiple repetitions of the F, which are given as
     distinct columns in the matrix
+
     mm is the market model containing values:
       nb_assets
       simulated_curves (standard form, refer to mrds doc)
@@ -324,10 +338,11 @@ def multivariate_spread_mm(multi_option_fct, l, K, sim_t_i, T, mm, fwd_idx):
       simulation_times
     tri_option_fct ... function that computes the value of the trivariate option
     """
+
     # reordering of the simulated paths here
     multi_nb = len (l) 
     if multi_nb != mm.nb_assets:
-        print "Multiplier vector does not equal the number of assets."
+        logger.info("Multiplier vector does not equal the number of assets.")
         return -1  # return the error message -1
     
     F_v_mat = np.kron(l.reshape (multi_nb,1), np.ones(mm.simulated_curves[0].shape[2])) * \
@@ -395,18 +410,23 @@ def d11_helper(params, z):
 
 def spread_option_appx(F_1, F_2, K, sigma_1, sigma_2, rho, T, DF):
     """
-    appx valuation of spread option 
+    Appx valuation of spread option, expressed as numerical integration.
+
     """
-    params = [F_1, F_2, K, sigma_1, sigma_2, rho, T, DF]
-    f_vals = d11_helper(params,  p_integ * np.sqrt(2.))
-    return DF * np.sum(w_integ * f_vals, axis=0) / np.sqrt(np.pi)
+
+    return DF * np.sum( w_integ * d11_helper([F_1, F_2, K, sigma_1, sigma_2, rho, T, DF],  p_integ * np.sqrt(2.))
+                      , axis = 0 ) / np.sqrt(np.pi)
 
 
 def spread_option_exact(F_1, F_2, K, sigma_1, sigma_2, rho, T, DF):
-    params = [F_1, F_2, K, sigma_1, sigma_2, rho, T, DF]
-    f_integ = lambda z: d11_helper(params, z) * \
-        np.exp(-z**2/2.) / np.sqrt(2. * np.pi)
-    return DF * scipy.integrate.quad(f_integ, -np.inf, np.inf)[0]
+    """
+    Spread option using scipy integration method.
+
+    """
+
+    return DF * scipy.integrate.quad( lambda z: d11_helper([F_1, F_2, K, sigma_1, sigma_2, rho, T, DF], z) * np.exp(-z**2/2.) / np.sqrt(2. * np.pi)
+                                    , -np.inf
+                                    , np.inf )[0]
 
 
 def spread_option_krik_zero_strike(F_1, F_2, sigma_1, sigma_2, rho, T, DF):
@@ -415,8 +435,10 @@ def spread_option_krik_zero_strike(F_1, F_2, sigma_1, sigma_2, rho, T, DF):
 
 def apo_wo_basket (K, sim_t_i, T, mm, fwd_idx ):
     """
-    implements APO WO BASKET option with strike K for a fixed fwd_idx
+    Implements APO WO BASKET option with strike K for a fixed fwd_idx.
+
     """
+
     avg = np.array([np.mean(mm.simulated_curves[asset_nb][:, fwd_idx, :], 1)
                     for asset_nb in range(mm.nb_assets)])
     # minimum on columns (columns are assets)
@@ -605,7 +627,6 @@ def cont_extend(mm, params):
             mme.update_sim_times (sim_times) 
             mme.simulate_curves(5000)
             ce[sim_nb] = cont_extend(mme, params_1)
-            print "Path ", sim_nb, ". Res = ", ce[sim_nb]
 
         portf = apo_c_nb_v[0] * apo_c_v + apo_p_nb_v[0] * apo_p_v + swap_nb_v[0] * swap_v + ce
     return mm.DF(ext_mat_v[0]) * np.mean(portf * (portf > 0))

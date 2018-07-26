@@ -1,8 +1,6 @@
 # elementwise kernel for one_period dispatch
-import config
-import pycuda.gpuarray as gpa
+
 from pycuda.elementwise import ElementwiseKernel
-import pycuda.compiler
 
 
 inputs = """
@@ -146,7 +144,8 @@ loop_code = """
 """
 
 
-opd_k = ElementwiseKernel(inputs, loop_code, 
-                          loop_prep=loop_prep,
-                          name="opd_k",
-                          preamble="#define SMALL_EPS 1e-5")
+opd_k = ElementwiseKernel( inputs
+                         , loop_code
+                         , loop_prep = loop_prep
+                         , name      = 'opd_k'
+                         , preamble  = '#define SMALL_EPS 1e-5')

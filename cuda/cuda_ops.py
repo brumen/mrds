@@ -1,16 +1,18 @@
 from config import work_dir
 import numpy as np
+import pycuda.autoinit  # IMPORTANT: THIS NEEDS TO BE HERE.
 import pycuda.gpuarray as gpa
 import pycuda.reduction
-from pycuda.compiler import SourceModule
+
+from pycuda.compiler    import SourceModule
 from pycuda.elementwise import ElementwiseKernel
-import skcuda.cublas as cublas  # skcuda bindings to cublas 
+# import skcuda.cublas as cublas  # skcuda bindings to cublas
 
 
 # reduction kernel, sums the elemnts in a vector 
 average_reduction = pycuda.reduction.ReductionKernel(np.dtype(np.float32),
                                                      neutral="0",
-                                                     reduce_expr="a+b", 
+                                                     reduce_expr="a+b",
                                                      map_expr="x[i]",
                                                      arguments="float *x")
 
@@ -27,43 +29,19 @@ vpv_double_f_slow = vtvpm_module.get_function("vpv_double_slow")
 vtv_double_f_slow = vtvpm_module.get_function("vtv_double_slow")
 
 
-def vtpv_old(v1, v2, tm_ind='p', transpose_ind=False):
-    """
-    WORSE VERSION OF THE FUNCTION BELOW
-    vector times/plus vector - constructs a matrix
-    :param v1, v2: 2 vectors, first serves as column vector, second as row vector
-    :param tm_ind: 'p' for summation (plus), 't' for multiplication
-    RESTRICTION: size of v2, the number of columns, _has_ to be smaller than 64
-
-    """
-
-    m_rows = len(v1)
-    m_cols = len(v2)
-    type_used = v1.dtype  # v1 and v2 are of the same type
-    # if not transpose_ind:
-    m_new = gpa.empty((m_rows, m_cols), dtype=type_used)
-
-    if type_used == np.float32:
-        vtpv_f = {'t': vtv_f, 'p': vpv_f}
-    else:
-        vtpv_f = {'t': vtv_double_f, 'p': vpv_double_f}
-
-    rows_to_do = m_rows/1024 + 1  # 1024 ... nb_rows/1024 threads
-    block_dims = (1024, 1, 1)
-    grid_dims = (65535, 1)
-    vtpv_f[tm_ind](v1, v2, m_new, np.int32(m_cols), np.int32(m_rows),
-                   np.int32(rows_to_do),
-                   block=block_dims, grid=grid_dims)
-    return m_new
-
-
 def vtpv(v1, v2, tm_ind='p', transpose_ind=False):
     """
-    vector times/plus vector - constructs a matrix
-    :param v1, v2: 2 vectors, first serves as column vector, second as row vector
-    :param tm_ind: 'p' for summation (plus), 't' for multiplication
-    RESTRICTION: size of v2, the number of columns, _has_ to be smaller than 64
+    Vector times/plus vector, one is a row vector, one a column vector to constructs a matrix.
+    IMPORTANT RESTRICTION: size of v2, the number of columns, _has_ to be smaller than 64
 
+    :param v1: column vector
+    :type v1: gpa.GPUArray
+    :param v2: row vector to add/multiply
+    :type v2: gpa.GPUArray
+    :param tm_ind: 'p' for summation (plus), 't' for multiplication
+    :type tm_ind: str
+    :param transpose_ind: indicator whether to transpose the matrix,
+    :type transpose_ind: bool
     """
 
     m_rows = len(v1)
@@ -71,10 +49,8 @@ def vtpv(v1, v2, tm_ind='p', transpose_ind=False):
     type_used = v1.dtype  # v1 and v2 are of the same type
     # if not transpose_ind:
     m_new = gpa.empty((m_rows, m_cols), dtype=type_used)
-    # else:
-    #    m_new = gpa.empty((m_cols, m_rows), dtype=np.float32)
-
     block_dims = (m_cols, 1, 1)  # THIS HAS TO BE m_cols, 1, 1 & m_cols < 64
+
     if type_used == np.float32:
         vtpv_f = {'t': vtv_f, 'p': vpv_f}
     else:
@@ -84,10 +60,9 @@ def vtpv(v1, v2, tm_ind='p', transpose_ind=False):
             vtpv_f = {'t': vtv_double_f_slow, 'p': vpv_double_f_slow}
 
     if m_rows / 65535 > 0:
-        nb_launches = m_rows / 65535 + 1  # this is an integer
         grid_dims = (65535, 1)
         vtpv_f[tm_ind](v1, v2, m_new, np.int32(m_cols), np.int32(m_rows),
-                       np.int32(nb_launches),
+                       np.int32(m_rows / 65535 + 1),  # nb of launches
                        block=block_dims, grid=grid_dims)
     else:
         grid_dims = (m_rows, 1)
@@ -99,13 +74,17 @@ def vtpv(v1, v2, tm_ind='p', transpose_ind=False):
 
 def vtpv_new(v1, v2, tm_ind='p'):
     """
-    vector times/plus vector - constructs a matrix
+    Vector times/plus vector - constructs a matrix.
+
     :param v1, v2: 2 vectors, first serves as column vector, second as row vector
+    :type v1:
     :param tm_ind: 'p' for summation (plus), 't' for multiplication
+    :type tm_ind: bool
     """
     m_cols = len(v2)
     m_rows = len(v1)
     type_used = v1.dtype
+
     # if not transpose_ind:
     m_new = gpa.empty((m_rows, m_cols), dtype=type_used)
     if tm_ind == 'p':
@@ -130,15 +109,12 @@ def set_mat_by_vec(v, nb_cols):
     return m_new
 
 
-#gpu_set_const_double_k = ElementwiseKernel('double *m_new, double a',
-#                                           'm_new[i] = a;',
-#                                           'gpu_set_const_double_k')
-
-
 def amax_gpu_0(m):
     """
-    computes the amax of a matrix along 0-th axis 
+    Computes the amax of a matrix along 0-th axis.
+
     """
+
     rows, cols = m.shape
     curr_max = m[0, :]
     for row_nb in range(1, rows):
@@ -161,22 +137,26 @@ vpm_double_f = vtpm_module.get_function("vpm_double")
 vtm_double_f = vtpm_module.get_function("vtm_double")
 # vector + matrix function on columns 
 vtpm_cols_module = SourceModule(vtpm_cols_code)
-vpm_cols_f = vtpm_cols_module.get_function("vpm_cols")
-vtm_cols_f = vtpm_cols_module.get_function("vtm_cols")
+vpm_cols_f  = vtpm_cols_module.get_function("vpm_cols" )
+vtm_cols_f  = vtpm_cols_module.get_function("vtm_cols" )
 vpm_cols2_f = vtpm_cols_module.get_function("vpm_cols2")
 vtm_cols2_f = vtpm_cols_module.get_function("vtm_cols2")
 # double arithmetics
-vpm_cols_double_f = vtpm_cols_module.get_function("vpm_cols_double")
-vtm_cols_double_f = vtpm_cols_module.get_function("vtm_cols_double")
+vpm_cols_double_f  = vtpm_cols_module.get_function("vpm_cols_double")
+vtm_cols_double_f  = vtpm_cols_module.get_function("vtm_cols_double")
 vpm_cols2_double_f = vtpm_cols_module.get_function("vpm_cols2_double")
 vtm_cols2_double_f = vtpm_cols_module.get_function("vtm_cols2_double")
 
 
 def vtpm(v, m, tm_ind='p', new_mtx_gen=False):
     """ 
-    vector times matrix, by rows 
-    v ... vector
-    m ... matrix 
+    Vector times matrix, by rows.
+
+    :param v: vector to multiply the matrix, 1-dimensional
+    :type v: gpa.GPUArray
+    :param m: matrix to be multiplied - 2 dimensional matrix
+    :type m: gpa.GPUArray
+    :param
     tm_ind = p ... for summation (plus)
     tm_ind = t ... for multiplication (times)
     new_mtx_gen ... indicator whether to generate a new matrix 
@@ -213,13 +193,15 @@ def vtpm(v, m, tm_ind='p', new_mtx_gen=False):
 
 def vtpm_cols(v, m, tm_ind='p', cons_new=False):
     """ 
-    vector times matrix, by columns:
-    _only_ works fast if there are lots of cols, and few rows.
+    Vector times matrix, by columns:
+    IMPORTANT: _only_ works fast if there are lots of cols, and few rows.
+
     :param cons_new: if False: m = v */+ m, else m_new = v */+ m
     :param v: vector on host
     :param m: matrix on the device
     :param tm_ind = p ... for summation (plus)
            tm_ind = t ... for multiplication (times)
+    :type tm_ind: str
     """
     m_cols = m.shape[1]
     m_rows = m.shape[0]
@@ -427,10 +409,12 @@ def colsum_cuda(m_d):
 
 def colsum_cuda_last(m_d):
     """
-    equivalent to np.sum (m_d, axis = 0)
+    Equivalent to np.sum (m_d, axis = 0)
     never works fast, although THIS IS STRANGE 
     works "faster" if m_d.cols is large and m_d.rows is small 
+
     """
+
     m_cols = m_d.shape[1]
     m_rows = m_d.shape[0]
     type_used = m_d.dtype
@@ -450,18 +434,13 @@ def colsum_cuda_last(m_d):
     return res_d
 
 
-def rowsum_cuda(m_d, ones_d, rs_res_d):
+def rowsum_cuda(m_d):
     """
-    row sum cuda - same as cumsum cuda, just that it returns last col of the matrix, 
-    a final cummulative sum 
+    Sums the elements along the row in a matrix.
+
+    :param m_d: matrix on the device.
+    :type m_d: gpa.GPUArray
     """
-    # m_cols = m_d.shape[1]
-    # m_rows = m_d.shape[0]
-    # ones_d = gpa.to_gpu ( np.ones ((m_cols,1)).astype(np.float32) )
-    cublas.cublasSgemv_d(1., m_d, ones_d, 0., rs_res_d)
-
-
-def rowsum_cuda_backup(m_d):
     rs_res_d = gpa.empty(m_d.shape[0], dtype=m_d.dtype)
     m_cols = m_d.shape[1]
     m_rows = m_d.shape[0]
@@ -531,20 +510,14 @@ sin_cos_exp_f_double = {'sin': sin_cos_exp_fast_module_double.get_function("sin_
                         'exp': sin_cos_exp_fast_module_double.get_function("exp_fast")}
 
 
-
 def sin_cos_exp_d(x, y, sin_cos_exp='sin'):
     """
-    implements the sin, cos on x, and writes it in y
-    """
-    if len(x.shape) == 1:  # vector
-        x_len = len(x)
-    else:  # matrix
-        x_len = x.shape[0] * x.shape[1]
+    Implements the sin, cos on x, and writes it in y.
 
-    if x.dtype == np.float32:
-        f_used = sin_cos_exp_f_single
-    else:  # double 
-        f_used = sin_cos_exp_f_double
+    """
+
+    x_len = len(x) if len(x.shape) == 1 else x.shape[0] * x.shape[1]  # case of a matrix
+    f_used = sin_cos_exp_f_single if x.dtype == np.float32 else sin_cos_exp_f_double
 
     f_used[sin_cos_exp](x, y, np.int32(x_len),
                         block=(512, 1, 1), grid=(x_len/512 + 1, 1))
@@ -730,6 +703,7 @@ or_array_k = ElementwiseKernel("bool *a, bool *b, bool *c",
 
 def comp_array_number(a, b, op='smaller', dtype='float'):
     c = gpa.empty(a.size, dtype=bool)
+
     if dtype == 'float':
         if op == 'smaller':
             comp_array_float_smaller_k(a, b, c)
@@ -746,12 +720,7 @@ def comp_array_number(a, b, op='smaller', dtype='float'):
 
 def and_or_array(a, b, op='and'):
     c = gpa.empty(a.size, dtype=bool)
-    if op == 'and':
-        and_array_k(a, b, c)
-    else:
-        or_array_k(a, b, c)
-
-    return c
+    return and_array_k(a, b, c) if op == 'and' else or_array_k(a, b, c)
 
 
 comp_two_arrays_and_k = ElementwiseKernel("int *a1, int *a2, float b1, float b2, bool *res",
@@ -797,45 +766,42 @@ def bdcast(corr_m, rn_v):
     :param corr_m: cholesky decomposition of the correlation matrix, for now 2x2 matrix 
     :param rn_v: random number vector 
     """
+
     nb_sims = rn_v.shape[1] * rn_v.shape[0]  # number of simulations
     res_v = gpa.empty_like(rn_v)  # this has to be true
-    bdcast_f(corr_m, rn_v, res_v, np.int32(corr_m.shape[0]), np.int32(nb_sims),
-             block=(512/corr_m.shape[0], corr_m.shape[0], 1), grid=(nb_sims/512*corr_m.shape[0]+1, 1), 
-             shared=corr_m.shape[0] * 4)  # shared memory (nb of bytes) 
+    bdcast_f( corr_m
+            , rn_v
+            , res_v
+            , np.int32(corr_m.shape[0])
+            , np.int32(nb_sims)
+            , block=(512/corr_m.shape[0], corr_m.shape[0], 1)
+            , grid=(nb_sims/512*corr_m.shape[0]+1, 1)
+            , shared=corr_m.shape[0] * 4)  # shared memory (nb of bytes)
+
     return res_v
 
 
 cdf_k_f = ElementwiseKernel("float *x, float *res",
                            """
-                           float a1 = 0.31938153;
-                           float a2 = -0.356563782;
-                           float a3 = 1.781477937;
-                           float a4 = -1.821255978;
-                           float a5 = 1.330274429;
                            float L = fabs(x[i]);
                            float K = 1. / (1. + 0.2316419 * L);
                            float K2 = K * K;
                            float K4 = K2 * K2;
                            // 0.39... = 1/(sqrt(2*pi))
-                           float w =  1. - 0.3989422804 * expf(-L * L / 2) * (a1 * K + a2 * K2 +
-                               a3 * K2 * K + a4 * K4 + a5 * K4 * K);
+                           float w =  1. - 0.3989422804 * expf(-L * L / 2) * (0.31938153 * K -0.356563782 * K2 +
+                               1.781477937 * K2 * K -1.821255978 * K4 + 1.330274429 * K4 * K);
                            res[i] = w * (x[i] >= 0.) + (1. - w) * (x[i] < 0.);
                            """, name='cdf_k_f')
 
 cdf_k_d = ElementwiseKernel("double *x, double *res",
                             """
-                            double a1 = 0.31938153;
-                            double a2 = -0.356563782;
-                            double a3 = 1.781477937;
-                            double a4 = -1.821255978;
-                            double a5 = 1.330274429;
                             double L = fabs(x[i]);
                             double K = 1. / (1. + 0.2316419 * L);
                             double K2 = K * K;
                             double K4 = K2 * K2;
                             // 0.39... = 1/(sqrt(2*pi))
-                            double w =  1. - 0.3989422804 * exp(-L * L / 2) * (a1 * K + a2 * K2 +
-                                a3 * K2 * K + a4 * K4 + a5 * K4 * K);
+                            double w =  1. - 0.3989422804 * exp(-L * L / 2) * (0.31938153* K -0.356563782 * K2 +
+                                1.781477937 * K2 * K -1.821255978 * K4 + 1.330274429 * K4 * K);
                             res[i] = w * (x[i] >= 0.) + (1. - w) * (x[i] < 0.);
                             """, name='cdf_k_d')
 
@@ -857,9 +823,3 @@ linear_fct_vec_float = ElementwiseKernel("float s, float d, float *vec",
 linear_fct_vec = ElementwiseKernel("double s, double d, double *vec",
                                    "vec[i] = s * vec[i] + d;",
                                    name='linear_fct_vec')
-
-
-# def linear_fct_vec(s, d, vec):
-#    # res = gpa.empty(vec.size, dtype=np.double)
-#    linear_fct_vec(s, d, vec)
-#    # return c

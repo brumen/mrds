@@ -14,4 +14,4 @@ vtpm_cpu_avx: vtpm_cpu.c vtpm_cpu.i
 	$(GCC) $(OMP) $(AVX2) $(PYTHON_INCLUDE) -fPIC -c vtpm_cpu.c -o cxx/vtpm_cpu.o
 	$(GCC) $(OMP) $(AVX2) $(PYTHON_INCLUDE) -fPIC -S vtpm_cpu.c -o cxx/vtpm_cpu.s
 	$(GCC) $(OMP) $(AVX2) $(PYTHON_INCLUDE) -I. -fPIC -c cxx/vtpm_cpu_wrap.c -o cxx/vtpm_cpu_wrap.o
-	$(GCC) -shared cxx/vtpm_cpu.o cxx/vtpm_cpu_wrap.o -lgomp -o _vtpm_cpu.so 
+	$(GCC) -shared cxx/vtpm_cpu.o cxx/vtpm_cpu_wrap.o -lgomp -o _cxx/vtpm_cpu.so

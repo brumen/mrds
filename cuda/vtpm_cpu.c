@@ -51,9 +51,11 @@
 void vm_add(double *x, double y, int nSize) {
   // computes x += y
   // nSize has to be divisible by 4
+
   size_t idx;
   reg x_xmm, y_xmm;
   y_xmm = mset(y);  
+
   for (idx=0; idx<nSize; idx += DOUBLE_INCR) {
     x_xmm = mloa(x + idx);
     x_xmm = madd(x_xmm, y_xmm);

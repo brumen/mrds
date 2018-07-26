@@ -9,8 +9,7 @@
 ## 
 
 compile:
-#	python pricers_setup.py build_ext --inplace
-	python mrds_setup.py build_ext --inplace
+	python pricers_setup.py build_ext --inplace
 
 quartic_file:
 	nvcc quartic.cu -o quartic_file

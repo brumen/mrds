@@ -6,19 +6,8 @@ import config
 
 import numpy
 from numpy import *
-import scipy
-import scipy.optimize
 
-import time
-import openopt 
-import pycuda.curandom 
-import multiprocessing
-import ctypes 
-
-
-import tolling_fast
-from pricers import cdf_vec 
-import config.gpuarray as gpa 
+import pycuda.curandom
 
 
 # structure for tolling parameters 

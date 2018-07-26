@@ -1,6 +1,6 @@
 #define NO_IMPORT_ARRAY
 #define PY_ARRAY_UNIQUE_SYMBOL opd_xmm
-#define AVX2
+#define AVX2  // switches between XMM and AVX
 
 #include <stdint.h>
 #include <stdio.h>
@@ -91,16 +91,17 @@ void add4_simple(double *r, double *a, double *b, double *c, double *d, double *
 }
 
 
-void add4(PO *r, PO *a, PO *b, PO *c, PO *d, PO *y,
-	  int n) {
+void add4(PO *r, PO *a, PO *b, PO *c, PO *d, PO *y, int n) {
+
   cp(r); cp(a); cp(b); cp(c); cp(d); cp(y);
-  add4_internal((double *) cn(r),
-		(double *) cn(a), 
-		(double *) cn(b),
-		(double *) cn(c), 
-		(double *) cn(d),
-		(double *) cn(y),
-		n);
+
+  add4_internal( (double *) cn(r)
+		       , (double *) cn(a)
+		       , (double *) cn(b)
+		       , (double *) cn(c)
+		       , (double *) cn(d)
+		       , (double *) cn(y)
+		       , n);
 }
 
 
@@ -172,9 +173,9 @@ void mul5(PO *r, PO *a, PO *b, double c, PO *y,
 		n);
 }
 
-void mul6_internal(double *r, double *a, double *b, double c, double *y, 
-		   int nSize) {
+void mul6_internal(double *r, double *a, double *b, double c, double *y, int nSize) {
   // computes: r * a * b * c (c scalar, all other vectors)
+
   size_t idx;
   reg a_xmm;
   reg c_xmm = mset(c);
@@ -572,4 +573,3 @@ void startup_cost(PO *is_cold_start,
 			 (double *) cn(res),
 			 nSize);
 }
-		  
