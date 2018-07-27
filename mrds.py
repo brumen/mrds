@@ -19,13 +19,13 @@ import os
 import calendar
 import copy
 
-# cuda
-if config.CUDA_PRESENT: 
-    import pycuda.curandom
-    import pycuda.gpuarray as gpa
-    import pycuda.cumath
-    from pycuda.compiler import SourceModule
-    import curand
+# cuda (this can be imported even if cuda is not present)
+#if config.CUDA_PRESENT:
+import pycuda.curandom
+import pycuda.gpuarray as gpa
+import pycuda.cumath
+from pycuda.compiler import SourceModule
+import curand
 
 import matplotlib as mpl
 mpl.use('TkAgg')
@@ -41,8 +41,8 @@ from quartic import quartic_cy
 import ds
 import correlations as corrs
 
-if config.CUDA_PRESENT:
-    import cuda_ops
+# if config.CUDA_PRESENT:
+from cuda import cuda_ops
 import opd_avx   # for speedups
 
 import logging
@@ -257,29 +257,52 @@ class mrd_skew(object):
         self.simulated_curves_fom_cuda = {}
         self.simulated_curves_fom_cpu = {}
 
+        # internal variables simulation times
+        self._simulation_times    = None
+        self._simulation_times_dt = None
+
     @property
     def simulation_times(self):
         """
-        Simulation times used for the simulation function
+        Simulation times used for the simulate_curves function.
 
         """
 
-        return self.simulation_times
+        return self._simulation_times
 
     @simulation_times.setter
-    def simulation_times(self, st):
-        # TODO: THIS NEED FIXING
-        self.simulation_times = st
+    def simulation_times(self, st_init):
+        """
+        Update simulation times for the model.
+        """
+
+        if type(st_init) == np.ndarray:
+            self._simulation_times = st_init
+            self._simulation_times_dt = [self.date_today_dt + dt.timedelta(int(np.round(stf * 365.)))
+                                        for stf in st_init]
+        elif (type(st_init) == list) and (type(st_init[0]) == dt.datetime):
+            self._simulation_times = np.array([(st - self.date_today_dt).days / 365.
+                                              for st in st_init])
+            self._simulation_times_dt = self._simulation_times
+
+        elif (type(st_init) == list) and (type(st_init[0]) == str):
+            self._simulation_times = np.array([(ds.convert_str_datetime(date_) -
+                                                ds.convert_str_datetime(self.date_today)).days / 365.
+                                              for date_ in st_init])
+            self._simulation_times_dt = st_init
+        elif (type(st_init) == list) and (type(st_init[0]) == float):
+            self._simulation_times = np.array(st_init)
+            self._simulation_times_dt = [self.date_today_dt + dt.timedelta(int(np.round(stf * 365.)))
+                                        for stf in self._simulation_times]
+
+        self.nb_time_steps = len(st_init)
 
     def factor_corr_mat_fct_lb_ub(self, asset_1, asset_2, lb_ub_ind='ub'):
         """
         TODO: WHAT IS THIS DOING??
 
         """
-        if lb_ub_ind is 'lb':
-            lb_ub_fact = -0.999
-        else:
-            lb_ub_fact = 0.999
+        lb_ub_fact = -0.999 if lb_ub_ind is 'lb' else 0.999
 
         if asset_1 == asset_2:
             tmp_1 = np.ones((self.nb_factors_list[asset_1], self.nb_factors_list[asset_1]))
@@ -311,30 +334,6 @@ class mrd_skew(object):
         """
 
         self.cash_vol_list[asset_nb] = cash_vols
-
-    def update_sim_times(self, st_init):
-        """
-        Update simulation times for the model.
-        """
-
-        if type(st_init) == np.ndarray:
-            self.simulation_times = st_init
-            self.simulation_times_dt = [self.date_today_dt + dt.timedelta(int(np.round(stf * 365.)))
-                                        for stf in self.simulation_times]
-        elif (type(st_init) == list) and (type(st_init[0]) == dt.datetime):
-            self.simulation_times = np.array([(st - self.date_today_dt).days/365.
-                                              for st in st_init])
-            self.simulation_times_dt = self.simulation_times
-        elif (type(st_init) == list) and (type(st_init[0]) == str):
-            self.simulation_times = np.array([(ds.convert_str_datetime(date_) -
-                                              ds.convert_str_datetime(self.date_today)).days / 365.
-                                              for date_ in st_init])
-            self.simulation_times_dt = st_init
-        elif (type(st_init) == list) and (type(st_init[0]) == float):
-            self.simulation_times = np.array(st_init)
-            self.simulation_times_dt = [self.date_today_dt + dt.timedelta(int(np.round(stf * 365.)))
-                                        for stf in self.simulation_times]
-        self.nb_time_steps = len(st_init)
 
     def update_fwd_curve(self, asset_nb, new_fwd):
         self.forward_curve_list[asset_nb] = new_fwd
@@ -387,12 +386,7 @@ class mrd_skew(object):
                 self.vol_surface_list[asset_ch] = self.vol_surface_list[asset_ch][f_idx, :]
                 self.vol_obj_list[asset_ch].extract_tenors(new_market_date, f_idx)
 
-        if asset == 'all':
-            f_idx_l = [update_one_asset(asset_ch) for asset_ch in range(self.nb_assets)]
-            return f_idx_l
-        else:
-            f_idx = update_one_asset(asset)
-            return f_idx
+        return [update_one_asset(asset_ch) for asset_ch in range(self.nb_assets)] if asset == 'all' else update_one_asset(asset)
 
     def read_curve_vol_data_db( self
                               , date_
@@ -452,8 +446,10 @@ class mrd_skew(object):
 
     def set_other_params (self, asset_nb):
         """
-        # this has to be run _AFTER_ the curves have been initialized
+        This has to be run _AFTER_ the curves have been initialized
+
         """
+
         self.beta_T_list[asset_nb] = np.ones(self.forward_curve_len[asset_nb])
         self.forward_curve_corr = 1 # WRONG WRONG WRONG WHAT DOES THAT MEAN 
         # !!!! inital value of C is such that it produces nearly flat implied vol (1, 0,0)
@@ -470,10 +466,14 @@ class mrd_skew(object):
 
     def implied_vol(self, asset_nb, fwd_nb, K_v, t):
         """
-        computes implied vol for asset
-        K_v ... vector of strikes
-        t ... implied vol for that time
+        Computes implied vol for asset.
+
+        :param K_v: vector of strikes
+        :type K_v: np.array[double]
+        :param t: implied vol for that time
+        :type t: double
         """
+
         if self.vol_surface_name_list[asset_nb] == 'JWSS7':
             return self.vol_obj_list[asset_nb].implied_vol(fwd_nb, K_v, t)
         elif self.vol_surface_name_list[asset_nb] == 'ATM':
@@ -494,8 +494,10 @@ class mrd_skew(object):
 
     def read_discount_curve_db(self, date_):
         """
-        obtains discount curve
+        Reads the discount curve from the data.
+
         """
+
         res_ = ds.read_discount_curve(date_)
         self._discount_tenors = res_["disc_tenors_numeric"]
         self._discount_discount = res_["disc_curve"]
@@ -554,8 +556,8 @@ class mrd_skew(object):
 
     def _construct_corr (self, mtx_size, theta_vector):
         """
-        # constructs and upper triangular matrix from a vector theta_vector
-        # first row is from the rho matrix
+        Constructs and upper triangular matrix from a vector theta_vector, first row is from the rho matrix.
+
         """
 
         utm = np.triu(np.ones((mtx_size,mtx_size))) # upper triangular matrix
@@ -746,7 +748,7 @@ class mrd_skew(object):
                                         , sigma_asset
                                         , corr_asset
                                         , forward_idx)
-                         for forward_idx in range(self.forward_curve_len[asset_nb])])  # .reshape(self.forward_curve_len[asset_nb])
+                         for forward_idx in range(self.forward_curve_len[asset_nb])])
 
     def check_black_vol_calib(self, asset_nb):
         """
@@ -758,6 +760,7 @@ class mrd_skew(object):
                                                   self.factor_corr_mat_list[asset_nb][asset_nb], fwd)
                                    for fwd in range(self.forward_curve_len[asset_nb])])
         diff = scipy.linalg.norm(model_atm_vols - self.atm_vol_list[asset_nb])
+
         if diff > 1e-2:
             logger.info('Calibration of ATM vols for asset nb. ' + str(asset_nb) + ' FAILED. Diff=' + str(diff))
         else:
@@ -1332,13 +1335,9 @@ class mrd_skew(object):
                 nb_factors_asset = self.nb_factors_list[asset_nb]
                 old_cov_mat = self.complete_corr_mat[fact_sum[asset_nb]:fact_sum[asset_nb+1],
                     fact_sum[asset_nb]:fact_sum[asset_nb+1]]
-                old_chol = np.linalg.cholesky(old_cov_mat)
-                sims_Z = simulated_rn[:, fact_sum[asset_nb]:fact_sum[asset_nb+1]].transpose()
-                sims_Z_unit = np.dot(np.linalg.inv(old_chol), sims_Z)
-                if tenor_list is None:
-                    tenor_used = range(self.forward_curve_len[asset_nb])
-                else:
-                    tenor_used = tenor_list[asset_nb]
+                sims_Z_unit = np.dot( np.linalg.inv(np.linalg.cholesky(old_cov_mat))
+                                    , simulated_rn[:, fact_sum[asset_nb]:fact_sum[asset_nb+1]].transpose())
+                tenor_used = range(self.forward_curve_len[asset_nb]) if tenor_list is None else tenor_list[asset_nb]
 
                 for tenor_idx, tenor_nb in enumerate(tenor_used):
                     # prepare cov mtx
@@ -1390,11 +1389,12 @@ class mrd_skew(object):
             for asset_nb in range(self.nb_assets):
                 self.simulated_curves[asset_nb] = np.exp(self.simulated_curves[asset_nb])
 
-    def simulate_curves_cuda(self, nb_simulations,
-                             tenor_list=None,
-                             set_seed=None):
+    def simulate_curves_cuda( self
+                            , nb_simulations
+                            , tenor_list = None
+                            , set_seed   = None):
         """
-        simulate forward curves on cuda
+        Simulate forward curves on cuda.
 
         generates a 3-dimensional array
          0-th dimension: asset_nb
@@ -1402,22 +1402,21 @@ class mrd_skew(object):
          2-nd dimension: curve
          3-rd dimension: repeats of the curve
         """
+
         np.random.seed(set_seed)
         cums = np.cumsum(self.nb_factors_list)  # borders between asset classes
         fact_sum = np.zeros(len(cums)+1, dtype=np.int)  # adding the first 0
         fact_sum[1:(len(cums)+1)] = cums
 
         # preliminary work that can be done
-        if tenor_list is None:
-            fwd_c_len = [self.forward_curve_len[asset_nb] for asset_nb in range(self.nb_assets)]
-        else:
-            fwd_c_len = [len(tenor_for_asset) for tenor_for_asset in tenor_list]
+        fwd_c_len = [self.forward_curve_len[asset_nb] for asset_nb in range(self.nb_assets)] if tenor_list is None else \
+            [len(tenor_for_asset) for tenor_for_asset in tenor_list]
 
         for asset_nb in range(self.nb_assets):  # looping over assets
-            self.simulated_curves[asset_nb] = gpa.zeros((len(self.simulation_times),
-                                                         fwd_c_len[asset_nb],
-                                                         nb_simulations),
-                                                        dtype=np.float32)
+            self.simulated_curves[asset_nb] = gpa.zeros( (len(self.simulation_times)
+                                                       , fwd_c_len[asset_nb]
+                                                       , nb_simulations)
+                                                       , dtype = np.float32 )
 
             if tenor_list is None:
                 fwd_c = self.forward_curve_list[asset_nb].astype(np.float32)
@@ -1465,15 +1464,9 @@ class mrd_skew(object):
                 old_chol_inv_gpu = gpa.to_gpu(old_chol_inv.astype(np.float32))
 
                 # extra matrices for using later
-                sims_Z_unit = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations),
-                                        dtype=np.float32)
-                sims_Z_unit_mul = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations),
-                                            dtype=np.float32)
-
-                if tenor_list is None:
-                    tenor_used = range(self.forward_curve_len[asset_nb])
-                else:
-                    tenor_used = tenor_list[asset_nb]
+                sims_Z_unit     = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations), dtype = np.float32)
+                sims_Z_unit_mul = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations), dtype = np.float32)
+                tenor_used = range(self.forward_curve_len[asset_nb]) if tenor_list is None else tenor_list[asset_nb]
 
                 for tenor_idx, tenor_nb in enumerate(tenor_used):
                     # prepare cov mtx
@@ -1540,6 +1533,7 @@ class mrd_skew(object):
          2-nd dimension: curve
          3-rd dimension: repeats of the curve
         """
+
         np.random.seed(set_seed)
         cums = np.cumsum(self.nb_factors_list)  # borders between asset classes
         fact_sum = np.zeros(len(cums)+1, dtype=np.int)  # adding the first 0
@@ -1704,8 +1698,14 @@ class mrd_skew(object):
     def update_cash_corr(self, cash_corr_adj):
         self.cash_corr = cash_corr_adj
 
-    def gen_spot_rn(self, nb_simulations, nb_days=65,
-                    cuda_ind=False):
+    def gen_spot_rn( self
+                   , nb_simulations
+                   , nb_days  = 65
+                   , cuda_ind = False):
+        """
+        Generate the random numbers for the cuda spot price simulation.
+
+        """
         if cuda_ind:
             self.gen_spot_rn_cuda(nb_simulations, nb_days=nb_days)
         else:
@@ -1713,9 +1713,10 @@ class mrd_skew(object):
 
     def gen_spot_rn_cpu(self, nb_simulations, nb_days=65):
         """
-        returns the random walk of nb_simulations and 31 days
+        Returns the random walk of nb_simulations and 31 days
         nb_days = 65  # suff. large
         """
+
         if not self.simulate_spot_rn_ind:  # random walk not yet initialized
             self.spot_rn = {}
             for day_idx in range(nb_days):
@@ -1749,10 +1750,8 @@ class mrd_skew(object):
         g1 = curand.create_gen_simple()  # pycuda.curandom.XORWOWRandomNumberGenerator()
         if not self.simulate_spot_rn_ind:  # random walk not yet initialized
             self.spot_rn = {}
+
             for day_idx in range(nb_days):
-                #self.spot_rn[day_idx] = np.random.multivariate_normal(np.zeros(self.nb_assets),
-                #                                                      self.cash_corr,
-                #                                                      size=nb_simulations)
                 spot_rn_init = gpa.empty((self.nb_assets, nb_simulations), dtype=np.float32)
                 cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(self.cash_corr).astype(np.float32))
                 self.spot_rn[day_idx] = gpa.empty((nb_simulations, self.nb_assets), dtype=np.float32)
@@ -2209,328 +2208,6 @@ class mrd_skew(object):
                 self.black_corr_intra_curves_calib(asset_1,asset_2)
 
 
-mm_calib_file_actual = 'mobj/mm_calib.txt'
-mm_calib_multi_file_actual = 'mobj/mm_calib_multiple.txt'
-single_asset_mm_calib = work_dir + mm_calib_file_actual
-multi_asset_mm_calib = work_dir + mm_calib_multi_file_actual
-
-
-def read_mm_hash(multi_single_ind):
-    """
-    Reads the market model hash tables.
-
-    :param  multi_single_ind: indicator to load single or multiple asset models
-                              puts together a hash table of all already calibrated market models
-
-    file has structure: COM, DATE_, NB_FWD (single asset)
-                        (COM1, COM2), DATE_, (NFWD_1, NFWD_2)  for multiple assets
-    """
-
-    mm_calib_file = single_asset_mm_calib if multi_single_ind is 'single' else multi_asset_mm_calib
-    logger.info('Reading prev. calibrated market models from' + mm_calib_file)
-
-    mm_hash = dict()
-
-    if os.stat(mm_calib_file)[6] != 0:  # is file empty
-        f1 = open(mm_calib_file)
-        f2 = csv.reader(f1)  # csv format
-        for com, date_, nb_fwd_str in f2:
-            if multi_single_ind is 'single':
-                nb_fwd = int(nb_fwd_str)
-                if com not in mm_hash.keys():
-                    mm_hash[com] = dict()
-                    mm_hash[com][date_] = nb_fwd
-                else:
-                    if date_ not in mm_hash[com].keys():
-                        mm_hash[com][date_] = nb_fwd
-                    else:
-                        mm_hash[com][date_] = max(mm_hash[com][date_], nb_fwd)
-            else:  # multiple models
-                nb_fwd_l = tuple(nb_fwd_str.split('___'))  # in the form A1___A2
-                nb_fwd_l_int = tuple([int(o) for o in nb_fwd_l])
-                com_l = tuple(com.split('___'))
-                if com_l not in mm_hash.keys():
-                    mm_hash[com_l] = dict()
-                    mm_hash[com_l][date_] = [nb_fwd_l_int]
-                else:  # already have that com
-                    if date_ not in mm_hash[com_l].keys():
-                        mm_hash[com_l][date_] = [nb_fwd_l_int]
-                    else:
-                        if nb_fwd_l_int not in mm_hash[com_l][date_]:
-                            mm_hash[com_l][date_].append(nb_fwd_l_int)
-    return mm_hash
-
-mm_hash = read_mm_hash('single')
-mm_hash_multiple = read_mm_hash('multiple')
-
-
-def write_mm_hash(multi_single_ind, mm_hash):
-    """
-    Writes the hash tables into the file.
-    TODO: DESCRIBE HERE BETTER.
-
-    """
-
-    f = open(single_asset_mm_calib if multi_single_ind is 'single' else multi_asset_mm_calib, 'w')
-
-    for com in mm_hash.keys():
-        for date_ in mm_hash[com].keys():
-            if multi_single_ind is 'single':
-                f.write(com + ',' + date_ + ',' + str(mm_hash[com][date_]) + '\n')
-            else:
-                # go through all fwd list
-                string_comp = ''
-                for asset in com:
-                    string_comp += asset + '___'
-                string_comp = string_comp[:-3]  # remove last ___
-                string_comp += ',' + date_ + ','
-                for fwd_pair in mm_hash[com][date_]:
-                    string_final = string_comp
-                    for nb_fwds in fwd_pair:
-                        string_final += str(nb_fwds) + '___'
-                    string_final = string_final[:-3]
-                    string_final += '\n'
-                    f.write(string_final)
-
-
-def find_adj_tenors(com_nb,
-                    adj_fwd_tenors_days,
-                    adj_vol_tenors_days):
-
-    if adj_vol_tenors_days is not None and adj_fwd_tenors_days is not None:
-        if com_nb in adj_vol_tenors_days.keys():
-            if com_nb in adj_fwd_tenors_days.keys():
-                adj_fwd_tenors = adj_fwd_tenors_days[com_nb]
-                adj_vol_tenors = adj_vol_tenors_days[com_nb]
-            else:
-                adj_fwd_tenors = adj_fwd_tenors_days[com_nb]
-                adj_vol_tenors = None
-        else:
-            if com_nb in adj_fwd_tenors_days.keys():
-                adj_fwd_tenors = adj_fwd_tenors_days[com_nb]
-                adj_vol_tenors = None
-            else:
-                adj_fwd_tenors, adj_vol_tenors = None, None
-    elif adj_vol_tenors_days is not None and adj_fwd_tenors_days is None:
-        if com_nb in adj_vol_tenors_days.keys():
-            adj_vol_tenors = adj_vol_tenors_days[com_nb]
-            adj_fwd_tenors = None
-        else:
-            adj_fwd_tenors, adj_vol_tenors = None, None
-    elif adj_vol_tenors_days is None and adj_fwd_tenors_days is not None:
-        if com_nb in adj_fwd_tenors_days.keys():
-            adj_fwd_tenors = adj_fwd_tenors_days[com_nb]
-            adj_vol_tenors = None
-        else:
-            adj_fwd_tenors, adj_vol_tenors = None, None
-    else:
-        adj_fwd_tenors, adj_vol_tenors = None, None
-
-    return adj_fwd_tenors, adj_vol_tenors
-
-
-def find_mm(com, date_, fwd, mm_hash):
-    """
-    Finds the market model for single asset.
-
-    :param com: commodity considered (WTI)
-    :type com: str, or tuple(str) for multiple commodities
-    :param date_: date considered
-    :type date_:
-    :param fwd: number of forward contracts that one needs to calibrate
-    :type fwd: int, or tuple(int)
-    :param mm_hash: hash of calibrated market models.
-    :type mm_hash: dict, where the first level are commodities, the second level are dates calibrated.
-    """
-
-    if com not in mm_hash.keys():
-        return False
-
-    if date_ not in mm_hash[com].keys():
-        return False
-
-    return False if fwd > mm_hash[com][date_] else True
-
-
-def update_mm_hash(multi_single_ind, mm_hash, new_mm):
-    """
-
-    """
-
-    com, date_, nb_fwd = new_mm
-    mm_hash_new = mm_hash
-
-    if com not in mm_hash.keys():
-        mm_hash_new[com] = dict()
-        if multi_single_ind is 'single':
-            mm_hash_new[com][date_] = nb_fwd
-        else:
-            mm_hash_new[com][date_] = [nb_fwd]
-    else:
-        if date_ not in mm_hash[com].keys():
-            if multi_single_ind is 'single':
-                mm_hash_new[com][date_] = nb_fwd
-            else:
-                mm_hash_new[com][date_] = [nb_fwd]
-        else:
-            if multi_single_ind is 'single':
-                if nb_fwd > mm_hash_new[com][date_]:
-                    mm_hash_new[com][date_] = nb_fwd
-            else:
-                if nb_fwd not in mm_hash_new[com][date_]:
-                    mm_hash_new[com][date_].append(nb_fwd)
-
-    return mm_hash_new
-
-
-def mrds_calib( com
-              , date_
-              , nb_fwd
-              , mm_hash      = mm_hash
-              , mm_hash_file = work_dir + mm_calib_file_actual
-              , mt           = True
-              , model_ind    = 'skew'
-              , cuda_ind = False ):
-    """
-    Calibrates the mrds object. If the model is already calibrated, it simply loads it.
-
-    :param com: commodity considered, like 'WTI', ...
-    :type com: str
-
-    """
-
-    mobj_mm_beg = 'mobj/mm_'
-
-    if find_mm(com, date_, nb_fwd, mm_hash):  # finds if the model is already calibrated.
-        mm_file = work_dir + mobj_mm_beg + str(com) + '_' + str(date_) + '_' + str(mm_hash[com][date_]) + '.obj'
-        mm = pickle.load(open(mm_file))
-        mm.multi_thread_ind = mt
-    else:
-        mm = mrds_calib_db( com
-                          , com
-                          , date_
-                          , nb_fwd
-                          , mt        = mt
-                          , model_ind = model_ind
-                          , cuda_ind  = False )
-        pickle.dump( mm
-                   , open(work_dir + mobj_mm_beg + str(com) + '_' + str(date_) + '_' + str(nb_fwd) + '.obj', 'wb'))
-        write_mm_hash('single', update_mm_hash('single', mm_hash, [com, date_, nb_fwd]))
-
-    return mm
-
-
-def mrds_calib_db( com_fwd
-                 , com_vol
-                 , date_
-                 , nb_fwd
-                 , mt        = True
-                 , model_ind = 'skew'
-                 , cuda_ind  = False ):
-
-    mm = mrd_skew( 1
-                 , date_
-                 , multi_thread_ind  = mt
-                 , model_skew_ln_ind = model_ind
-                 , cuda_ind          = cuda_ind)
-
-    mm.read_curve_vol_data_db(date_, 0, com_fwd, com_vol, sub_idx_rows=np.arange(nb_fwd))
-    mm.read_discount_curve_db(date_)
-    mm.read_model_config_db(0)
-    mm.set_other_params(0)
-
-    if mm.vol_surface_name_list[0] == 'ATM':
-        mm.model_skew_ln_ind = 'ln_ln'
-    mm.black_vol_calibration(0)
-    if model_ind is 'skew':
-        mm.calibrate_skew_params(0)
-    mm.generate_large_corr_mat()
-
-    return mm
-
-
-def mrds_calib_multiple( com_l
-                       , date_
-                       , nb_fwd_l
-                       , mm_hash             = mm_hash_multiple
-                       , model_ind           = 'skew'
-                       , adj_fwd_tenors_days = None
-                       , adj_vol_tenors_days = None
-                       , multi_thread_ind    = True
-                       , cuda_ind            = False):
-    """
-    calibrates the multiple models
-    """
-
-    nb_comm = len(com_l)
-    assert(nb_comm == len(nb_fwd_l))
-    com_str = reduce(lambda x, y: x+'___'+y, com_l)
-    nb_fwd_str = reduce(lambda x, y: str(x)+'___'+str(y), nb_fwd_l)
-
-    mm_calibrated = find_mm(com_l[0], date_, nb_fwd_l[0], mm_hash) if nb_comm == 1 else find_mm(tuple(com_l), date_, tuple(nb_fwd_l), mm_hash)
-
-    mm_file = work_dir + 'mobj/mm_' + str(com_str) + '_' + \
-        str(date_) + '_' + str(nb_fwd_str) + '.obj'
-    if mm_calibrated:
-        mm = pickle.load(open(mm_file))
-    else:
-        mm = mrds_calib_db_multiple(com_l, com_l, date_, nb_fwd_l,
-                                    model_ind=model_ind,
-                                    adj_fwd_tenors_days=adj_fwd_tenors_days,
-                                    adj_vol_tenors_days=adj_vol_tenors_days,
-                                    mt=multi_thread_ind,
-                                    cuda_ind=cuda_ind)
-        pickle.dump(mm, open(mm_file, 'wb'))
-        mm_hash_new = update_mm_hash('multiple', mm_hash,
-                                     [tuple(com_l), date_, tuple(nb_fwd_l)])
-        write_mm_hash('multiple', mm_hash_new)
-
-    return mm
-
-
-def mrds_calib_db_multiple( com_fwd_l
-                          , com_vol_l
-                          , date_
-                          , nb_fwd_l
-                          , mt                  = True
-                          , model_ind           = 'skew'
-                          , adj_fwd_tenors_days = None
-                          , adj_vol_tenors_days = None
-                          , cuda_ind            = False):
-    """
-    TODO: FINISH HERE.
-
-    :param com_fwd_l: list of com to calibrate
-    col_vol_l ... list of vols for counterparted coms
-    nb_fwd_l ... list of nb of forwards [12, 10, 12]
-    :param mt: multithreading indicator
-    :type mt: bool
-    :param adj_fwd_tenors_days:  dict of {com_nb: nb_days_adj}
-    """
-
-    nb_comm = len(com_fwd_l)
-    assert(nb_comm == len(com_vol_l) and nb_comm == len(nb_fwd_l)), \
-        "Unequal lists for fwd, vol, nb_fwd"
-
-    mm = mrd_skew(nb_comm, date_, multi_thread_ind=mt,
-                  model_skew_ln_ind=model_ind,
-                  cuda_ind=cuda_ind)
-    mm.read_discount_curve_db(date_)
-    for com_nb, (com_used, vol_used) in enumerate(zip(com_fwd_l, com_vol_l)):
-        adj_fwd_tenors, adj_vol_tenors = find_adj_tenors(com_nb,
-                                                         adj_fwd_tenors_days,
-                                                         adj_vol_tenors_days)
-        mm.read_curve_vol_data_db(date_, com_nb, com_used, vol_used,
-                                  sub_idx_rows=np.arange(nb_fwd_l[com_nb]),
-                                  adj_fwd_tenors_days=adj_fwd_tenors,
-                                  adj_vol_tenors_days=adj_vol_tenors)
-        mm.read_model_config_db(com_nb)
-        mm.set_other_params(com_nb)
-        mm.black_vol_calibration(com_nb)
-        if model_ind is 'skew':
-            mm.calibrate_skew_params(com_nb)
-    mm.generate_large_corr_mat()
-    return mm
 
 
 def compute_partial_deltas ( mm

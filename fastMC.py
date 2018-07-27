@@ -1,38 +1,25 @@
 # implements the Ninomiya MC engine 
-import config # general configuration
-import sys # module for pathload
+
 from numpy import *
 import numpy.random
-import scipy
-import scipy.optimize
-from scipy.integrate import ode 
-import scipy.special
-import scipy.stats
-#from scipy.stats import cdf, pdf 
-import scipy.optimize 
-import scipy.linalg # for extracting linear algebra
+from scipy.integrate import ode
 import multiprocessing
-import copy # for copying objects in contingent extendible
-
-# abstract classes
-import abs_class
-
-import pricers_fast # fast libs in cython 
-#import pricers
-import vols
 
 
-# implements the ninomiya-ninomiya step
-# V0 ... V0 (x,t) drift function 
-# V1 ... V1 (x,t) diffusion function
-# Xk ... inital state Y(t_k)
-# k ... time step
-# dt ... time step
-# params ... [p0, p1] ... parameters for V0, V1 
-def ninomiya_victoir_step ( V0, V1, Xk, k, dt, params ):  # Y(t_k) = Xk 
+def ninomiya_victoir_step ( V0, V1, Xk, k, dt, params ):  # Y(t_k) = Xk
+    """
+    implements the ninomiya-ninomiya step
+
+    V0 ... V0 (x,t) drift function
+    V1 ... V1 (x,t) diffusion function
+    Xk ... inital state Y(t_k)
+    k ... time step
+    dt ... time step
+    params ... [p0, p1] ... parameters for V0, V1
+    """
 
     V0new = lambda t,y, params : V0 (t,y,params) * dt / 2
-    #binomial_sample = 2 * rbinom (1, 1, 0.5) -1  ## bernoulli rand. variable +/- 1 w.p. 1/2 
+    # binomial_sample = 2 * rbinom (1, 1, 0.5) -1  ## bernoulli rand. variable +/- 1 w.p. 1/2
     V1new = lambda t, y, params: V1 (t,y,params) * sqrt (dt) * numpy.random.normal() # * binomial_sample 
 
     # simple implementation of runge-kutta 
