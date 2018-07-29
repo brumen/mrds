@@ -5,14 +5,14 @@ import csv
 import pickle
 import numpy as np
 
-from mrds   import mrd_skew
+from mrds   import MrdSkew
 from config import work_dir
 
 import logging
 logger = logging.Logger(__name__)
 
-
-mm_calib_file_actual = 'mobj/mm_calib.txt'
+# calibration files
+mm_calib_file_actual       = 'mobj/mm_calib.txt'
 mm_calib_multi_file_actual = 'mobj/mm_calib_multiple.txt'
 single_asset_mm_calib = work_dir + mm_calib_file_actual
 multi_asset_mm_calib = work_dir + mm_calib_multi_file_actual
@@ -229,7 +229,7 @@ def mrds_calib_db( com_fwd
                  , model_ind = 'skew'
                  , cuda_ind  = False ):
 
-    mm = mrd_skew( 1
+    mm = MrdSkew( 1
                  , date_
                  , multi_thread_ind  = mt
                  , model_skew_ln_ind = model_ind
@@ -314,9 +314,12 @@ def mrds_calib_db_multiple( com_fwd_l
     assert(nb_comm == len(com_vol_l) and nb_comm == len(nb_fwd_l)), \
         "Unequal lists for fwd, vol, nb_fwd"
 
-    mm = mrd_skew(nb_comm, date_, multi_thread_ind=mt,
-                  model_skew_ln_ind=model_ind,
-                  cuda_ind=cuda_ind)
+    mm = MrdSkew( nb_comm
+                , date_
+                , multi_thread_ind  = mt
+                , model_skew_ln_ind = model_ind
+                , cuda_ind          = cuda_ind )
+
     mm.read_discount_curve_db(date_)
     for com_nb, (com_used, vol_used) in enumerate(zip(com_fwd_l, com_vol_l)):
         adj_fwd_tenors, adj_vol_tenors = find_adj_tenors(com_nb,
@@ -332,4 +335,5 @@ def mrds_calib_db_multiple( com_fwd_l
         if model_ind is 'skew':
             mm.calibrate_skew_params(com_nb)
     mm.generate_large_corr_mat()
+
     return mm

@@ -515,18 +515,19 @@ class MrdSkew(object):
         """
 
         res_ = ds.read_discount_curve(date_)
-        self._discount_tenors = res_["disc_tenors_numeric"]
-        self._discount_discount = res_["disc_curve"]
-        self._discount_yield = res_['yield_rates']
-        self._discount_function = res_['discount_function']
+        self._discount_tenors   = res_['disc_tenors_numeric']
+        self._discount_discount = res_['disc_curve'         ]
+        self._discount_yield    = res_['yield_rates'        ]
+        self._discount_function = res_['discount_function'  ]
 
     def DF(self, t):
         """
         Discount from self.date_today_dt to t
-        t can be in a format:
-          float
-          string ... '20141114'
-          datetime ... dt.datetime(...
+
+        :param t: time to discount to:
+        :type t: float
+                 string ... '20141114'
+                 datetime ... dt.datetime(...
         """
 
         if (type(t) is np.double) or (type(t) is float):
@@ -979,24 +980,25 @@ class MrdSkew(object):
         return np.exp((scipy.stats.norm.ppf(self.delta_vec_list[asset_nb]) - 0.5 * integrated_vol ) * integrated_vol) * \
                self.forward_curve_list[asset_nb][tenor_nb]
 
-    def __integr_analy(self, real_roots_tsf, nb_real_roots, Asigma):
+    def __integr_analy(self, real_roots_tsf, nb_real_roots, Asigma, A0, A1, A2, A3, A4, V):
         """
         Integrate the polynomial between the roots.
 
         """
-        A0, A1, A2, A3, A4, V = self.__unpack_params(Asigma, call_put_ind, strike)
 
         if nb_real_roots == 0:  # integrate polynomial function over whole of real axis
             if A4 > 0 or (A4 == 0 and A2 > 0) or (A4 == 0 and A2 == 0 and A0 > 0):
                 res = Asigma[0] + Asigma[2] + 3. * Asigma[4]
             else:
-                res = 0.0
-        elif nb_real_roots == 1:
+                res = 0.
+
+        if nb_real_roots == 1:
             if A3 > 0:
                 res = np.sum(self.__trunc_normal_below__(real_roots_tsf[0]) * Asigma)
             else:
                 res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma)
-        elif nb_real_roots in [2, 3]:  # integrate over 2 intervals
+
+        if nb_real_roots in [2, 3]:  # integrate over 2 intervals
             if A4 > 0:
                 res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
                       np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
@@ -1036,7 +1038,9 @@ class MrdSkew(object):
 
         return scipy.integrate.quad(lambda x: np.max([A0 + A1 * V * x + A2 * V**2 * x**2 +
                                                       A3 * V**3 * x**3 + A4 * V**4 * x**4, 0.]) / \
-                                              np.sqrt(2. * np.pi) * np.exp(- x**2 / 2.), -np.inf, np.inf)[0]
+                                              np.sqrt(2. * np.pi) * np.exp(- x**2 / 2.)
+                                   , -np.inf
+                                   , np.inf)[0]
 
     @staticmethod
     def __unpack_params(A_V, call_put_ind, strike):
@@ -1067,10 +1071,10 @@ class MrdSkew(object):
         call_put_ind ... 1 for call, -1 for put
         """
 
-        A_V = self.skew_params(asset_nb, C_vec, opt_mat_idx)  # returns the
-
         # obtaining the coefficients
-        A0, A1, A2, A3, A4 = MrdSkew.__unpack_params(A_V, call_put_ind, strike)
+        A0, A1, A2, A3, A4, V = MrdSkew.__unpack_params( self.skew_params(asset_nb, C_vec, opt_mat_idx)
+                                                       , call_put_ind
+                                                       , strike)
 
         if self.debug_mode:
             poly_roots = np.sort(np.poly1d([A4, A3, A2, A1, A0]).roots)
@@ -1095,7 +1099,7 @@ class MrdSkew(object):
         if self.debug_mode:  # debug, selects the numeric approach
             return disc_fact * self.__integr_num(Asigma, call_put_ind, strike)
         else:  # prod. mode
-            return disc_fact * self.__integr_analy(real_roots_tsf, nb_real_roots, Asigma)
+            return disc_fact * self.__integr_analy(real_roots_tsf, nb_real_roots, Asigma, A0, A1, A2, A3, A4, V)
 
     def model_vol_surface(self, asset_nb, C_vec, fwd_idx):
         """
@@ -1986,10 +1990,7 @@ class MrdSkew(object):
         :rtype: np.array
         """
 
-        cc1 = C_vec[0]  # coefficient at x^2
-        cc2 = C_vec[1]  # coefficient at x^3
-        cc3 = C_vec[2]  # coefficient at x^4
-
+        cc1, cc2, cc3 = C_vec
         # integrated volatility
         v = self.black_vol_current(asset_nb, opt_mat_idx) * np.sqrt(self.option_tenors_list[asset_nb][opt_mat_idx])
         f0t = self.forward_curve_list[asset_nb][opt_mat_idx]
@@ -2008,9 +2009,6 @@ class MrdSkew(object):
         A0, A1, A2, A3, A4, V = self.skew_params(asset_nb, C_vec, opt_mat_idx)
 
         return self.forward_curve_list[asset_nb] * (A0 + A1*X + A2*X**2 + A3*X**3 + A4*X**4)
-
-    def skew_tsf_internal(self, asset_nb, X, opt_mat_idx):
-        return self.skew_tsf(asset_nb, X, self.C_vec_list[asset_nb][opt_mat_idx], opt_mat_idx)
 
     def intra_curve_corr_calib(self, model_name_list):
         """

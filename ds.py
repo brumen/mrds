@@ -67,7 +67,6 @@ def convert_str_dateslash(date_):
         return [conv_local(d_elt) for d_elt in date_]
     else:
         return conv_local(date_)
-
     
 
 def convert_str_date(date_):
@@ -232,6 +231,7 @@ def get_forward_curve(fwd, date_):
     gets the forward curve (ALWAYS USE DATE 20150410)
     these are the only curves available
     """
+
     # trivial wrap, simply so that it works:
     if fwd == 'WTI':
         curve_dates = ds_data.wti_curve_dates
@@ -318,37 +318,28 @@ def get_forward_curve_plot(fwd, date_):
 
 def get_vol_curve(fwd, date_):
     """
-    gets the vol curve, date_ in string form '20150416'
-    """
-    if fwd == 'WTI':
-        curve_dates = ds_data.wti_vol_curve_dates
-        curve_vals = ds_data.wti_vol_curve_vals
-    elif fwd == 'BRENT':
-        curve_dates = ds_data.brent_vol_dates
-        curve_vals = ds_data.brent_vol_vals
-    elif fwd == 'ATSI-PEAK':
-        curve_dates = ds_data.atsi_peak_vol_dates
-        curve_vals = ds_data.atsi_peak_vol_vals
-    elif fwd == 'ATSI_2X16':
-        curve_dates = ds_data.atsi_2x16_vol_dates
-        curve_vals = ds_data.atsi_2x16_vol_vals
-    elif fwd == 'ATSI_7X8':
-        curve_dates = ds_data.atsi_7x8_vol_dates
-        curve_vals = ds_data.atsi_7x8_vol_vals
-    elif fwd == 'NG_MICHCON_GD-PEAK':
-        curve_dates = ds_data.ng_michcon_gd_peak_vol_dates
-        curve_vals = ds_data.ng_michcon_gd_peak_vol_vals
-    elif fwd == 'NG_MICHCON_CASHVOL':
-        curve_dates = ds_data.ng_michcon_cv_vol_dates
-        curve_vals = ds_data.ng_michcon_cv_vol_vals
-    elif fwd == 'PJMW-OFFPEAK_CV':
-        curve_dates = ds_data.pjm_offpeak_cv_vol_dates
-        curve_vals = ds_data.pjm_offpeak_cv_vol_vals
-    elif fwd == 'PJMW-PEAK_CV':
-        curve_dates = ds_data.pjm_peak_cv_vol_dates
-        curve_vals = ds_data.pjm_peak_cv_vol_vals
+    Gets the vol curve, date_ in string form '20150416'
 
-    return curve_dates, curve_vals
+    """
+
+    if fwd == 'WTI':
+        return ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals
+    elif fwd == 'BRENT':
+        return ds_data.brent_vol_dates    , ds_data.brent_vol_vals
+    elif fwd == 'ATSI-PEAK':
+        return ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals
+    elif fwd == 'ATSI_2X16':
+        return ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals
+    elif fwd == 'ATSI_7X8':
+        return ds_data.atsi_7x8_vol_dates , ds_data.atsi_7x8_vol_vals
+    elif fwd == 'NG_MICHCON_GD-PEAK':
+        return ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals
+    elif fwd == 'NG_MICHCON_CASHVOL':
+        return ds_data.ng_michcon_cv_vol_dates     , ds_data.ng_michcon_cv_vol_vals
+    elif fwd == 'PJMW-OFFPEAK_CV':
+        return ds_data.pjm_offpeak_cv_vol_dates    , ds_data.pjm_offpeak_cv_vol_vals
+    elif fwd == 'PJMW-PEAK_CV':
+        return ds_data.pjm_peak_cv_vol_dates       , ds_data.pjm_peak_cv_vol_vals
 
 
 def get_vol_curve_pretty2(fwd, date_):
@@ -485,18 +476,20 @@ def read_data_matched_tenors(sim_date, fwd_curve, vol_curve,
 
 
 def read_discount_curve(date_):
+    """
+    Returns the discount curve from ????
+    """
     base_date = convert_str_datetime(date_)
     disc_tenors, yield_rates = get_forward_curve('DISCOUNT', date_)
     diffs = [ten_ - base_date for ten_ in disc_tenors]
     disc_tenors_numeric = np.array([float(elt.days) for elt in diffs])/365.
     yield_rates = np.array([float(x) for x in yield_rates])
     disc_curve = np.exp(-disc_tenors_numeric * yield_rates)
-    discount_function = scipy.interpolate.splrep(disc_tenors_numeric, disc_curve)
 
-    return {"disc_tenors_numeric": disc_tenors_numeric,
-            'yield_rates': yield_rates,
-            'disc_curve': disc_curve,
-            'discount_function': discount_function}
+    return {'disc_tenors_numeric': disc_tenors_numeric,
+            'yield_rates'        : yield_rates,
+            'disc_curve'         : disc_curve,
+            'discount_function'  : scipy.interpolate.splrep(disc_tenors_numeric, disc_curve)}
 
 
 def DF_hash(disc_data, t):
@@ -544,12 +537,12 @@ def DF(date_, date_fut):
     
 # vol hash, has to be moved
 vol_hash = dict()
-vol_hash['WTI'] = 'JWSS7'
-vol_hash['BRENT'] = 'JWSS7'
+vol_hash['WTI'      ] = 'JWSS7'
+vol_hash['BRENT'    ] = 'JWSS7'
 vol_hash['ATSI-PEAK'] = 'JWSS7'
-vol_hash['ATSI_7X8'] = 'JWSS7'
+vol_hash['ATSI_7X8' ] = 'JWSS7'
 vol_hash['ATSI_2X16'] = 'JWSS7'
 vol_hash['NG_MICHCON_GD-PEAK'] = 'ATM'
 vol_hash['NG_MICHCON_CASHVOL'] = 'ATM'
-vol_hash['PJMW-OFFPEAK_CV'] = 'ATM'
-vol_hash['PJMW-PEAK_CV'] = 'ATM'
+vol_hash['PJMW-OFFPEAK_CV'   ] = 'ATM'
+vol_hash['PJMW-PEAK_CV'      ] = 'ATM'
