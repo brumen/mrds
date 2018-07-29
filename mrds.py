@@ -565,7 +565,8 @@ class MrdSkew(object):
 
     def overwrite_market_corr (self, asset_1, asset_2, overwr):
         """
-        # overwrites read corr. with manual
+        Overwrites read corr. with manual
+
         """
 
         logger.info('Corr. vec overwritten with' + overwr)
@@ -936,9 +937,15 @@ class MrdSkew(object):
         """
         Computes the truncated E[ N^{0,1,2,3,4} * 1(N <a) ] where N std. normal in succession.
 
+        :param a: parameter for the truncation.
+        :type a: double
+        :returns truncated std. normal.
+        :rtype: double
         """
+
         if a < -1e10:
             return np.array([0., 0., 0., 0., 0.])
+
         if a > 1e10:
             return np.array([1., 0., 1., 0., 3.])
 
@@ -954,8 +961,12 @@ class MrdSkew(object):
 
     def __trunc_normal_below__(self, a):
         """
-        computes the truncated E[ N^{0,1,2,3,4} * 1(N >a) ] where N std. normal
-        in succession
+        computes the truncated E[ N^{0,1,2,3,4} * 1(N >a) ] where N std. normal.
+
+        :param a: parameter for the truncation.
+        :type a: double
+        :returns truncated std. normal.
+        :rtype: double
         """
 
         return - self.__trunc_normal_above__(a) + np.array([1.0, 0.0, 1.0, 0.0, 3.0])
@@ -1022,7 +1033,7 @@ class MrdSkew(object):
                 res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma ) + \
                       np.sum(self.__trunc_normal_below__(real_roots_tsf[3]) * Asigma ) + \
                       np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
-            else: # A4 < 0
+            else:  # A4 < 0
                 res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
                       np.sum(self.__trunc_normal_interval__(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
         return res

@@ -2,6 +2,7 @@
 import numpy as np
 import scipy.interpolate
 import matplotlib.pyplot as plt
+import datetime
 import datetime as dt
 import ds_data
 import calendar as cal
@@ -23,8 +24,7 @@ fwd_mapping_codes = {'f': 'JAN',
                      'u': 'SEP',
                      'v': 'OCT',
                      'x': 'NOV',
-                     'z': 'DEC'
-                     }
+                     'z': 'DEC' }
 
 fwd_codes = {'f': 1,
              'g': 2,
@@ -37,14 +37,19 @@ fwd_codes = {'f': 1,
              'u': 9,
              'v': 10,
              'x': 11,
-             'z': 12,
-             }
+             'z': 12 }
 
 
 def convert_str_datetime(date_):
     """
-    converts yyyymmdd into datetime
+    Converts yyyymmdd into datetime.
+
+    :param date_: date in above format, or a list of these formats.
+    :type date_: str or list[str]
+    :returns: same date in a different format
+    :rtype: datetime.date or list[datetime.date]
     """
+
     def conv_local(d_elt):
         return dt.datetime(int(d_elt[0:4]),
                            int(d_elt[4:6]),
@@ -58,8 +63,14 @@ def convert_str_datetime(date_):
     
 def convert_str_dateslash(date_):
     """
-    converts yyyymmdd into datetime
+    Converts yyyymmdd into mm/dd/yyyy
+
+    :param date_: date in the format
+    :type date_: str
+    :returns: date in the different format
+    :rtype: str
     """
+
     def conv_local(d_elt):
         return str(int(d_elt[4:6])) + '/' + str(int(d_elt[6:8])) + '/' + str(int(d_elt[0:4]))
 
@@ -87,17 +98,18 @@ def convert_str_date(date_):
 def d2s(i):
     """
     digit to string conversion, adding 0 if < 10
+
     """
-    if i < 10:
-        return "0" + str(i)
-    else:
-        return str(i)
+
+    return "0" + str(i) if i < 10 else str(i)
 
 
 def convert_datetime_str(date_):
     """
-    converts the date in datetime format into string format 
+    Converts the date in datetime format into string format.
+
     """
+
     return str(date_.year) + d2s(date_.month) + d2s(date_.day)
 
 
@@ -125,6 +137,7 @@ def convert_datedash_date(dates):
     """
     converts date in form 2016-10-5 -> dt.date(..)
     """
+
     year, mon, day = dates.split('-')
     return dt.date(int(year), int(mon), int(day))
 
@@ -136,29 +149,35 @@ def convert_datedash_time_dt(date_i, hour_i):
     year, mon, day = date_i.split('-')
     hour, minutes, sec = hour_i.split(':')
     return dt.datetime(int(year), int(mon), int(day), int(hour), int(minutes))
-    
+
+
 def convert_hour_time(hour):
     """
     converts date in form 12:00:02 -> dt.time(..)
+
     """
+
     hour, minute, sec = hour.split(':')
     return dt.time(int(hour), int(minute), int(sec))
 
 
 def convert_dateslash_dash(dates):
     """
-    converts date in form 10/5/2016 -> 2016-10-05
+    Converts date in form 10/5/2016 -> 2016-10-05
     """
+
     mon, day, year = dates.split('/')
     return year + '-' + d2s(int(mon)) + '-' + d2s(int(day))    
 
 
 def construct_date_range(date_b, date_e):
     """
-    constructs the date range between date_b and date_e
+    Constructs the date range between date_b and date_e
+
     :param date_b: begin date, in string format
     :param date_e: end date, in string format
     """
+
     date_b_dt = convert_str_date(date_b)
     date_e_dt = convert_str_date(date_e)
     year_b, month_b, day_b = date_b_dt.year, date_b_dt.month, date_b_dt.day
@@ -209,8 +228,10 @@ def construct_date_range(date_b, date_e):
 
 def time_diff(date1, date2, dt_format=365.25):
     """
-    computes numerical difference between date1 date2
+    Computes numerical difference between date1 date2
+
     """
+
     if type(date1) is dt.datetime:
         return (date2 - date1).days / dt_format
     else:
@@ -221,52 +242,56 @@ def time_diff(date1, date2, dt_format=365.25):
 
 def add_days_str(date_, days):
     """
-    adds the number of days to date_
+    Adds the number of days to date_
+
     """
+
     return convert_datetime_str(convert_str_datetime(date_) + dt.timedelta(days=days))
 
 
-def get_forward_curve(fwd, date_):
+def get_forward_curve(fwd: str, date_ : datetime.date):
     """
-    gets the forward curve (ALWAYS USE DATE 20150410)
-    these are the only curves available
+    Gets the forward curve (ALWAYS USE DATE 20150410) for a particular date.
+
+    :param fwd: name of the curve
+    :type fwd: str
+    :param date_: forward date
+    :type date_: datetime.date
     """
 
-    # trivial wrap, simply so that it works:
     if fwd == 'WTI':
-        curve_dates = ds_data.wti_curve_dates
-        curve_vals = ds_data.wti_curve_vals
-    elif fwd == 'BRENT':
+        return ds_data.wti_curve_dates, ds_data.wti_curve_vals
+
+    if fwd == 'BRENT':
         curve_dates = ds_data.brent_curve_dates
         curve_vals_init = ds_data.brent_curve_vals
         brent_spread = np.linspace(6, 7, len(curve_vals_init))  # fictitious spread
         curve_vals = [x + s for x, s in zip(curve_vals_init, brent_spread)]
-    elif fwd == 'ATSI-PEAK':
-        curve_dates = ds_data.atsi_peak_curve_dates
-        curve_vals = ds_data.atsi_peak_curve_vals
-    elif fwd == 'ATSI_7X8':
-        curve_dates = ds_data.atsi_7x8_curve_dates
-        curve_vals = ds_data.atsi_7x8_curve_vals
-    elif fwd == 'ATSI_2X16':
-        curve_dates = ds_data.atsi_2x16_curve_dates
-        curve_vals = ds_data.atsi_2x16_curve_vals
-    elif fwd == 'NG_MICHCON_GD-PEAK':
-        curve_dates = ds_data.ng_michcon_gd_peak_dates
-        curve_vals = ds_data.ng_michcon_gd_peak_curve_vals
-    elif fwd == 'NG_MICHCON_CASHVOL':
-        curve_dates = ds_data.ng_michcon_cv_curve_dates
-        curve_vals = ds_data.ng_michcon_cv_curve_vals
-    elif fwd == 'PJMW-OFFPEAK_CV':
-        curve_dates = ds_data.pjm_offpeak_cv_curve_dates
-        curve_vals = ds_data.pjm_offpeak_cv_curve_vals
-    elif fwd == 'PJMW-PEAK_CV':
-        curve_dates = ds_data.pjm_peak_cv_curve_dates
-        curve_vals = ds_data.pjm_peak_cv_curve_vals
-    elif fwd == 'DISCOUNT':
-        curve_dates = ds_data.discount_curve_dates
-        curve_vals = ds_data.discount_curve_vals
+        return curve_dates, curve_vals
 
-    return curve_dates, curve_vals
+    if fwd == 'ATSI-PEAK':
+        return ds_data.atsi_peak_curve_dates, ds_data.atsi_peak_curve_vals
+
+    if fwd == 'ATSI_7X8':
+        return ds_data.atsi_7x8_curve_dates, ds_data.atsi_7x8_curve_vals
+
+    if fwd == 'ATSI_2X16':
+        return ds_data.atsi_2x16_curve_dates, ds_data.atsi_2x16_curve_vals
+
+    if fwd == 'NG_MICHCON_GD-PEAK':
+        return ds_data.ng_michcon_gd_peak_dates, ds_data.ng_michcon_gd_peak_curve_vals
+
+    if fwd == 'NG_MICHCON_CASHVOL':
+        return ds_data.ng_michcon_cv_curve_dates, ds_data.ng_michcon_cv_curve_vals
+
+    if fwd == 'PJMW-OFFPEAK_CV':
+        return ds_data.pjm_offpeak_cv_curve_dates, ds_data.pjm_offpeak_cv_curve_vals
+
+    if fwd == 'PJMW-PEAK_CV':
+        return ds_data.pjm_peak_cv_curve_dates, ds_data.pjm_peak_cv_curve_vals
+
+    if fwd == 'DISCOUNT':
+        return ds_data.discount_curve_dates, ds_data.discount_curve_vals
 
 
 def get_forward_curve_slice(fwd, date_, date_b, date_e,
