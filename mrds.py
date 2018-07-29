@@ -2,7 +2,6 @@
 #
 import config
 from config import work_dir
-import pickle
 import datetime as dt
 import numpy as np
 import scipy
@@ -14,18 +13,17 @@ import scipy.optimize
 import scipy.interpolate  # spline package
 from openopt import NLP
 import multiprocessing as mp
-import csv
-import os
 import calendar
 import copy
 
 # cuda (this can be imported even if cuda is not present)
-#if config.CUDA_PRESENT:
-import pycuda.curandom
-import pycuda.gpuarray as gpa
-import pycuda.cumath
-from pycuda.compiler import SourceModule
-import curand
+if config.CUDA_PRESENT:
+    import pycuda.curandom
+    import pycuda.gpuarray as gpa
+    import pycuda.cumath
+    from pycuda.cumath import exp as cuExp, sqrt as cuSqrt
+    from pycuda.compiler import SourceModule
+    import curand  # TODO: THIS IS WRONG
 
 import matplotlib as mpl
 mpl.use('TkAgg')
@@ -34,15 +32,18 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import tkinter as tk
 
-import vols.vols
-from vols import vols_fast
-import near_corr
-from quartic import quartic_cy
+# mrds local imports
 import ds
+import vols.vols
+import near_corr
 import correlations as corrs
 
-# if config.CUDA_PRESENT:
-from cuda import cuda_ops
+from quartic import quartic_cy
+
+if config.CUDA_PRESENT:
+    from cuda import cuda_ops
+    from cuda.cuda_ops import matmul
+
 import opd_avx   # for speedups
 
 import logging
@@ -50,7 +51,7 @@ logger = logging.Logger(__name__)
 
 
 # F skew implementation
-if config.CUDA_PRESENT: 
+if config.CUDA_PRESENT:
     F_skew_el = open(work_dir + 'cuda/skew_tsf.c', 'r').read()
     F_skew_mod = SourceModule(F_skew_el)
     F_skew_fct = F_skew_mod.get_function('F_skew_tsf')
@@ -75,25 +76,16 @@ class InputError(MrdsError):
         self.msg = msg
 
 
-class mouse_press_state_machine():
-    """
-    TODO: FILL WHAT THIS IS DOING
-
-    """
-
-    pass
-
-
 def opt_fct_skew_wrap(arg, **kwarg):
     """
     wrapper for the skew MRD model calibration function
 
     """
 
-    return mrd_skew.opt_fct_skew(*arg, **kwarg)
+    return MrdSkew.opt_fct_skew(*arg, **kwarg)
 
 
-class mrd_skew(object):
+class MrdSkew(object):
 
     def _empty_list_fct(self, n):
         return [np.array([])] * n
@@ -207,7 +199,7 @@ class mrd_skew(object):
         self.sim_date_indicator = False
         self.days_nb_const_ind = False  # monthly dat numbers are constr.
         self.simulate_spot_rn_ind = False  # indic. for random number for spot sim.
-        self.cash_corr = np.eye(self.nb_assets)
+        self._cash_corr = np.eye(self.nb_assets)
 
         self.fwd_curve_name = ['UNK'] * self.nb_assets
         self.vol_curve_name = ['UNK'] * self.nb_assets
@@ -224,7 +216,6 @@ class mrd_skew(object):
                 return diff_asset_corr * np.ones((self.nb_factors_list[asset_1],
                                                   self.nb_factors_list[asset_2]))
 
-
         # factor correlations matrices (also for cross factor correlations )
         self.factor_corr_mat_list = [[factor_corr_mat_fct(self, asset_1, asset_2)
                                       for asset_2 in range(nb_assets)]
@@ -238,24 +229,24 @@ class mrd_skew(object):
 
         # market correlation list of lists
         self.market_corr_list = [self._empty_list_fct(self.nb_assets)] * self.nb_assets
-        self.model_corr_list = [self._empty_list_fct (self.nb_assets)] * self.nb_assets
+        self.model_corr_list  = [self._empty_list_fct(self.nb_assets)] * self.nb_assets
         # other parameters 
         self.multi_thread_ind = multi_thread_ind 
 
-        self.simulated_curves = self._empty_list_fct(self.nb_assets) # placeholder for all simulated curves
+        # simulated curves section, placeholders
+        self.simulated_curves     = [None ] * self.nb_assets
         self.simulated_curves_ind = [False] * self.nb_assets
-        self.simulated_curves_nb = [None] * self.nb_assets
-        self.forward_curve_ch = [None] * self.nb_assets
+        self.simulated_curves_nb  = [None ] * self.nb_assets
+        self.forward_curve_ch     = [None ] * self.nb_assets
         self.sim_rv_ind = {'ind': False,
                            'nb_sim': 0}
         self.sim_rv = None
         self.cuda_ind = cuda_ind
-        # if self.cuda_ind:
-        #    # construct objects used for cuda generation
-        #    self.rng_cuda = curand.create_gen_simple()
+
+        # TODO: THIS CAN BE BETTER WRITTEN
         # placeholder for simulated_curves_fom, indexed by tenors_list, asset_nb, sim_nb
         self.simulated_curves_fom_cuda = {}
-        self.simulated_curves_fom_cpu = {}
+        self.simulated_curves_fom_cpu  = {}
 
         # internal variables simulation times
         self._simulation_times    = None
@@ -296,6 +287,14 @@ class mrd_skew(object):
                                         for stf in self._simulation_times]
 
         self.nb_time_steps = len(st_init)
+
+    @property
+    def cash_corr(self):
+        return self._cash_corr
+
+    @cash_corr.setter
+    def cash_corr(self, cc):
+        self._cash_corr = cc
 
     def factor_corr_mat_fct_lb_ub(self, asset_1, asset_2, lb_ub_ind='ub'):
         """
@@ -348,45 +347,62 @@ class mrd_skew(object):
                 self.calibrate_skew_params(asset_nb)
             self.generate_large_corr_mat()
 
+    def update_one_asset(self, new_market_date, asset_ch):
+        """
+        Updates the date to the new market date, and updates the curves and vols accordingly.
+
+        :param new_market_date: new date that one wants to set.
+        :type new_market_date: datetime.date TODO: CHECK THIS????
+        :param asset_ch: commodity asset that one wants to update.
+        :type asset_ch: int
+        """
+
+        # TODO: WHAT IS THIS???
+        f_new = [(ft_dt, ft_idx) for (ft_dt, ft_idx)
+                 in zip(self.option_tenors_dt_list[asset_ch],
+                        range(self.forward_curve_len[asset_ch]))
+                 if ft_dt > self.date_today_dt]
+        f_idx = [ft_idx for (ft_dt, ft_idx) in f_new]
+
+        # forward curves shortening
+        self.forward_curve_list[asset_ch]     = self.forward_curve_list[asset_ch][f_idx]
+        self.forward_curve_len[asset_ch]      = len(f_idx)
+        self.forward_tenors_dt_list[asset_ch] = [self.forward_tenors_dt_list[asset_ch][i] for i in f_idx]
+        self.forward_tenors_list[asset_ch]    = [(ft_dt - self.date_today_dt).days / 365.25
+                                                 for ft_dt in self.forward_tenors_dt_list[asset_ch] ]
+        self.forward_tenors_code_list[asset_ch] = [self.forward_tenors_code_list[asset_ch][i] for i in f_idx]
+        # option/vol curves
+        self.option_tenors_dt_list[asset_ch] = [self.option_tenors_dt_list[asset_ch][i] for i in f_idx]
+        self.option_tenors_list[asset_ch]    = np.array([(ft_dt - self.date_today_dt).days / 365.25
+                                                         for ft_dt in self.option_tenors_dt_list[asset_ch]])
+        self.option_tenors_code_list[asset_ch] = [self.option_tenors_code_list[asset_ch][i] for i in f_idx]
+
+        # other parameters
+        self.beta_T_list[asset_ch] = self.beta_T_list[asset_ch][f_idx]
+        self.atm_vol_list[asset_ch] = self.atm_vol_list[asset_ch][f_idx]
+        self.C_vec_list[asset_ch] = self.C_vec_list[asset_ch][f_idx]
+
+        if self.cash_vol_list[asset_ch].shape != (0,):
+            self.cash_vol_list[asset_ch] = self.cash_vol_list[asset_ch][f_idx]
+        if self.vol_param_list[asset_ch].shape != (0,):
+            self.vol_param_list[asset_ch] = self.vol_param_list[asset_ch][f_idx, :]
+            self.vol_surface_list[asset_ch] = self.vol_surface_list[asset_ch][f_idx, :]
+            self.vol_obj_list[asset_ch].extract_tenors(new_market_date, f_idx)
+
     def update_market_date(self, new_market_date, asset='all'):
         """
-        change the model by changing the market date
+        Change the model by changing the market date
+
         :param new_market_date: market date in string format
+        :type new_market_date: str
+        :param asset:
         """
+
         self.date_today = new_market_date
         self.date_today_dt = ds.convert_str_datetime(new_market_date)
 
-        def update_one_asset(asset_ch):
-            f_new = [(ft_dt, ft_idx) for (ft_dt, ft_idx)
-                     in zip(self.option_tenors_dt_list[asset_ch],
-                            range(self.forward_curve_len[asset_ch]))
-                     if ft_dt > self.date_today_dt]
-            f_idx = [ft_idx for (ft_dt, ft_idx) in f_new]
-
-            # forward curves shortening
-            self.forward_curve_list[asset_ch] = self.forward_curve_list[asset_ch][f_idx]
-            self.forward_curve_len[asset_ch] = len(f_idx)
-            self.forward_tenors_dt_list[asset_ch] = [self.forward_tenors_dt_list[asset_ch][i] for i in f_idx]
-            self.forward_tenors_list[asset_ch] = [(ft_dt - self.date_today_dt).days / 365.25
-                                                  for ft_dt in self.forward_tenors_dt_list[asset_ch]]
-            self.forward_tenors_code_list[asset_ch] = [self.forward_tenors_code_list[asset_ch][i] for i in f_idx]
-            # option/vol curves
-            self.option_tenors_dt_list[asset_ch] = [self.option_tenors_dt_list[asset_ch][i] for i in f_idx]
-            self.option_tenors_list[asset_ch] = np.array([(ft_dt - self.date_today_dt).days / 365.25
-                                                 for ft_dt in self.option_tenors_dt_list[asset_ch]])
-            self.option_tenors_code_list[asset_ch] = [self.option_tenors_code_list[asset_ch][i] for i in f_idx]
-            # other parameters
-            self.beta_T_list[asset_ch] = self.beta_T_list[asset_ch][f_idx]
-            self.atm_vol_list[asset_ch] = self.atm_vol_list[asset_ch][f_idx]
-            self.C_vec_list[asset_ch] = self.C_vec_list[asset_ch][f_idx]
-            if self.cash_vol_list[asset_ch].shape != (0,):
-                self.cash_vol_list[asset_ch] = self.cash_vol_list[asset_ch][f_idx]
-            if self.vol_param_list[asset_ch].shape != (0,):
-                self.vol_param_list[asset_ch] = self.vol_param_list[asset_ch][f_idx, :]
-                self.vol_surface_list[asset_ch] = self.vol_surface_list[asset_ch][f_idx, :]
-                self.vol_obj_list[asset_ch].extract_tenors(new_market_date, f_idx)
-
-        return [update_one_asset(asset_ch) for asset_ch in range(self.nb_assets)] if asset == 'all' else update_one_asset(asset)
+        return [self.update_one_asset(new_market_date, asset_ch) for asset_ch in range(self.nb_assets)] if asset == 'all' \
+                else self.update_one_asset(new_market_date, asset)
 
     def read_curve_vol_data_db( self
                               , date_
@@ -734,30 +750,31 @@ class mrd_skew(object):
 
     def beta_T_calibration (self, asset_nb):
         """
-        adjusts beta_T so that the atm vol is fitted perfectly
+        Adjusts beta_T so that the atm vol is fitted perfectly.
         (assuming that kappa, sigma, rho has already been calibrated)
-        """
 
-        kappa_asset = self.kappa_vec_list[asset_nb]
-        sigma_asset = self.sigma_vec_list[asset_nb]
-        corr_asset  = self.factor_corr_mat_list[asset_nb][asset_nb]
+        :param asset_nb: number of the asset calibrated (e.g. 'WTI')
+        :type asset_nb: int
+        """
 
         return self.atm_vol_list[asset_nb] / \
                np.array([ self.black_vol( asset_nb
-                                        , kappa_asset
-                                        , sigma_asset
-                                        , corr_asset
+                                        , self.kappa_vec_list[asset_nb]
+                                        , self.sigma_vec_list[asset_nb]
+                                        , self.factor_corr_mat_list[asset_nb][asset_nb]
                                         , forward_idx)
                          for forward_idx in range(self.forward_curve_len[asset_nb])])
 
     def check_black_vol_calib(self, asset_nb):
         """
-        Checks the black vol calibration
+        Checks the black vol calibration, logs the results if the calibration failed.
 
         """
-        model_atm_vols = np.array([self.black_vol(asset_nb, self.kappa_vec_list[asset_nb],
-                                                  self.sigma_vec_list[asset_nb],
-                                                  self.factor_corr_mat_list[asset_nb][asset_nb], fwd)
+
+        model_atm_vols = np.array([self.black_vol(asset_nb
+                                                 , self.kappa_vec_list[asset_nb]
+                                                 , self.sigma_vec_list[asset_nb]
+                                                 , self.factor_corr_mat_list[asset_nb][asset_nb], fwd)
                                    for fwd in range(self.forward_curve_len[asset_nb])])
         diff = scipy.linalg.norm(model_atm_vols - self.atm_vol_list[asset_nb])
 
@@ -789,10 +806,10 @@ class mrd_skew(object):
         """
 
         opt_mat = self.option_tenors_list[asset_nb][np.min(ind_1, ind_2)] # opt_mat until the smallest one
-        corr = self.factor_corr_mat_list[asset_nb][asset_nb]
-        kv = self.kappa_vec_list[asset_nb]
-        sv = self.sigma_vec_list[asset_nb]
-        ft = self.forward_tenors_list[asset_nb]
+        corr = self.factor_corr_mat_list[asset_nb][asset_nb]  # correlation matrix
+        kv = self.kappa_vec_list[asset_nb]  # kappa vector
+        sv = self.sigma_vec_list[asset_nb]  # sigma vector
+        ft = self.forward_tenors_list[asset_nb]  # forward vector
 
         a = np.array([corr[ind_1, ind_2] * sv[factor_nb_1] * sv[factor_nb_2] *
                       np.product(self.beta_T_list[asset_nb] ) *
@@ -809,15 +826,19 @@ class mrd_skew(object):
 
     def black_corr_within_curve_estimation(self, asset_nb, emp_corr_matrix):
         """
-        this function performs the calibration
-        """
-        def model_corr(params):
-            model_matrix = [self.black_corr_within_curve(asset_nb, ind_1, ind_2)
-                            for ind_1 in range(self.forward_curve_len[asset_nb])
-                            for ind_2 in range(self.forward_curve_len[asset_nb])]
-            return np.sum(np.sum((model_matrix - emp_corr_matrix)** 2))
+        Calibration of TODO within the curve.
 
-        return scipy.optimize.brute(model_corr, 1)
+        :param asset_nb: commodity asset
+        :type asset_nb: int
+        :param emp_corr_matrix: empirical correlation matrix
+        :type emp_corr_matrix: 2-dim np.array
+        """
+
+        return scipy.optimize.brute(np.sum(np.sum(([self.black_corr_within_curve(asset_nb, ind_1, ind_2)
+                                                     for ind_1 in range(self.forward_curve_len[asset_nb])
+                                                         for ind_2 in range(self.forward_curve_len[asset_nb])]
+                                                   - emp_corr_matrix)** 2))
+                                   , 1)
 
     def black_corr_intra_curves(self, model_corr_mtx, curve_1, curve_2, tenor_1, tenor_2):
         """
@@ -943,29 +964,113 @@ class mrd_skew(object):
 
     def deltas_to_strikes(self, asset_nb, tenor_nb):
         """
-        converts deltas to strikes
-        """
-        integrated_vol = self.atm_vol_list[asset_nb][tenor_nb] * np.sqrt(self.option_tenors_list[asset_nb][tenor_nb])
-        return np.exp((scipy.stats.norm.ppf(self.delta_vec_list[asset_nb]) - 0.5 * integrated_vol ) *
-                      integrated_vol) * self.forward_curve_list[asset_nb][tenor_nb]
+        Converts deltas to strikes for particular asset and tenor.
 
-    def polynomial_european(self, asset_nb, C_vec, opt_mat_idx, strike, call_put_ind):
+        :param asset_nb: asset number
+        :type asset_nb: int
+        :param tenor_nb: tenor considered.
+        :type tenor_nb: int
+        :returns: a vector of deltas from the strikes given in self.delta_vec_list
+        :rtype: np.array
+        """
+
+        integrated_vol = self.atm_vol_list[asset_nb][tenor_nb] * np.sqrt(self.option_tenors_list[asset_nb][tenor_nb])
+
+        return np.exp((scipy.stats.norm.ppf(self.delta_vec_list[asset_nb]) - 0.5 * integrated_vol ) * integrated_vol) * \
+               self.forward_curve_list[asset_nb][tenor_nb]
+
+    def __integr_analy(self, real_roots_tsf, nb_real_roots, Asigma):
+        """
+        Integrate the polynomial between the roots.
+
+        """
+        A0, A1, A2, A3, A4, V = self.__unpack_params(Asigma, call_put_ind, strike)
+
+        if nb_real_roots == 0:  # integrate polynomial function over whole of real axis
+            if A4 > 0 or (A4 == 0 and A2 > 0) or (A4 == 0 and A2 == 0 and A0 > 0):
+                res = Asigma[0] + Asigma[2] + 3. * Asigma[4]
+            else:
+                res = 0.0
+        elif nb_real_roots == 1:
+            if A3 > 0:
+                res = np.sum(self.__trunc_normal_below__(real_roots_tsf[0]) * Asigma)
+            else:
+                res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma)
+        elif nb_real_roots in [2, 3]:  # integrate over 2 intervals
+            if A4 > 0:
+                res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
+                      np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+            if A4 < 0.:
+                res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+            if A4 == 0. and A3 != 0.:
+                if A3 > 0.:
+                    res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
+                        np.sum(self.__trunc_normal_below__(real_roots_tsf[2]) * Asigma)
+                else:  # A3 < 0
+                    res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
+                        np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
+            if A4 == 0. and A3 == 0.:
+                if A2 < 0.:
+                    res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+                else:
+                    res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
+                        np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+        elif nb_real_roots == 4:  # integrate over 3 intervals
+            if A4 > 0:
+                res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma ) + \
+                      np.sum(self.__trunc_normal_below__(real_roots_tsf[3]) * Asigma ) + \
+                      np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
+            else: # A4 < 0
+                res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
+                      np.sum(self.__trunc_normal_interval__(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
+        return res
+
+    def __integr_num(self, A_V, call_put_ind, strike):
+        """
+        Integrate numerically between the roots of the polynomials.
+        IMPORTANT: For testing purposes only, in prod. use the code in integr_analy.
+
+        """
+
+        A0, A1, A2, A3, A4, V = self.__unpack_params(A_V, call_put_ind, strike)
+
+        return scipy.integrate.quad(lambda x: np.max([A0 + A1 * V * x + A2 * V**2 * x**2 +
+                                                      A3 * V**3 * x**3 + A4 * V**4 * x**4, 0.]) / \
+                                              np.sqrt(2. * np.pi) * np.exp(- x**2 / 2.), -np.inf, np.inf)[0]
+
+    @staticmethod
+    def __unpack_params(A_V, call_put_ind, strike):
+        """
+        Unpacks the parameters A, V from A_V.
+
+        """
+
+        A, V = A_V[0:5], A_V[5]  # V= integrated volatility, not variance
+
+        if call_put_ind == 1:  # call
+            A0 = A[0] - strike
+            A1, A2, A3, A4 = A[1:5]
+        else:  # put
+            A0 = strike - A[0]
+            A1, A2, A3, A4 = - A[1:5]
+
+        return A0, A1, A2, A3, A4, V
+
+    def polynomial_european( self
+                           , asset_nb
+                           , C_vec
+                           , opt_mat_idx
+                           , strike
+                           , call_put_ind):
         """
         value of european call option in skew model with strike
         call_put_ind ... 1 for call, -1 for put
         """
 
-        # obtaining the coefficients
-        A_V = self.skew_params(asset_nb, C_vec, opt_mat_idx)
-        A = A_V[0:5]
-        V = A_V[5]  # integrated volatility, not variance
+        A_V = self.skew_params(asset_nb, C_vec, opt_mat_idx)  # returns the
 
-        if call_put_ind == 1:  # call
-            A0 = A[0] - strike 
-            A1, A2, A3, A4 = A[1:5]
-        else:  # put
-            A0 = strike - A[0]
-            A1, A2, A3, A4 = - A[1:5]
+        # obtaining the coefficients
+        A0, A1, A2, A3, A4 = MrdSkew.__unpack_params(A_V, call_put_ind, strike)
 
         if self.debug_mode:
             poly_roots = np.sort(np.poly1d([A4, A3, A2, A1, A0]).roots)
@@ -986,68 +1091,11 @@ class mrd_skew(object):
 
         Asigma = np.array([A0, A1, A2, A3, A4]) * np.array([1., V, V**2, V**3, V**4])  # A multiplied by sigmas
         real_roots_tsf = real_roots / V  # equivalent of s in the document
-
-        def integr_analy(self, real_roots_tsf, nb_real_roots, Asigma):
-            # integrate the polynomial between the roots
-            if nb_real_roots == 0:  # integrate polynomial function over whole of real axis
-                if A4 > 0 or (A4 == 0 and A2 > 0) or (A4 == 0 and A2 == 0 and A0 > 0):
-                    res = Asigma[0] + Asigma[2] + 3. * Asigma[4] 
-                else: 
-                    res = 0.0
-            elif nb_real_roots == 1:
-                if A3 > 0:
-                    res = np.sum(self.__trunc_normal_below__(real_roots_tsf[0]) * Asigma)
-                else:
-                    res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma)
-            elif (nb_real_roots == 2 or nb_real_roots == 3):  # integrate over 2 intervals
-                if A4 > 0:
-                    res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                          np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
-                if A4 < 0.:
-                    res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
-                if A4 == 0. and A3 != 0.:
-                    if A3 > 0.:
-                        res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-                            np.sum(self.__trunc_normal_below__(real_roots_tsf[2]) * Asigma)
-                    else:  # A3 < 0
-                        res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                            np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
-                if A4 == 0. and A3 == 0.:
-                    if A2 < 0.:
-                        res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
-                    else:
-                        res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                            np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
-            elif nb_real_roots == 4:  # integrate over 3 intervals
-                if A4 > 0:
-                    res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma ) + \
-                          np.sum(self.__trunc_normal_below__(real_roots_tsf[3]) * Asigma ) + \
-                          np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
-                else: # A4 < 0
-                    res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-                          np.sum(self.__trunc_normal_interval__(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
-            return res
-
-        def integr_num(A_V):
-            # for testing purposes only, in prod. use the code above 
-            A = A_V[0:5]
-            V = A_V[5]  # integrated volatility, not variance
-            if call_put_ind == 1:  # call
-                A0 = A[0] - strike
-                A1, A2, A3, A4 = A[1:5]
-            else:  # put
-                A0 = strike - A[0]
-                A1, A2, A3, A4 = - A[1:5]
-
-            return scipy.integrate.quad(lambda x: np.max([A0 + A1 * V * x + A2 * V**2 * x**2 +
-                                                          A3 * V**3 * x**3 + A4 * V**4 * x**4, 0.]) / \
-                                                  np.sqrt(2. * np.pi) * np.exp(- x**2 / 2.), -np.inf, np.inf)[0]
-
         disc_fact = self.DF(self.option_tenors_list[asset_nb][opt_mat_idx])
         if self.debug_mode:  # debug, selects the numeric approach
-            return disc_fact * integr_num(A_V)
+            return disc_fact * self.__integr_num(Asigma, call_put_ind, strike)
         else:  # prod. mode
-            return disc_fact * integr_analy(self, real_roots_tsf, nb_real_roots, Asigma)
+            return disc_fact * self.__integr_analy(real_roots_tsf, nb_real_roots, Asigma)
 
     def model_vol_surface(self, asset_nb, C_vec, fwd_idx):
         """
@@ -1075,6 +1123,7 @@ class mrd_skew(object):
         """
         plotting the model vols as you click the button
         """
+
         root = tk.Tk()  # main canvas
         # plot market vols as initial
         delta_x = self.deltas_to_strikes(asset, fwd)
@@ -1159,14 +1208,14 @@ class mrd_skew(object):
         # penalization level is 10000
         #    imp_vol_vec_model - self.vol_surface_list[asset_nb][fwd_idx, :]
         return NLP( lambda C_vec: scipy.linalg.norm(self.model_vol_surface(asset_nb, C_vec, index_curr_tenor) -
-                                     self.vol_surface_list[asset_nb][index_curr_tenor, :])
+                                                    self.vol_surface_list[asset_nb][index_curr_tenor, :] )
                   , self.C_vec_list[asset_nb][index_curr_tenor, :]
                   , iprint=self.iprint)\
                   .solve(self.solver).xf
 
     def calibrate_skew_params(self, asset_nb):
         """
-        Calibrates params C.
+        Calibrates params C for asset number asset_nb
 
         :param asset_nb: the asset nb. to calibrate, such as 'wti'
         :type asset_nb: int
@@ -1240,18 +1289,40 @@ class mrd_skew(object):
 
     def _var_covar_mtx(self, asset_nb, fwd_idx, i, j, t_idx, sim_times):
         """
-        generate covar mtx, part of LN simulation, used in simulate_curves
-        """
-        if t_idx == 0:
-            t_prev = 0.
-        else:
-            t_prev = sim_times[t_idx - 1]
+        Generate covar mtx, part of LN simulation, used in simulate_curves.
 
+        :param asset_nb: asset number considered
+        :type asset_nb: int
+        """
+
+        t_prev = 0. if t_idx == 0 else sim_times[t_idx - 1]
         t_next = sim_times[t_idx]
-        if i==j:
+
+        if i == j:
             return self.V_fct_factor(asset_nb, i, fwd_idx, t_prev, t_next)
         else:
             return self._V_cross_factor(asset_nb, i, j, fwd_idx, fwd_idx, t_prev, t_next)
+
+    def __simulate_std_normal(self
+                             , nb_factors
+                             , corr_mtx
+                             , nb_simulations
+                             , cuda_ind = False ):
+        """
+        Simulates the standard normal random variables with specified correlation
+
+        """
+
+        if not cuda_ind:
+            return np.random.multivariate_normal( np.zeros(nb_factors)
+                                                , corr_mtx
+                                                , size = nb_simulations )
+        else:
+            simulated_rn_init = gpa.empty((nb_factors, nb_simulations), dtype = np.float32)
+            curand.gen_eff_dev_rns(simulated_rn_init.size, simulated_rn_init.ptr, curand.create_gen_simple())
+
+            return matmul( gpa.to_gpu(np.linalg.cholesky(corr_mtx).astype(np.float32))
+                         , simulated_rn_init)
 
     def simulate_curves( self
                        , nb_simulations
@@ -1259,21 +1330,8 @@ class mrd_skew(object):
                        , set_seed   = None
                        , cuda_ind   = False ):
         """
-        Simulate curves, depending on whether cuda or cpu is used.
-
-        """
-
-        simulate_curves_fct = self.simulate_curves_cuda if cuda_ind else self.simulate_curves_cpu
-        return simulate_curves_fct( nb_simulations
-                                  , tenor_list = tenor_list
-                                  , set_seed   = set_seed)
-
-    def simulate_curves_cpu( self
-                           , nb_simulations
-                           , tenor_list = None
-                           , set_seed   = None ):
-        """
-        Simulate just one forward curve on the cpu.
+        Simulate all curves for desired simulation times on either cpu or cuda.
+        Simulation times have to be given.
 
         Generates a 3-dimensional array
         0-th dimension: asset_nb
@@ -1287,7 +1345,10 @@ class mrd_skew(object):
         :type tenor_list: list[int]
         :param set_seed: seed, if needed, can be left to None
         :type set_seed: int
-
+        :param cuda_ind: indicator whether to use cuda or not.
+        :type cuda_ind: bool
+        :returns: simulates the paths in the variable simulated_curves
+        :rtype: None
         """
 
         np.random.seed(set_seed)
@@ -1295,362 +1356,127 @@ class mrd_skew(object):
         fact_sum = np.zeros(len(cums)+1, dtype=np.int)  # adding the first 0
         fact_sum[1:(len(cums)+1)] = cums
         
-        # preliminary work that can be done
-        if tenor_list is None:
-            fwd_c_len = [self.forward_curve_len[asset_nb] for asset_nb in range(self.nb_assets)]
-        else:
-            fwd_c_len = [len(tenor_for_asset) for tenor_for_asset in tenor_list]
+        # lengths of forward curves
+        fwd_c_len = [self.forward_curve_len[asset_nb] for asset_nb in range(self.nb_assets)] if tenor_list is None \
+            else [len(tenor_for_asset) for tenor_for_asset in tenor_list]
 
-        for asset_nb in range(self.nb_assets):  # looping over assets
-            self.simulated_curves[asset_nb] = np.empty((len(self.simulation_times),
-                                                        fwd_c_len[asset_nb], nb_simulations))
-            if tenor_list is None:
-                fwd_c_reshape = self.forward_curve_list[asset_nb].reshape(fwd_c_len[asset_nb], 1)
+        for asset_nb in range(self.nb_assets):
+            sim_curves_shape = (len(self.simulation_times), fwd_c_len[asset_nb], nb_simulations)
+
+            self.simulated_curves[asset_nb] = np.empty(sim_curves_shape) if not cuda_ind else \
+                                              gpa.zeros(sim_curves_shape, dtype=np.float32)
+
+            if not cuda_ind:
+                fwd_c_col = self.forward_curve_list[asset_nb].reshape(fwd_c_len[asset_nb], 1) if tenor_list is None else \
+                            self.forward_curve_list[asset_nb][tenor_list[asset_nb]].reshape(fwd_c_len[asset_nb], 1)
             else:
-                fwd_c_reshape = self.forward_curve_list[asset_nb][tenor_list[asset_nb]].reshape(fwd_c_len[asset_nb], 1)
+                fwd_c_col = self.forward_curve_list[asset_nb].astype(np.float32) if tenor_list is None else \
+                            self.forward_curve_list[asset_nb][tenor_list[asset_nb]].astype(np.float32)
 
             if self.model_skew_ln_ind == 'skew':
-                self.simulated_curves[asset_nb][0, :, :] = fwd_c_reshape
-            else:  # ln-model
-                # ln_model is simulated in logs, do the log now, convert the exp later
-                self.simulated_curves[asset_nb][0, :, :] = np.log(fwd_c_reshape)
+                if not cuda_ind:
+                    self.simulated_curves[asset_nb][0, :, :] = fwd_c_col
+                else:
+                    cuda_ops.vtpm_cols(fwd_c_col, self.simulated_curves[asset_nb][0, :, :], tm_ind='p')
 
-            self.forward_curve_ch[asset_nb] = False
-            self.simulated_curves_nb[asset_nb] = nb_simulations
+            else:  # ln-model is simulated in logs, do the log now, convert the exp later
+                if not cuda_ind:
+                    self.simulated_curves[asset_nb][0, :, :] = np.log(fwd_c_col)
+                else:
+                    cuda_ops.vtpm_cols(np.log(fwd_c_col), self.simulated_curves[asset_nb][0, :, :], tm_ind='p')
+
+            self.forward_curve_ch    [asset_nb] = False
+            self.simulated_curves_nb [asset_nb] = nb_simulations
             self.simulated_curves_ind[asset_nb] = True
 
-        X = [np.zeros((fwd_c_len[asset_nb], nb_simulations)) for asset_nb in range(self.nb_assets)]
-        X_prev = [np.empty((fwd_c_len[asset_nb], nb_simulations)) for asset_nb in range(self.nb_assets)]
+        X      = [np.zeros((fwd_c_len[asset_nb], nb_simulations)) if not cuda_ind else
+                  gpa.zeros((fwd_c_len[asset_nb], nb_simulations), dtype=np.float32)
+                  for asset_nb in range(self.nb_assets)]
+        X_prev = [np.empty ((fwd_c_len[asset_nb], nb_simulations)) if not cuda_ind else
+                  gpa.empty((fwd_c_len[asset_nb], nb_simulations), dtype=np.float32)
+                  for asset_nb in range(self.nb_assets)]
+        nb_factors = np.sum(self.nb_factors_list)
 
         # looping over time steps
         #   simulates ln process, basis for skew as well
         #   t_i ... idx of sim_time
         #   fact_sum ... factors of the individual assets
         for t_i in range(self.nb_time_steps):
-            nb_factors = np.sum(self.nb_factors_list)
-            simulated_rn = np.random.multivariate_normal(np.zeros(nb_factors),
-                                                         self.complete_corr_mat,
-                                                         size=nb_simulations)
+            simulated_rn = self.__simulate_std_normal( nb_factors
+                                                     , self.complete_corr_mat
+                                                     , nb_simulations
+                                                     , cuda_ind = cuda_ind )
+
             for asset_nb in range(self.nb_assets):
                 nb_factors_asset = self.nb_factors_list[asset_nb]
-                old_cov_mat = self.complete_corr_mat[fact_sum[asset_nb]:fact_sum[asset_nb+1],
-                    fact_sum[asset_nb]:fact_sum[asset_nb+1]]
-                sims_Z_unit = np.dot( np.linalg.inv(np.linalg.cholesky(old_cov_mat))
-                                    , simulated_rn[:, fact_sum[asset_nb]:fact_sum[asset_nb+1]].transpose())
+                old_cov_mat = self.complete_corr_mat[ fact_sum[asset_nb]:fact_sum[asset_nb+1]
+                                                    , fact_sum[asset_nb]:fact_sum[asset_nb+1] ]
                 tenor_used = range(self.forward_curve_len[asset_nb]) if tenor_list is None else tenor_list[asset_nb]
+                old_chol_inv = np.linalg.inv(np.linalg.cholesky(old_cov_mat))
+
+                sims_Z_unit = np.dot(old_chol_inv
+                                    , simulated_rn[:, fact_sum[asset_nb]:fact_sum[asset_nb + 1]].transpose()) if not cuda_ind else \
+                              cuda_ops.matmul(gpa.to_gpu( old_chol_inv.astype(np.float32))
+                                                        , simulated_rn[fact_sum[asset_nb]:fact_sum[asset_nb + 1], :])
 
                 for tenor_idx, tenor_nb in enumerate(tenor_used):
                     # prepare cov mtx
-                    new_cov_mat = np.array([[self._var_covar_mtx(asset_nb, tenor_nb, i, j, t_i, self.simulation_times)
-                                             for j in range(nb_factors_asset)]
-                                            for i in range(nb_factors_asset)])
-                    new_chol = np.linalg.cholesky(new_cov_mat)
-                    delta_X = np.sum(np.dot(new_chol, sims_Z_unit), axis=0)
+                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset_nb, tenor_nb, i, j, t_i, self.simulation_times)
+                                                             for j in range(nb_factors_asset)]
+                                                            for i in range(nb_factors_asset)]))
 
-                    # quadratic variation of delta_X
-                    t_prev_qv = 0. if t_i == 0 else self.simulation_times[t_i - 1]
-                    t_next_qv = self.simulation_times[t_i]
-                    qv = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2,
-                                                       tenor_nb, tenor_nb, t_prev_qv, t_next_qv)
-                                 for factor_1 in range(nb_factors_asset)]
+                    delta_X = np.sum(np.dot(cov_chol, sims_Z_unit), axis=0) if not cuda_ind else \
+                        cuda_ops.colsum_cuda_last(cuda_ops.matmul( gpa.to_gpu(cov_chol.astype(np.float32))
+                                                                 , sims_Z_unit))
+
+                    # quadratic variation of delta_X, also q_v = V_u
+                    qv = np.sum([[self._V_cross_factor( asset_nb
+                                                      , factor_1
+                                                      , factor_2
+                                                      , tenor_nb
+                                                      , tenor_nb
+                                                      , 0. if t_i == 0 else self.simulation_times[t_i - 1]
+                                                      , self.simulation_times[t_i])
+                                  for factor_1 in range(nb_factors_asset)]
                                  for factor_2 in range(nb_factors_asset)])
 
                     if self.model_skew_ln_ind is 'ln_ln':
-                        self.simulated_curves[asset_nb][t_i, tenor_idx, :] = self.simulated_curves[asset_nb][(t_i != 0) * (t_i-1), tenor_idx, :] + \
-                            delta_X - 0.5 * qv
+                        self.simulated_curves[asset_nb][t_i, tenor_idx, :] = self.simulated_curves[asset_nb][(t_i != 0) * (t_i-1), tenor_idx, :] + delta_X - 0.5 * qv
                     else:  # skew model, qv differently computed
                         X_prev[asset_nb][tenor_idx, :] = X[asset_nb][tenor_idx, :]
                         X[asset_nb][tenor_idx, :] = X_prev[asset_nb][tenor_idx, :] + delta_X
-
-                        t_prev = 0.
-                        t_next = self.simulation_times[t_i]
-                        # V used
-                        V_u = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2,
-                                                            tenor_nb, tenor_nb, t_prev, t_next)
-                                      for factor_1 in range(nb_factors_asset)]
-                                      for factor_2 in range(nb_factors_asset)])
-                        X_u = X[asset_nb][tenor_idx, :]  # delta_X # X used
-                        F_u = self.forward_curve_list[asset_nb][tenor_nb]
                         # F_res = F_u * (1. + X_u + 0.5 * c1 * (X_u**2 - V_u) +
                         #                c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
                         #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
                         # self.simulated_curves[asset_nb][t_i, tenor_idx, :] = F_res
-                        # TODO: CHECK CHECK CHECK - THIS LINE  BELOW MIGHT BE WRONG
-                        opd_avx.skew_fom(F_u
-                                        , X_u
-                                        , 0.5 * self.C_vec_list[asset_nb][tenor_nb, 0]
-                                        , V_u
-                                        , self.C_vec_list[asset_nb][tenor_nb, 1]/6.
-                                        , self.C_vec_list[asset_nb][tenor_nb, 2]/24.,
-                                         self.simulated_curves[asset_nb][t_i, tenor_idx, :],
-                                         nb_simulations)
+                        if not cuda_ind:
+                            opd_avx.skew_fom( self.forward_curve_list[asset_nb][tenor_nb]
+                                            , X[asset_nb][tenor_idx, :]  # delta_X
+                                            , 0.5 * self.C_vec_list[asset_nb][tenor_nb, 0]
+                                            , qv  # V_u, quadratic variation
+                                            , self.C_vec_list[asset_nb][tenor_nb, 1]/6.
+                                            , self.C_vec_list[asset_nb][tenor_nb, 2]/24.
+                                            , self.simulated_curves[asset_nb][t_i, tenor_idx, :]
+                                            , nb_simulations )
+                        else:
+                            F_skew_fct( np.float32(self.forward_curve_list[asset_nb][tenor_nb])
+                                      , np.float32(self.C_vec_list[asset_nb][tenor_nb, 0])
+                                      , np.float32(self.C_vec_list[asset_nb][tenor_nb, 1])
+                                      , np.float32(self.C_vec_list[asset_nb][tenor_nb, 2])
+                                      , np.float32(qv)
+                                      , X[asset_nb][tenor_idx, :]  # delta_X
+                                      , self.simulated_curves[asset_nb][t_i, tenor_idx, :]
+                                      , np.int32(nb_simulations)
+                                      , block = (1, 1, 1)
+                                      , grid  = (nb_simulations, 1))
 
-        if self.model_skew_ln_ind == 'ln_ln':
+        if self.model_skew_ln_ind == 'ln_ln':  # ln model is simulated in log terms, reversed back
             for asset_nb in range(self.nb_assets):
-                self.simulated_curves[asset_nb] = np.exp(self.simulated_curves[asset_nb])
+                self.simulated_curves[asset_nb] = (cuExp if cuda_ind else np.exp)(self.simulated_curves[asset_nb])
 
-    def simulate_curves_cuda( self
-                            , nb_simulations
-                            , tenor_list = None
-                            , set_seed   = None):
+    def simulate_1nb(self, nb_simulations, set_seed=None, cuda_ind = False):
         """
-        Simulate forward curves on cuda.
-
-        generates a 3-dimensional array
-         0-th dimension: asset_nb
-         1-st dimension: simulation times
-         2-nd dimension: curve
-         3-rd dimension: repeats of the curve
-        """
-
-        np.random.seed(set_seed)
-        cums = np.cumsum(self.nb_factors_list)  # borders between asset classes
-        fact_sum = np.zeros(len(cums)+1, dtype=np.int)  # adding the first 0
-        fact_sum[1:(len(cums)+1)] = cums
-
-        # preliminary work that can be done
-        fwd_c_len = [self.forward_curve_len[asset_nb] for asset_nb in range(self.nb_assets)] if tenor_list is None else \
-            [len(tenor_for_asset) for tenor_for_asset in tenor_list]
-
-        for asset_nb in range(self.nb_assets):  # looping over assets
-            self.simulated_curves[asset_nb] = gpa.zeros( (len(self.simulation_times)
-                                                       , fwd_c_len[asset_nb]
-                                                       , nb_simulations)
-                                                       , dtype = np.float32 )
-
-            if tenor_list is None:
-                fwd_c = self.forward_curve_list[asset_nb].astype(np.float32)
-            else:
-                fwd_c = self.forward_curve_list[asset_nb][tenor_list[asset_nb]].astype(np.float32)
-
-            if self.model_skew_ln_ind == 'skew':
-                cuda_ops.vtpm_cols(fwd_c, self.simulated_curves[asset_nb][0, :, :], tm_ind='p')
-                # for sim_idx in range(nb_simulations):
-                #    self.simulated_curves[asset_nb][0, :, sim_idx] = fwd_c
-            else:  # ln-model
-                # ln_model is simulated in logs, do the log now, convert the exp later
-                cuda_ops.vtpm_cols(np.log(fwd_c), self.simulated_curves[asset_nb][0, :, :], tm_ind='p')
-
-            self.forward_curve_ch[asset_nb] = False
-            self.simulated_curves_nb[asset_nb] = nb_simulations
-            self.simulated_curves_ind[asset_nb] = True
-
-        X = [gpa.zeros((fwd_c_len[asset_nb], nb_simulations), dtype=np.float32)
-             for asset_nb in range(self.nb_assets)]
-        X_prev = [gpa.empty((fwd_c_len[asset_nb], nb_simulations), dtype=np.float32)
-                  for asset_nb in range(self.nb_assets)]
-
-        nb_factors = np.sum(self.nb_factors_list)
-
-        simulated_rn = gpa.empty((nb_factors, nb_simulations), dtype=np.float32)
-        compl_corr_chol_gpu = gpa.to_gpu(np.linalg.cholesky(self.complete_corr_mat).astype(np.float32))
-        g1 = curand.create_gen_simple()
-
-        # looping over time steps
-        #   simulates ln process, basis for skew as well
-        #   t_i ... idx of sim_time
-        #   fact_sum ... factors of the individual assets
-        for t_i in range(self.nb_time_steps):
-            simulated_rn_init = gpa.empty((nb_factors, nb_simulations), dtype=np.float32)  # HAS TO BE HERE!!!
-            curand.gen_eff_dev_rns(simulated_rn_init.size, np.longlong(simulated_rn_init.ptr), g1)
-            cuda_ops.matmul(compl_corr_chol_gpu, simulated_rn_init, simulated_rn)
-
-            for asset_nb in range(self.nb_assets):
-                nb_factors_asset = self.nb_factors_list[asset_nb]
-                old_cov_mat = self.complete_corr_mat[fact_sum[asset_nb]:fact_sum[asset_nb+1],
-                                                     fact_sum[asset_nb]:fact_sum[asset_nb+1]]
-                old_chol = np.linalg.cholesky(old_cov_mat)
-                old_chol_inv = np.linalg.inv(old_chol)
-                old_chol_inv_gpu = gpa.to_gpu(old_chol_inv.astype(np.float32))
-
-                # extra matrices for using later
-                sims_Z_unit     = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations), dtype = np.float32)
-                sims_Z_unit_mul = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations), dtype = np.float32)
-                tenor_used = range(self.forward_curve_len[asset_nb]) if tenor_list is None else tenor_list[asset_nb]
-
-                for tenor_idx, tenor_nb in enumerate(tenor_used):
-                    # prepare cov mtx
-                    new_cov_mat = np.array([[self._var_covar_mtx(asset_nb, tenor_nb, i, j, t_i, self.simulation_times)
-                                             for j in range(nb_factors_asset)]
-                                            for i in range(nb_factors_asset)])
-                    new_chol = np.linalg.cholesky(new_cov_mat)
-                    new_chol_gpu = gpa.to_gpu(new_chol.astype(np.float32))
-
-                    sims_Z = simulated_rn[fact_sum[asset_nb]:fact_sum[asset_nb+1], :]
-                    cuda_ops.matmul(old_chol_inv_gpu, sims_Z, sims_Z_unit)
-                    cuda_ops.matmul(new_chol_gpu, sims_Z_unit, sims_Z_unit_mul)
-                    delta_X = cuda_ops.colsum_cuda_last(sims_Z_unit_mul)
-
-                    # quadratic variation of delta_X
-                    t_prev_qv = 0. if t_i == 0 else self.simulation_times[t_i - 1]
-                    t_next_qv = self.simulation_times[t_i]
-                    qv = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2,
-                                                       tenor_nb, tenor_nb, t_prev_qv, t_next_qv)
-                                 for factor_1 in range(nb_factors_asset)]
-                                 for factor_2 in range(nb_factors_asset)])
-                    if self.model_skew_ln_ind == 'ln_ln':
-                        sim_curr = self.simulated_curves[asset_nb][(t_i != 0) * (t_i-1), tenor_idx, :] + \
-                            delta_X - 0.5 * qv
-                        self.simulated_curves[asset_nb][t_i, tenor_idx, :] = sim_curr
-                    else:  # skew model, qv differently computed
-                        X_prev[asset_nb][tenor_idx, :] = X[asset_nb][tenor_idx, :]
-                        X[asset_nb][tenor_idx, :] = X_prev[asset_nb][tenor_idx, :] + delta_X
-                        c1 = self.C_vec_list[asset_nb][tenor_nb, 0]
-                        c2 = self.C_vec_list[asset_nb][tenor_nb, 1]
-                        c3 = self.C_vec_list[asset_nb][tenor_nb, 2]
-                        t_prev = 0.
-                        t_next = self.simulation_times[t_i]
-                        # V used
-                        V_u = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2,
-                                                            tenor_nb, tenor_nb, t_prev, t_next)
-                                      for factor_1 in range(nb_factors_asset)]
-                                      for factor_2 in range(nb_factors_asset)])
-                        X_u = X[asset_nb][tenor_idx, :]  # delta_X # X used
-                        F_u = self.forward_curve_list[asset_nb][tenor_nb]
-                        F_skew_fct(np.float32(F_u), np.float32(c1), np.float32(c2),
-                                   np.float32(c3), np.float32(V_u), X_u,
-                                   self.simulated_curves[asset_nb][t_i, tenor_idx, :],
-                                   np.int32(nb_simulations),
-                                   block=(1, 1, 1), grid=(nb_simulations, 1))
-                        # F_res = F_u * (1. + X_u + 0.5 * c1 * (X_u**2 - V_u) +
-                        #               c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
-                        #               c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
-                        # self.simulated_curves[asset_nb][t_i, tenor_idx, :] = F_res.astype(np.float32)
-
-        if self.model_skew_ln_ind == 'ln_ln':
-            for asset_nb in range(self.nb_assets):
-                self.simulated_curves[asset_nb] = pycuda.cumath.exp(self.simulated_curves[asset_nb])
-
-    def simulate_curves_cuda_double(self, nb_simulations,
-                                    tenor_list=None,
-                                    set_seed=None):
-        """
-        simulate forward curves on cuda
-
-        generates a 3-dimensional array
-         0-th dimension: asset_nb
-         1-st dimension: simulation times
-         2-nd dimension: curve
-         3-rd dimension: repeats of the curve
-        """
-
-        np.random.seed(set_seed)
-        cums = np.cumsum(self.nb_factors_list)  # borders between asset classes
-        fact_sum = np.zeros(len(cums)+1, dtype=np.int)  # adding the first 0
-        fact_sum[1:(len(cums)+1)] = cums
-
-        # preliminary work that can be done
-        if tenor_list is None:
-            fwd_c_len = [self.forward_curve_len[asset_nb] for asset_nb in range(self.nb_assets)]
-        else:
-            fwd_c_len = [len(tenor_for_asset) for tenor_for_asset in tenor_list]
-
-        for asset_nb in range(self.nb_assets):  # looping over assets
-            self.simulated_curves[asset_nb] = gpa.zeros((len(self.simulation_times),
-                                                         fwd_c_len[asset_nb],
-                                                         nb_simulations),
-                                                        dtype=np.double)
-
-            if tenor_list is None:
-                fwd_c = self.forward_curve_list[asset_nb]
-            else:
-                fwd_c = self.forward_curve_list[asset_nb][tenor_list[asset_nb]]
-
-            if self.model_skew_ln_ind == 'skew':
-                cuda_ops.vtpm_cols(fwd_c, self.simulated_curves[asset_nb][0, :, :], tm_ind='p')
-                # for sim_idx in range(nb_simulations):
-                #    self.simulated_curves[asset_nb][0, :, sim_idx] = fwd_c
-            else:  # ln-model
-                # ln_model is simulated in logs, do the log now, convert the exp later
-                cuda_ops.vtpm_cols(np.log(fwd_c), self.simulated_curves[asset_nb][0, :, :], tm_ind='p')
-
-            self.forward_curve_ch[asset_nb] = False
-            self.simulated_curves_nb[asset_nb] = nb_simulations
-            self.simulated_curves_ind[asset_nb] = True
-
-        X = [gpa.zeros((fwd_c_len[asset_nb], nb_simulations), dtype=np.double)
-             for asset_nb in range(self.nb_assets)]
-        X_prev = [gpa.empty((fwd_c_len[asset_nb], nb_simulations), dtype=np.double)
-                  for asset_nb in range(self.nb_assets)]
-
-        nb_factors = np.sum(self.nb_factors_list)
-        simulated_rn = gpa.empty((nb_factors, nb_simulations), dtype=np.double)
-        compl_corr_chol_gpu = gpa.to_gpu(np.linalg.cholesky(self.complete_corr_mat))
-        g1 = curand.create_gen_simple()
-
-        # looping over time steps
-        #   simulates ln process, basis for skew as well
-        #   t_i ... idx of sim_time
-        #   fact_sum ... factors of the individual assets
-        for t_i in range(self.nb_time_steps):
-            simulated_rn_init = gpa.empty((nb_factors, nb_simulations), dtype=np.double)
-            curand.gen_eff_dev_rns_double(simulated_rn_init.size, np.longlong(simulated_rn_init.ptr), g1)
-            cuda_ops.matmul(compl_corr_chol_gpu, simulated_rn_init, simulated_rn)
-
-            for asset_nb in range(self.nb_assets):
-                nb_factors_asset = self.nb_factors_list[asset_nb]
-                old_cov_mat = self.complete_corr_mat[fact_sum[asset_nb]:fact_sum[asset_nb+1],
-                                                     fact_sum[asset_nb]:fact_sum[asset_nb+1]]
-
-                old_chol_inv_gpu = gpa.to_gpu(np.linalg.inv(np.linalg.cholesky(old_cov_mat)))
-
-                # extra matrices for using later
-                sims_Z_unit = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations), dtype=np.double)
-                sims_Z_unit_mul = gpa.empty((fact_sum[asset_nb+1] - fact_sum[asset_nb], nb_simulations), dtype=np.double)
-
-                tenor_used = range(self.forward_curve_len[asset_nb]) if tenor_list is None else tenor_list[asset_nb]
-
-                for tenor_idx, tenor_nb in enumerate(tenor_used):
-                    # prepare cov mtx
-                    new_cov_mat = np.array([[self._var_covar_mtx(asset_nb, tenor_nb, i, j, t_i, self.simulation_times)
-                                             for j in range(nb_factors_asset)]
-                                            for i in range(nb_factors_asset)])
-                    new_chol = np.linalg.cholesky(new_cov_mat)
-                    new_chol_gpu = gpa.to_gpu(new_chol)
-
-                    sims_Z = simulated_rn[fact_sum[asset_nb]:fact_sum[asset_nb+1], :]
-                    cuda_ops.matmul(old_chol_inv_gpu, sims_Z, sims_Z_unit)
-                    cuda_ops.matmul(new_chol_gpu, sims_Z_unit, sims_Z_unit_mul)
-                    delta_X = cuda_ops.colsum_cuda_last(sims_Z_unit_mul)
-
-                    # quadratic variation of delta_X
-                    t_prev_qv = 0. if t_i == 0 else self.simulation_times[t_i - 1]
-                    t_next_qv = self.simulation_times[t_i]
-                    # quadratic variation
-                    qv = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2,
-                                                       tenor_nb, tenor_nb, t_prev_qv, t_next_qv)
-                                 for factor_1 in range(nb_factors_asset)]
-                                 for factor_2 in range(nb_factors_asset)])
-                    if self.model_skew_ln_ind == 'ln_ln':
-                        self.simulated_curves[asset_nb][t_i, tenor_idx, :] = self.simulated_curves[asset_nb][(t_i != 0) * (t_i-1), tenor_idx, :] + \
-                            delta_X - 0.5 * qv
-                    else:  # skew model, qv differently computed
-                        X_prev[asset_nb][tenor_idx, :] = X[asset_nb][tenor_idx, :]
-                        X[asset_nb][tenor_idx, :] = X_prev[asset_nb][tenor_idx, :] + delta_X
-                        c1 = self.C_vec_list[asset_nb][tenor_nb, 0]
-                        c2 = self.C_vec_list[asset_nb][tenor_nb, 1]
-                        c3 = self.C_vec_list[asset_nb][tenor_nb, 2]
-                        t_prev = 0.
-                        t_next = self.simulation_times[t_i]
-                        # V used
-                        V_u = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2,
-                                                            tenor_nb, tenor_nb, t_prev, t_next)
-                                      for factor_1 in range(nb_factors_asset)]
-                                      for factor_2 in range(nb_factors_asset)])
-                        X_u = X[asset_nb][tenor_idx, :]  # delta_X # X used
-                        F_u = self.forward_curve_list[asset_nb][tenor_nb]
-                        F_res = F_u * (1. + X_u + 0.5 * c1 * (X_u**2 - V_u) +
-                                       c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
-                                       c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
-                        self.simulated_curves[asset_nb][t_i, tenor_idx, :] = F_res
-
-        if self.model_skew_ln_ind == 'ln_ln':
-            for asset_nb in range(self.nb_assets):
-                self.simulated_curves[asset_nb] = pycuda.cumath.exp(self.simulated_curves[asset_nb])
-
-    def simulate_1nb(self, nb_simulations, set_seed=None):
-        """
-        simulate the 1NB (rolling) contract
+        Simulate the 1NB (rolling) contract
 
         generates a 3-dimensional array:
           0-th dimension: asset_nb
@@ -1660,9 +1486,9 @@ class mrd_skew(object):
 
         if self.simulation_times[-1] > self.forward_tenors_list[0][-1]:
             logger.debug('Last simulation time is larger than the largest forward tenor.')
-            self.simulated_curves = [] 
+            self.simulated_curves = None
         else:
-            self.simulate_curves(nb_simulations, set_seed)  # simulate curves
+            self.simulate_curves(nb_simulations, set_seed, cuda_ind = cuda_ind)
 
             self.simulated_curves = self._empty_list_fct(self.nb_assets)  # removing the prev. sim. curves
             for asset_nb in range(self.nb_assets):
@@ -1673,9 +1499,14 @@ class mrd_skew(object):
 
     def gen_days_number(self, asset_nb):
         """
-        generates a dict of number of days per month for every tenor
-        output:
-           self.nb_days_month[m] for m being the m-th tenor in the model
+        Generates a dict of number of days per month for every tenor, saves it to
+           self.nb_days_month and returns the same thing.
+
+        :param asset_nb: which asset
+        :type asset_nb: int
+        :returns: a dictionary where the key is the number of days for that month in the model,
+                  i.e. if m = 0 that refers to the number of days for the first month generated
+        :rtype: dict[int] = int
         """
 
         if not self.days_nb_const_ind:  # if not yet constructed
@@ -1693,10 +1524,8 @@ class mrd_skew(object):
                 else:
                     curr_month_m += 1
             self.days_nb_const_ind = True  # indicator about the days number
-        return self.nb_days_month
 
-    def update_cash_corr(self, cash_corr_adj):
-        self.cash_corr = cash_corr_adj
+        return self.nb_days_month
 
     def gen_spot_rn( self
                    , nb_simulations
@@ -1711,7 +1540,10 @@ class mrd_skew(object):
         else:
             self.gen_spot_rn_cpu(nb_simulations, nb_days=nb_days)
 
-    def gen_spot_rn_cpu(self, nb_simulations, nb_days=65):
+    def gen_spot_rn_cpu( self
+                       , nb_simulations
+                       , nb_days  = 65
+                       , cuda_ind = False):
         """
         Returns the random walk of nb_simulations and 31 days
         nb_days = 65  # suff. large
@@ -1754,10 +1586,8 @@ class mrd_skew(object):
             for day_idx in range(nb_days):
                 spot_rn_init = gpa.empty((self.nb_assets, nb_simulations), dtype=np.float32)
                 cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(self.cash_corr).astype(np.float32))
-                self.spot_rn[day_idx] = gpa.empty((nb_simulations, self.nb_assets), dtype=np.float32)
-                # r1.fill_normal(spot_rn_init)  # fill spot_rn_init w/ random numbers
                 curand.gen_eff_dev_rns(spot_rn_init.size, np.longlong(spot_rn_init.ptr), g1)
-                cuda_ops.matmul(cash_corr_gpu, spot_rn_init, self.spot_rn[day_idx])
+                self.spot_rn[day_idx] = cuda_ops.matmul(cash_corr_gpu, spot_rn_init)
 
             self.spot_rn_a = {}
             for asset_nb in range(self.nb_assets):
@@ -1771,17 +1601,16 @@ class mrd_skew(object):
                 for day_idx in range(nb_days):
                     spot_rn_init = gpa.empty((self.nb_assets, nb_simulations), dtype=np.float32)
                     cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(self.cash_corr).astype(np.float32))
-                    self.spot_rn[day_idx] = gpa.empty((self.nb_assets, nb_simulations), dtype=np.float32)
-                    # r1.fill_normal(spot_rn_init)
                     curand.gen_eff_dev_rns(spot_rn_init.size, np.longlong(spot_rn_init.ptr), g1)
-                    cuda_ops.matmul(cash_corr_gpu, spot_rn_init, self.spot_rn[day_idx])
+                    self.spot_rn[day_idx] = cuda_ops.matmul(cash_corr_gpu, spot_rn_init)
+
                     self.spot_rn_a = {}
                     for asset_nb in range(self.nb_assets):
                         self.spot_rn_a[asset_nb] = gpa.empty((nb_simulations, nb_days), dtype=np.float32)
                         for day_idx in range(nb_days):
                             self.spot_rn_a[asset_nb][:, day_idx] = self.spot_rn[day_idx][:, asset_nb]
 
-    def simulate_spot(self, asset_nb, nb_simulations, set_seed=None):
+    def simulate_spot(self, asset_nb, nb_simulations):
         """
         Simulate daily spot using for all tenors the cash_vols for asset asset_nb
 
@@ -1793,7 +1622,7 @@ class mrd_skew(object):
         else:
             saving_done = False
 
-        self.update_sim_times(self.option_tenors_list[asset_nb])
+        self.simulation_times = self.option_tenors_list[asset_nb]
         self.gen_days_number(asset_nb)
         self.gen_spot_rn(nb_simulations)
         spot_sims = {}
@@ -1859,15 +1688,6 @@ class mrd_skew(object):
 
         sim_fom = np.empty((fwd_c_len, nb_simulations))
 
-        def _var_covar_mtx_simple(self, asset_nb, fwd_idx, i, j, t_idx, sim_times):
-            """
-            Generates covar mtx from 0 to sim_times[t_idx], part of LN simulation
-
-            """
-
-            return self.V_fct_factor(asset_nb, i, fwd_idx, 0., sim_times[t_idx]) if i == j else \
-                self._V_cross_factor(asset_nb, i, j, fwd_idx, fwd_idx, 0., sim_times[t_idx])
-
         # looping over tenors
         #    t_i ... idx of sim_time (also tenor)
         #    fact_sum ... factors of the individual assets
@@ -1879,7 +1699,7 @@ class mrd_skew(object):
             simulated_rn = np.random.multivariate_normal(np.zeros(nb_factors), self.complete_corr_mat,
                                                          size=nb_simulations)
             nb_factors_asset = self.nb_factors_list[asset_nb]
-            new_cov_mat = np.array([[_var_covar_mtx_simple(self, asset_nb, tenor_nb, i, j, t_i, sim_times)
+            new_cov_mat = np.array([[self._var_covar_mtx(self, asset_nb, tenor_nb, i, j, t_i, sim_times)
                                     for j in range(nb_factors_asset)]
                                     for i in range(nb_factors_asset)])
 
@@ -1910,9 +1730,11 @@ class mrd_skew(object):
 
         return sim_fom
 
-    def simulate_curves_fom_cuda(self, asset_nb, nb_simulations,
-                                 tenors_list=None,
-                                 set_seed=None):
+    def simulate_curves_fom_cuda( self
+                                , asset_nb
+                                , nb_simulations
+                                , tenors_list = None
+                                , set_seed    = None):
         """
         simulate first of month curves
         generates a list of 3 dim arrays:
@@ -1926,15 +1748,6 @@ class mrd_skew(object):
         fact_sum[1:(len(cums)+1)] = cums
         sim_times = self.option_tenors_list[asset_nb]
         sim_fom = gpa.empty((self.forward_curve_len[asset_nb], nb_simulations), dtype=np.float32)
-
-        def _var_covar_mtx_simple(self, asset_nb, fwd_idx, i, j, t_idx, sim_times):
-            """
-            Generates covar mtx from 0 to sim_times[t_idx], part of LN simulation
-
-            """
-
-            return self.V_fct_factor(asset_nb, i, fwd_idx, 0., sim_times[t_idx]) if i == j else \
-                self._V_cross_factor(asset_nb, i, j, fwd_idx, fwd_idx, 0., sim_times[t_idx])
 
         g1 = curand.create_gen_simple()
         # looping over tenors
@@ -1954,7 +1767,7 @@ class mrd_skew(object):
             # simulated_rn = cuda_ops.bdcast(compl_corr_chol_gpu, simulated_rn_init).transpose()
             simulated_rn = simulated_rn.transpose()  # this is done very fast 
             nb_factors_asset = self.nb_factors_list[asset_nb]
-            new_cov_mat = np.array([[_var_covar_mtx_simple(self, asset_nb, tenor_nb, i, j, t_i, sim_times)
+            new_cov_mat = np.array([[self._var_covar_mtx_simple(asset_nb, tenor_nb, i, j, t_i, sim_times)
                                     for j in range(nb_factors_asset)]
                                         for i in range(nb_factors_asset)])
             new_chol = np.linalg.cholesky(new_cov_mat)
@@ -2163,15 +1976,14 @@ class mrd_skew(object):
 
     def skew_params(self, asset_nb, C_vec, opt_mat_idx):
         """
-        Given the input coefficients and value of the factor X, returns the skewed forward prices.
+        Given the C parameters, returns the parameters for the option value computation using the polynomial approach.
 
         :param asset_nb: number of the asset
-        TODO: The assets should be identified by str, not numbers.
         :type asset_nb: int
         :param C_vec: vector of calibrated skew parameters.
         :type C_vec: np.array
-
-
+        :returns: a vector of A0, A1, A2, A3, A4, V
+        :rtype: np.array
         """
 
         cc1 = C_vec[0]  # coefficient at x^2
@@ -2193,7 +2005,8 @@ class mrd_skew(object):
         """
         skew transformation of the entire curve for given X
         """
-        [A0, A1, A2, A3, A4, V] = self.skew_params(asset_nb, C_vec, opt_mat_idx)
+        A0, A1, A2, A3, A4, V = self.skew_params(asset_nb, C_vec, opt_mat_idx)
+
         return self.forward_curve_list[asset_nb] * (A0 + A1*X + A2*X**2 + A3*X**3 + A4*X**4)
 
     def skew_tsf_internal(self, asset_nb, X, opt_mat_idx):
@@ -2203,11 +2016,10 @@ class mrd_skew(object):
         """
         inter-curve correlation calib.
         """
+
         for asset_1 in range(self.nb_assets):
             for asset_2 in range((asset_1+1), self.nb_assets):
                 self.black_corr_intra_curves_calib(asset_1,asset_2)
-
-
 
 
 def compute_partial_deltas ( mm
