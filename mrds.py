@@ -503,9 +503,11 @@ class MrdSkew(object):
         """
         computes model implied vol for ATM for asset_nb and fwd_nb
         """
+
         if self.vol_surface_name_list[asset_nb] is 'JWSS7':
             return self.vol_obj_list[asset_nb].sigma_0
-        elif self.vol_surface_name_list[asset_nb] is 'ATM':
+
+        if self.vol_surface_name_list[asset_nb] is 'ATM':
             return self.atm_vol_list[asset_nb][fwd_nb]
 
     def read_discount_curve_db(self, date_):
@@ -582,7 +584,7 @@ class MrdSkew(object):
         utm_diag_ones = np.diag(np.diag(utm))
         utm = utm - utm_diag_ones
         utm[utm==1] = theta_vector
-        utm = utm + utm.transpose() + utm_diag_ones
+        utm += utm.transpose() + utm_diag_ones
 
         return utm
 
@@ -842,10 +844,13 @@ class MrdSkew(object):
                                                    - emp_corr_matrix)** 2))
                                    , 1)
 
-    def black_corr_intra_curves(self, model_corr_mtx, curve_1, curve_2, tenor_1, tenor_2):
+    def black_corr_intra_curves(self, model_corr_mtx, curve_1 : int, curve_2 : int, tenor_1 :int, tenor_2 :int) -> np.double:
         """
-        curve_1, curve_2 are different curves indices
-        tenor_1 and tenor_2 are tenor indices
+
+        :param curve_1: index of curve 1
+        :param curve_2: index of curve 2
+        :param tenor_1: index of the first tenor on curve 1
+        :param tenor_2: index of a tenor on curve 2
         """
 
         t_1 = self.option_tenors_list[curve_1][tenor_1]
@@ -853,28 +858,29 @@ class MrdSkew(object):
         opt_mat = t_1 * (t_1 <= t_2) + t_2 * (t_2 < t_1)  # opt_mat until the smallest one
         kv1 = self.kappa_vec_list[curve_1]
         kv2 = self.kappa_vec_list[curve_2]
-        sv1 = self.sigma_vec_list[curve_1]
-        sv2 = self.sigma_vec_list[curve_2]
-        ft1 = self.forward_tenors_list[curve_1]
-        ft2 = self.forward_tenors_list[curve_2]
-
-        a = np.array([model_corr_mtx[factor_nb_1, factor_nb_2] *
-                    sv1[factor_nb_1] * sv2[factor_nb_2] *
-                    self.beta_T_list[curve_1][tenor_1] * self.beta_T_list[curve_2][tenor_2] *
-                    np.exp(- kv1[factor_nb_1] * ft1[tenor_1]
-                           - kv2[factor_nb_2] * ft2[tenor_2]) *
-                    (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1) /
-                    (kv1[factor_nb_1] + kv2[factor_nb_2] )
-                    for factor_nb_1 in range(self.nb_factors_list[curve_1])
-                    for factor_nb_2 in range(self.nb_factors_list[curve_2])])
 
         bv1 = np.sqrt(self.V_fct_current(curve_1, tenor_1, opt_mat))  # square of integrated variance
         bv2 = np.sqrt(self.V_fct_current(curve_2, tenor_2, opt_mat))
-        return np.sum(a) / (bv1 * bv2)
 
-    def black_corr_intra_curves_factors(self, model_corr_mtx, curve_1, curve_2,
-                                        tenor_1, tenor_2,
-                                        factor_nb_1, factor_nb_2, opt_mat):
+        return sum([model_corr_mtx[factor_nb_1, factor_nb_2] *
+                                self.sigma_vec_list[curve_1][factor_nb_1] * self.sigma_vec_list[curve_2][factor_nb_2] *
+                    self.beta_T_list[curve_1][tenor_1] * self.beta_T_list[curve_2][tenor_2] *
+                    np.exp(- kv1[factor_nb_1] * self.forward_tenors_list[curve_1][tenor_1]
+                           - kv2[factor_nb_2] * self.forward_tenors_list[curve_2][tenor_2]) *
+                    (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1) /
+                    (kv1[factor_nb_1] + kv2[factor_nb_2] )
+                    for factor_nb_1 in range(self.nb_factors_list[curve_1])
+                    for factor_nb_2 in range(self.nb_factors_list[curve_2])]) / (bv1 * bv2)
+
+    def black_corr_intra_curves_factors( self
+                                       , model_corr_mtx
+                                       , curve_1     : int
+                                       , curve_2     : int
+                                       , tenor_1     : int
+                                       , tenor_2     : int
+                                       , factor_nb_1 : int
+                                       , factor_nb_2 : int
+                                       , opt_mat ):
         """
         same as function above (black_corr_intra_curves), but the factors are exposed
         curve_1, curve_2 are different curves indices
@@ -890,16 +896,15 @@ class MrdSkew(object):
         sv2 = self.sigma_vec_list[curve_2]
         ft1 = self.forward_tenors_list[curve_1]
         ft2 = self.forward_tenors_list[curve_2]
-        tmp1 = model_corr_mtx[factor_nb_1, factor_nb_2] * \
+        bv1 = np.sqrt(self.V_fct_factor(curve_1, factor_nb_1, tenor_1, 0., opt_mat))
+        bv2 = np.sqrt(self.V_fct_factor(curve_2, factor_nb_2, tenor_2, 0., opt_mat))
+
+        return model_corr_mtx[factor_nb_1, factor_nb_2] * \
                sv1[factor_nb_1] * sv2[factor_nb_2] * \
                self.beta_T_list[curve_1][tenor_1] * self.beta_T_list[curve_2][tenor_2] * \
                np.exp(- kv1[factor_nb_1] * ft1[tenor_1] - kv2[factor_nb_2] * ft2[tenor_2]) * \
                (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1.) / \
-               (kv1[factor_nb_1] + kv2[factor_nb_2])
-        bv1 = np.sqrt(self.V_fct_factor(curve_1, factor_nb_1, tenor_1, 0., opt_mat))
-        bv2 = np.sqrt(self.V_fct_factor(curve_2, factor_nb_2, tenor_2, 0., opt_mat))
-
-        return tmp1 / (bv1 * bv2)
+               (kv1[factor_nb_1] + kv2[factor_nb_2]) / (bv1 * bv2)
 
     def black_corr_intra_curves_calib(self, curve_1, curve_2):
         """
@@ -1134,9 +1139,29 @@ class MrdSkew(object):
                                                     , self.black_vol_inverse_tol)
                          for opt_price, strike, cp in zip(price_vec_model, strikes, cp_ind)])
 
+    def __refresh_model_vols( self
+                          , asset
+                          , fwd
+                          , c
+                          , a
+                          , canvas
+                          , li1
+                          , li2):
+
+        mv1 = self.vol_surface_list[asset][fwd]
+        bv = self.model_vol_surface(asset, c, fwd)  # model vols
+        str1 = self.deltas_to_strikes(asset, fwd)
+        # fastest way to draw data
+        li1.set_xdata(str1)
+        li1.set_ydata(bv)
+        li2.set_xdata(str1)
+        li2.set_ydata(mv1)
+        canvas.draw()
+
     def disp_model_vols(self, asset, fwd):
         """
-        plotting the model vols as you click the button
+        Plotting the model vols as you click the button.
+
         """
 
         root = tk.Tk()  # main canvas
@@ -1151,19 +1176,13 @@ class MrdSkew(object):
         dataPlot_canvas = FigureCanvasTkAgg(f, master=root)
         dataPlot_canvas.get_tk_widget().grid(row=0, column=0, rowspan=2)
 
-        def refresh_model_vols(self, asset, fwd, c, a, canvas, li1, li2):
-            mv1 = self.vol_surface_list[asset][fwd]
-            bv = self.model_vol_surface(asset, c, fwd)  # model vols
-            str1 = self.deltas_to_strikes(asset, fwd)
-            # fastest way to draw data
-            li1.set_xdata(str1)
-            li1.set_ydata(bv)
-            li2.set_xdata(str1)
-            li2.set_ydata(mv1)
-            canvas.draw()
-
-        fct_update = lambda cc: refresh_model_vols(self, asset, fwd, [c1.get(), c2.get(), c3.get()],
-                                                   a, dataPlot_canvas, line1, line2)
+        fct_update = lambda cc: self.__refresh_model_vols( asset
+                                                         , fwd
+                                                         , [c1.get(), c2.get(), c3.get()]
+                                                         , a
+                                                         , dataPlot_canvas
+                                                         , line1
+                                                         , line2 )
 
         c1 = tk.Scale(root, from_=-5., to=5., resolution=0.1, label='c0', command=fct_update)
         c2 = tk.Scale(root, from_=-25., to=25., resolution=0.2, label='c1', command=fct_update)

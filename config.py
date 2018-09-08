@@ -4,12 +4,8 @@ from subprocess import Popen, PIPE
 
 # cuda check
 p = Popen(['prime-select', 'query'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
-output, err = p.communicate()
-# rc = p.returncode
-if output == 'nvidia\n':
-    CUDA_PRESENT = True  # True
-else:
-    CUDA_PRESENT = False
+output, _ = p.communicate()
+CUDA_PRESENT = True if output == b'nvidia\n' else False
 
 # adding various paths
 prod_dir = '/home/brumen/work/mrds/'
