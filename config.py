@@ -11,15 +11,10 @@ CUDA_PRESENT = True if output == b'nvidia\n' else False
 prod_dir = '/home/brumen/work/mrds/'
 work_dir = prod_dir
 sys.path.append(work_dir)  # basic path
-subdirs = ['cubl', 'cublas', 'tbbmc', 'tests', 'cva', 'cuda',
-           'opd', 'tolling', 'quartic', 'tensor', 'vols', 'weather',
-           'pricers', 'spikes', 'ao']
-for sd in subdirs:
-    sys.path.append(work_dir + sd)
 
 # cython params
-cython_include_dirs = []  # '/usr/local/lib/python2.7/dist-packages/numpy/core/include/']
-cython_extra_link_args = []  # '-L/usr/local/lib/python2.7/dist-packages/numpy/core/lib']
+cython_include_dirs = []
+cython_extra_link_args = []
 
 if CUDA_PRESENT:  # cuda modules
     import pycuda.autoinit
