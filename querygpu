@@ -1,0 +1,29 @@
+#! /usr/bin/env python
+import subprocess, time
+
+
+class GPUCommunicationException(Exception):
+    pass
+
+
+def query_gpu():
+    """
+    Query the working of the gpu.
+
+    """
+
+    while 1:
+        try:
+            out, err = subprocess.Popen(["/usr/bin/nvidia-smi", "-q"], stdout=subprocess.PIPE).communicate()
+        except:
+            raise GPUCommunicationException("Could not connect to the nvidia card.")
+
+        out_lines = out.split('\n')
+
+        print('\n'.join([ out_lines[62], out_lines[63], out_lines[64], out_lines[65]
+                        , out_lines[71], out_lines[72], out_lines[73], out_lines[74], out_lines[75]]))
+        print("\033[12A")
+        time.sleep(1)
+
+
+query_gpu()
