@@ -1,11 +1,7 @@
 # ONLY USED DATE POSSIBLE: 20150401
-import numpy as np
-import scipy.interpolate
-import matplotlib.pyplot as plt
-import datetime
-import datetime as dt
+import datetime, numpy as np, scipy.interpolate, matplotlib.pyplot as plt, calendar as cal
+
 import ds_data
-import calendar as cal
 
 # forward codes
 fwd_mth_codes = ['f', 'g', 'h',
@@ -51,9 +47,9 @@ def convert_str_datetime(date_):
     """
 
     def conv_local(d_elt):
-        return dt.datetime(int(d_elt[0:4]),
-                           int(d_elt[4:6]),
-                           int(d_elt[6:8]))
+        return datetime.date(int(d_elt[0:4]),
+                       int(d_elt[4:6]),
+                       int(d_elt[6:8]))
 
     if type(date_) is list:
         return [conv_local(d_elt) for d_elt in date_]
@@ -85,7 +81,7 @@ def convert_str_date(date_):
     converts yyyymmdd into datetime
     """
     def conv_local(d_elt):
-        return dt.date(int(d_elt[0:4]),
+        return datetime.date(int(d_elt[0:4]),
                        int(d_elt[4:6]),
                        int(d_elt[6:8]))
     
@@ -135,11 +131,11 @@ def convert_datedash_str(dates):
 
 def convert_datedash_date(dates):
     """
-    converts date in form 2016-10-5 -> dt.date(..)
+    converts date in form 2016-10-5 -> datetime.date(..)
     """
 
     year, mon, day = dates.split('-')
-    return dt.date(int(year), int(mon), int(day))
+    return datetime.date(int(year), int(mon), int(day))
 
 
 def convert_datedash_time_dt(date_i, hour_i):
@@ -148,17 +144,18 @@ def convert_datedash_time_dt(date_i, hour_i):
     """
     year, mon, day = date_i.split('-')
     hour, minutes, sec = hour_i.split(':')
-    return dt.datetime(int(year), int(mon), int(day), int(hour), int(minutes))
+
+    return datetime.datetime(int(year), int(mon), int(day), int(hour), int(minutes))
 
 
 def convert_hour_time(hour):
     """
-    converts date in form 12:00:02 -> dt.time(..)
+    converts date in form 12:00:02 -> datetime.time(..)
 
     """
 
     hour, minute, sec = hour.split(':')
-    return dt.time(int(hour), int(minute), int(sec))
+    return datetime.time(int(hour), int(minute), int(sec))
 
 
 def convert_dateslash_dash(dates):
@@ -192,7 +189,7 @@ def construct_date_range(date_b, date_e):
         for row in m:
             for day in row:
                 if day >= day_b and day <= day_e:
-                    T_l.append(dt.date(year, month, day))
+                    T_l.append(datetime.date(year, month, day))
         return T_l
         
     for year in range(year_b, year_e+1):
@@ -232,7 +229,7 @@ def time_diff(date1, date2, dt_format=365.25):
 
     """
 
-    if type(date1) is dt.datetime:
+    if type(date1) is datetime.datetime:
         return (date2 - date1).days / dt_format
     else:
         date1_dt = convert_str_datetime(date1)
@@ -246,7 +243,7 @@ def add_days_str(date_, days):
 
     """
 
-    return convert_datetime_str(convert_str_datetime(date_) + dt.timedelta(days=days))
+    return convert_datetime_str(convert_str_datetime(date_) + datetime.timedelta(days=days))
 
 
 def get_forward_curve(fwd: str, date_ : datetime.date):
@@ -300,11 +297,12 @@ def get_forward_curve_slice(fwd, date_, date_b, date_e,
     returns the slice between date_b, date_e, both are in string formats
     returns curve in [(date, value, com_coda)
     """
+
     fc1 = get_forward_curve(fwd, date_)
     fc_tenors = get_forward_curve_pretty2(fwd, date_)[1]
     date_b_dt = convert_str_datetime(date_b)
     date_e_dt = convert_str_datetime(date_e)
-    adj_days_dt = dt.timedelta(days=adj_tenors_days)
+    adj_days_dt = datetime.timedelta(days=adj_tenors_days)
 
     if type(date_b) is list:
         return [[(fc1[0][k] - adj_days_dt, fc1[1][k], fc_tenors[k])
@@ -382,18 +380,18 @@ def get_fwd_vol_curve_numeric_tenor(fwd_vol, date_, base_date_,
     if fwd_vol_ind is 'fwd':
         fwd_vol_tenors_raw, fwd_vol_values_raw = get_forward_curve(fwd_vol, date_)
         if adj_fwd_tenors_days is not None:
-            fwd_vol_tenors_vals = [(ot - dt.timedelta(days=adj_fwd_tenors_days), val)
+            fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_fwd_tenors_days), val)
                                    for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
-                                   if ot - dt.timedelta(days=adj_fwd_tenors_days) > base_date_]
+                                   if ot - datetime.timedelta(days=adj_fwd_tenors_days) > base_date_]
             fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
         else:
             fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
     else:
         fwd_vol_tenors_raw, fwd_vol_values_raw = get_vol_curve(fwd_vol, date_)
         if adj_vol_tenors_days is not None:
-            fwd_vol_tenors_vals = [(ot - dt.timedelta(days=adj_vol_tenors_days), val)
+            fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_vol_tenors_days), val)
                                    for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
-                                   if ot - dt.timedelta(days=adj_vol_tenors_days) > base_date_]
+                                   if ot - datetime.timedelta(days=adj_vol_tenors_days) > base_date_]
             fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
         else:
             fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
@@ -447,7 +445,7 @@ def read_data_matched_tenors(sim_date, fwd_curve, vol_curve,
 
     # if option_tenors_dt and fwd_tenors_dt are the same, remove 1 day from option_tenors
     if fwd_tenors_dt == option_tenors_dt_orig:
-        option_tenors_dt = [ot - dt.timedelta(1) for ot in option_tenors_dt_orig]
+        option_tenors_dt = [ot - datetime.timedelta(1) for ot in option_tenors_dt_orig]
     else:
         option_tenors_dt = option_tenors_dt_orig
 
@@ -533,16 +531,13 @@ def code_to_date(code_):
 def DF_single(date_, date_fut):
 
     def DF_new(date_, t):
-        disc_data = read_discount_curve(date_)
-        return scipy.interpolate.splev(t, disc_data['discount_function'])
+        return scipy.interpolate.splev(t, read_discount_curve(date_)['discount_function'])
 
     def DF_code_new(date_, code_):
         return DF_date_new(date_, code_to_date(code_))
 
     def DF_date_new(date_, date_DF):
-        date_dt = convert_str_datetime(date_)
-        date_DF_dt = convert_str_datetime(date_DF)
-        return DF_new(date_, (date_DF_dt - date_dt).days / 365.)
+        return DF_new(date_, (convert_str_datetime(date_DF) - convert_str_datetime(date_)).days / 365.)
 
     if (type(date_fut) is int) or (type(date_fut) is float) or \
             (type(date_fut) is np.double):  # format double
@@ -552,6 +547,7 @@ def DF_single(date_, date_fut):
 
 
 def DF(date_, date_fut):
+
     if type(date_fut) is list:
         return [DF_single(date_, date_f_single) for date_f_single in date_fut]
     elif type(date_fut) is np.ndarray:
