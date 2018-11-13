@@ -1,4 +1,6 @@
-# volatilities' module
+.# volatilities' module
+
+from abc import ABC, abstractmethod
 
 import config
 import logging
@@ -10,7 +12,7 @@ import scipy
 import scipy.stats
 from scipy.stats import norm
 import scipy.interpolate  # spline package
-import openopt
+from openopt import NLP
 import matplotlib as mpl
 mpl.use('TkAgg')
 
@@ -26,55 +28,10 @@ if config.CUDA_PRESENT:
     from pycuda.compiler import SourceModule
 
 import ds
-import pricers.pricers
-import vols_fast
+from pricers.pricers import black_greeks
+import vols.vols_fast as vols_fast
 
 logger = logging.Logger(__name__)
-
-
-def norm_strike(S0, K, sigma, ttm):
-    """
-    Normalized strike if the forward is S0, strike is K, atm vol is sigma and time to maturity is ttm
-
-    :param S0: initial stock (forward) price
-    :type S0: double
-    :param K: strike price
-    :type K: double
-    :param sigma: ATM volatility of the stock price
-    :type sigma: double
-    :param ttm: time to maturity
-    :type ttm: double
-    :returns: normalized strike of the option
-    :rtype: double
-    """
-
-    return log(double(K) / double(S0)) / (sigma * sqrt(double(ttm)))
-
-
-def norm_strike_v(S0, K_v, sigma, ttm_v):
-    """
-    Vectorized form of norm_strike
-    K_v, ttm_v can be any shape
-
-    """
-
-    return log(double(K_v.reshape(1, len(K_v))) / double(S0)) / \
-           (sigma * sqrt(double(ttm_v)))
-
-
-def norm_strike_v_inv(delta_v, sigma, ttm):
-    """
-    Inverse of the normalized strike.
-
-    :param delta_v: vector of delta
-    :type delta_v: np.array[double]
-    :param sigma: volatility of stock/forward
-    :type sigma:
-    :param ttm: time to maturity
-    :type ttm: double
-    """
-
-    return exp(scipy.stats.norm.ppf(delta_v) * sigma * sqrt(double(ttm)) - 0.5 * sigma**2 * ttm)
 
 
 def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
@@ -95,73 +52,106 @@ def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
     return fv_array, option_tenors_dt
 
 
-class vol_param(object):
+class Volatility(ABC):
     """
     Base class for vol parametrization
 
     """
 
     def __init__( self
-                , params=None
-                , date_fwd_vol_name=(None, None, None) ):
-
-        date_, fwd_name, vol_name = date_fwd_vol_name
-
-        if params is not None:
-            self.p_mat = params
-            self.extract_ind(params)
-            # number of forward contracts in the vol. surface
-            self.fwd_nbs = len(params)
-
-    def extract_ind(p_mat):
-        return p_mat
-
-    def get_params(self, fwd_idx):
+                , comName
+                , mktDate ):
         """
-        returns all the params for fwd_idx
-        """
-
-        try:
-            return self.p_mat[fwd_idx, :]
-        except IndexError:  # returns the last index
-            logger.info('Invalid index:', fwd_idx)
-            logger.info("Returning the last fwd contract.")
-
-            return self.p_mat[-1, :]
-
-    def set_params(self, fwd_idx, c):
-        """
-        Set params of the fwd_idx forward to c
+        Generic class for the volatility object. Most generic way of computing the volatility.
 
         """
 
-        try:
-            self.p_mat[fwd_idx, :] = c
-            self.extract_ind(self.p_mat)  # update params
-        except ValueError:  # dont set anything
-            logger.info("Length of array has to be 8.")
-        except IndexError:  # wrong index
-            logger.info("Wrong fwd. contract.")
+        self.mktDate    = mktDate
+        self.comName    = comName
+        self._volParams = ds.get_vol_curve    (comName, mktDate)
+        self._fwdParams = ds.get_forward_curve(comName, mktDate)
 
-    def call_future_K(self, K, ttm):
+    @staticmethod
+    def normalizedStrike( S0   : np.double
+                        , K_v  : np.array
+                        , sigma: np.double
+                        , ttm_v: np.array ) -> np.array:
+        """
+        Vectorized form of norm_strike
+
+        :param S0: initial stock (forward) price
+        :param K_v: strike price
+        :param sigma: ATM volatility of the stock price
+        :param ttm_v: time to maturity
+        :returns: normalized strike of the option
+        """
+
+        return log(double(K_v.reshape(1, len(K_v))) / double(S0)) / \
+               (sigma * sqrt(double(ttm_v)))
+
+    @staticmethod
+    def normalizedStrikeInv( delta_v: np.array
+                           , sigma: np.double
+                           , ttm: np.double) -> np.array:
+        """
+        Inverse of the normalized strike.
+
+        :param delta_v: vector of delta
+        :param sigma: volatility of stock/forward
+        :param ttm: time to maturity
+        """
+
+        return exp(scipy.stats.norm.ppf(delta_v) * sigma * sqrt(double(ttm)) - 0.5 * sigma ** 2 * ttm)
+
+    @abstractmethod
+    def impliedVol(self, S0, K, ttm):
+        """
+        Implied vol needs to be implemented in the subclass.
+        Implied volatility for S0, K, ttm.
+
+        :param ttm: time to maturity
+        :type ttm: double
+        """
+
+        return 0.2
+
+    @abstractmethod
+    def delta( self
+             , K : np.double
+             , ttm : np.double ):
+        """
+        Computes the delta of the volatility.
+
+        """
+
+        pass
+
+    def callFutureK( self
+                   , K : np.double
+                   , ttm : np.double
+                   , delta_K = 0.01 ):
         """
         WRONG WRONG WRONG WRONG
         derivative of the call option with respect to strike dC/dK
 
         """
 
-        pr_0 = pricers.black_greeks_no_branching( S0
-                                                , K
-                                                , -log(disc_fact) / double(T)
-                                                , self.implied_vol(S0, K, ttm)
-                                                , T
-                                                , 0)[0]
-        pr_delta = pricers.black_greeks_no_branching(S0,
-                                                     K + delta_K,
-                                                     -log(disc_fact) /
-                                                     double(T),
-                                                     self.implied_vol(S0, K + delta_K, ttm), T, 0)[0]
+
+        pr_0 = black_greeks( S0
+                           , K
+                           , -log(disc_fact) / double(T)
+                           , self.impliedVol(S0, K, ttm)
+                           , T
+                           , 0)
+
+        pr_delta = black_greeks( S0
+                               , K + delta_K
+                               , -log(disc_fact) / double(T)
+                               , self.impliedVol(S0, K + delta_K, ttm)
+                               , T
+                               , 0 )
         return (pr_delta - pr_0) / delta_K
+        return self.delta(S0, )
 
     def skewed_distribution(self, K, delta_K, ttm):
         """
@@ -176,8 +166,8 @@ class vol_param(object):
         """
         find K : skewed_cdf_analy(K, quantile) = 0
         """
-        optim_pr = openopt.NLP(lambda K: self.skewed_cdf_analy(K, quantile), S0, lb=0.01, ub=inf,
-                               maxIter=self.max_iter, iprint=self.iprint)
+        optim_pr = NLP(lambda K: self.skewed_cdf_analy(K, quantile), S0, lb=0.01, ub=inf,
+                       maxIter=self.max_iter, iprint=self.iprint)
         return optim_pr.solve(self.solver).xf[0]
 
     def local_vol_generic(self, K, T, dT, dK):
@@ -190,9 +180,9 @@ class vol_param(object):
         """
 
         sigma = self.impl_vol(K, T)  # CORRECT THIS HERE
-        up_part = pricers.black_greeks(S_0, K, r, sigma, T, 0)[4]  # dC/dT
-        down_part = (pricers.black_greeks(S_0, K + dK, r, sigma, T, 0)[1] -
-                     pricers.black_greeks(S_0, K, r, sigma, T, 0)[1]) / dK
+        up_part = black_greeks(S_0, K, r, sigma, T, 0)[4]  # dC/dT
+        down_part = (black_greeks(S_0, K + dK, r, sigma, T, 0)[1] -
+                     black_greeks(S_0, K, r, sigma, T, 0)[1]) / dK
 
         return 2. * up_part / down_part / K**2
 
@@ -209,7 +199,7 @@ class vol_param(object):
 
         for ttm_ind, ttm in enumerate(ttm_grid):
             for K_ind, K in enumerate(K_grid):
-                self.impl_surf[ttm_ind, K_ind] = self.implied_vol(fwd, K, ttm)
+                self.impl_surf[ttm_ind, K_ind] = self.impliedVol(fwd, K, ttm)
 
         return self.impl_surf
 
@@ -217,47 +207,206 @@ class vol_param(object):
         """
         local-vol surface for ttm_grid, K_grid
         """
+
         self.lv_surf = np.empty((len(ttm_grid), len(K_grid)))
         for ttm_ind, ttm in enumerate(ttm_grid):
             for K_ind, K in enumerate(K_grid):
                 self.lv_surf[ttm_ind, K_ind] = self.local_vol(K, ttm, dT, dK)
 
+    def draw_surface( self
+                    , model
+                    , fwd_idx
+                    , Sd
+                    , Su
+                    , Sstep
+                    , Tmin
+                    , Tmax
+                    , Tstep
+                    , impl_local_ind = 'impl'
+                    , cuda_ind       = False ):
+        """
+        Draws the implied/local vol surface from
+          model ... vol. surface model, it contains:
+            name = jw7, sabr, c0c1c2, ratiovol
+          [Sd, Su] x [Tmin, Tmax] with steps Sstep, Tstep
+          vol = vol. parametrization: jw7, sabr, c0c1c2, ratiovol
+          impl_local_ind ... indicator for implied or local volatility
+          cuda_ind ... should the computations be performed on the cuda
+          fwd_idx ... forward index we are trying to plot
+        """
 
-class jw7_params(vol_param):
+        K_grid = np.arange(Sd, Su, Sstep)
+        ttm_grid = np.arange(Tmin, Tmax, Tstep)
+        K_size = len(K_grid)
+        ttm_size = len(ttm_grid)
+        if cuda_ind:
+            K_grid_d = to_gpu(K_grid).astype(np.float32)  # K, ttm grid on device
+            ttm_grid_d = to_gpu(ttm_grid).astype(np.float32)
+
+        K_mesh, ttm_mesh = np.meshgrid(K_grid, ttm_grid)
+        impl_surf = np.zeros((len(ttm_grid), len(K_grid)))
+        lv_surf = np.zeros((len(ttm_grid), len(K_grid)))
+
+        c = model.get_params(fwd_idx)  # constructs the param array
+
+        if cuda_ind:
+            impl_surf_d = to_gpu(impl_surf).astype(np.float32)  # impl. surf on cuda
+            lv_surf_d = to_gpu(lv_surf).astype(np.float32)  # lv surf. on cuda
+            c_d = to_gpu(c).astype(np.float32)
+            imp_vol_kern_string = open(config.work_dir + "imp_vol_kern.cu").read()
+            imp_vol_mod = SourceModule(
+                imp_vol_kern_string % {
+                    "K_size": K_size,
+                    "ttm_size": ttm_size})
+            # extracting compute vol function
+            comp_imp_vol = imp_vol_mod.get_function("comp_imp_vol")
+            comp_local_vol = imp_vol_mod.get_function(
+                "comp_local_vol")  # extracting compute vol function
+            # compute both local and implied vol
+            comp_imp_vol(impl_surf_d, c_d, K_grid_d, ttm_grid_d,
+                         block=(ttm_size, 1, 1), grid=(K_size, 1))
+            impl_surf = impl_surf_d.get()  # get impl. surf from device
+            comp_local_vol(lv_surf_d, c_d, K_grid_d, ttm_grid_d,
+                           block=(ttm_size, 1, 1), grid=(K_size, 1))
+            lv_surf = lv_surf_d.get()  # get local. surf from device
+
+
+        root = tk.Tk()  # root canvas
+        # plot market vols as initial
+        fig = plt.figure()
+        # construct canvas
+        dataPlot_canvas = FigureCanvasTkAgg(fig, master=root)
+        dataPlot_canvas.get_tk_widget().grid(row=0, column=0, rowspan=8)
+        ax = Axes3D(fig)  # plot it
+
+        if impl_local_ind == 'impl':  # cuda not important, so not implemented
+            impl_surf = model.gen_impl_surf(
+                fwd_idx,
+                ttm_grid,
+                K_grid)  # impl. vol surface
+            ax.plot_surface(ttm_mesh, K_mesh, impl_surf)  # initial impl. plot
+        else:
+            lv_surf = gen_lv_surf()  # updating the local vol surface
+            ax.plot_surface(ttm_mesh, K_mesh, lv_surf)  # initial lv. plot
+
+        # draw graphs
+        self.draw_buttons()
+
+        if model.name == 'jw7':
+            jw7_buttons(fwd_idx, root, ax, dataPlot_canvas)
+        elif model.name == 'c0c1c2':
+            c0c1c2_buttons(root, ax, dataPlot_canvas)
+        elif model.name == 'ratiovol':
+            ratiovol_buttons(root, ax, dataPlot_canvas)
+        elif model.name == 'sabr':
+            sabr_buttons(root, ax, dataPlot_canvas)
+
+
+    # writing this testing in a form of a function
+    # CHECK CHECK - HERE WE ARE DIRECTLY UPDATING THE PARAMETERS OF THE MODEL,
+    # SHOULD BE SEPARATE
+    def update_graph(self, fwd, model, c, a, canvas):
+        model.set_params(fwd, c)  # sets the params in the model
+        if impl_local_ind == 'impl':
+            if cuda_ind:
+                impl_surf = model.gen_impl_surf_cuda(fwd,
+                                                     ttm_grid_d, K_grid_d,
+                                                     len(ttm_grid), len(
+                                                         K_grid),
+                                                     impl_surf_d, comp_imp_vol)
+            else:
+                # TO CORRECT HERE TO CORRECT HERE
+                # impl_surf = model.gen_impl_surf_v() # vol. surface on cpu
+                impl_surf = model.gen_impl_surf(
+                    fwd,
+                    ttm_grid,
+                    K_grid)  # vol. surface on cpu
+            a.plot_surface(K_mesh, ttm_mesh, impl_surf)
+        else:
+            if cuda_ind:
+                lv_surf = model.gen_lv_surf_cuda()  # local vol on cuda
+            else:
+                lv_surf = model.gen_lv_surf()  # local vol surface on cpu
+            a.plot_surface(K_mesh, ttm_mesh, lv_surf)
+        canvas.show()
+
+
+
+class ATMFVolatility(Volatility):
+    """
+    Simplest flat volatility.
+
+    """
+
+    def __init__( self
+                , comName
+                , mktDate ):
+        """
+        reads from database and constructs vol object
+
+        """
+        super().__init__(comName, mktDate)  # date and comName are defined here
+
+    @property
+    def volName(self):
+        return 'ATMF'
+
+    def atmVol( self
+              , fwdDate ):
+        """
+        Returns the ATM volatility for the forward date fwdDate
+
+        """
+
+        return self._volParams  # TODO: FINISH HERE
+
+
+class JW7Volatility(Volatility):
     """
     JumpWing parametrization (inherits from vol_param)
 
     """
 
-    def __init__(self, date_, fwd_name, vol_name, nb_fwds_taken=-1):
+    def __init__( self
+                , comName
+                , mktDate ):
         """
         reads from database and constructs vol object
+
         """
-        self.name = 'jw7'
-        self.market_date = date_
-        self.market_date_dt = ds.convert_str_datetime(self.market_date)
-        fwd_vol_array, option_tenors_dt = extract_param_matrix(date_,
-                                                               fwd_name, vol_name,
-                                                               nb_fwds_taken=nb_fwds_taken)
-        self.p_mat = np.array(fwd_vol_array, dtype=np.double)
-        params_names = self.transform_from_jwss7(self.p_mat)
-        self.S0 = params_names['S0']
+        super().__init__(comName, mktDate)  # date and comName are defined here
+        params_names = self.transform_from_jwss7(self._volParams)  # self.p_mat)
+
+        self.S0        = params_names['S0']
         self.fwd_curve = self.S0
-        self.sigma_0 = params_names['sigma_0']
-        self.skew = params_names['skew']
-        self.smile = params_names['smile']
-        self.putSlope = params_names['putSlope']
-        self.putBend = params_names['putBend']
-        self.callBend = params_names['callBend']
+        self.sigma_0   = params_names['sigma_0']
+        self.skew      = params_names['skew']
+        self.smile     = params_names['smile']
+        self.putSlope  = params_names['putSlope']
+        self.putBend   = params_names['putBend']
+        self.callBend  = params_names['callBend']
         self.callSlope = params_names['callSlope']
-        self.B = params_names['B']
-        self.A = params_names['A']
-        self.C = params_names['C']
-        self.P = params_names['P']
+
+        self.B      = params_names['B']
+        self.A      = params_names['A']
+        self.C      = params_names['C']
+        self.P      = params_names['P']
         self.alphaC = params_names['alphaC']
         self.alphaP = params_names['alphaP']
         self.ttm_opt = np.array([(tenor_dt - self.market_date_dt).days / 365.25
                                  for tenor_dt in option_tenors_dt])
+
+    @property
+    def volName(self):
+        return 'jw7'
+
+    def atmVol( self
+              , fwdDate ):
+        """
+        Returns the atm forward for the fwd date.
+        """
+
+        return self._volParams
 
     def extract_tenors(self, new_market_date, tenors_list):
         """
@@ -288,9 +437,10 @@ class jw7_params(vol_param):
     @staticmethod
     def transform_from_jwss7(p_mat):
         """
-        returns jw7 from jwss7
+        Returns jw7 parametrization from jwss7.
         p_mat in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
         p_mat in jw7: [S0, atm, A, B, C, P, alphaC, alphaP]
+
         """
 
         S0 = double(p_mat[:, 0])
@@ -310,9 +460,9 @@ class jw7_params(vol_param):
         alphaC = call_bend
         alphaP = put_bend
 
-        return {'S0': S0,
+        return {'S0'     : S0,
                 'sigma_0': sigma_0,
-                'skew': skew,
+                'skew'   : skew,
                 'smile': smile,
                 'putSlope': put_slope,
                 'putBend': put_bend,
@@ -323,8 +473,7 @@ class jw7_params(vol_param):
                 'C': C,
                 'P': P,
                 'alphaC': alphaC,
-                'alphaP': alphaP
-                }
+                'alphaP': alphaP }
 
     @staticmethod
     def _vol_compute(z, alphaC, alphaP, sigma_0, A, B, C, P):
@@ -332,9 +481,9 @@ class jw7_params(vol_param):
         Computes the volatility given the following parameters:
 
         """
-        hC = z / (1.0 + z * z) ** (alphaC/2)
-        hP = z / (1.0 + z * z) ** (alphaP/2)
-        return sigma_0 * sqrt(1. + A * log(B * exp(C*hC) + (1. - B) * exp(-P*hP)))
+
+        return sigma_0 * sqrt(1. + A * log(B * exp(C * (z / (1.0 + z * z) ** (alphaC/2))) + \
+                                           (1. - B) * exp(- P * (z / (1.0 + z * z) ** (alphaP/2)))))
 
     def implied_vol(self, fwd, K, ttm):
         z = norm_strike(self.S0[fwd], K, self.sigma_0[fwd], ttm)
@@ -346,21 +495,26 @@ class jw7_params(vol_param):
         """
         solution to N(d1) = delta_val, where d1(vol)
         """
-        fct = lambda K: vols_fast.invert_delta(K,
-                                               delta_val,
-                                               self.ttm_opt[fwd],
+
+        optim_pr = NLP(lambda K: vols_fast.invert_delta( K
+                                                               , delta_val
+                                                               , self.ttm_opt[fwd],
                                                self.fwd_curve[fwd],
                                                self.alphaC[fwd],
                                                self.alphaP[fwd],
                                                self.sigma_0[fwd],
                                                self.A[fwd], self.B[fwd],
                                                self.C[fwd], self.P[fwd])
-        optim_pr = openopt.NLP(fct, self.fwd_curve[fwd], lb=0.001, ub=np.inf,
-                               maxIter=150, iprint=-9)
+                              , self.fwd_curve[fwd]
+                              , lb      = 0.001
+                              , ub      = np.inf
+                              , maxIter = 150
+                              , iprint  = -9)
 
         return optim_pr.solve('scipy_cobyla').xf[0]
 
     def implied_vol_all_fwd_standard(self, delta_v):
+
         vol_mat = np.empty((len(self.fwd_curve), len(delta_v)))
         for tenor_nb, (fwd_v, ttm) in enumerate(zip(self.fwd_curve, self.ttm_opt)):
             perc_v = norm_strike_v_inv(delta_v, self.sigma_0[tenor_nb], ttm)
@@ -407,18 +561,23 @@ class jw7_params(vol_param):
 
     def local_vol(self, fwd, S, T, ttm):
         """
-        Local volatility of the parametrization.
+        Local volatility of the JWSS7 parametrization.
 
-        # local vol from implied vol
-        # ttm ... option ttm
-        # lv (S, T)
-        # fwd ... forward index that we are computing the local vol of
+        :param fwd: forward index that we are computing the local vol of
+        :param ttm: option time to maturity
         """
-        z = norm_strike(self.S0, S, self.sigma_0, ttm)  # can be a vector
-        sigma = self.implied_vol(S, T)
 
-        S_0, sigma_0, A, B, C, P, alphaC, alphaP = self.get_params(
-            fwd).transpose()  # params in columns
+        S_0     = self.S0[fwd]
+        sigma_0 = self.sigma_0[fwd]
+        A       = self.A[fwd]
+        B       = self.B[fwd]
+        C       = self.C[fwd]
+        P       = self.P[fwd]
+        alphaC  = self.alphaC[fwd]
+        alphaP  = self.alphaP[fwd]
+
+        z = self.normalizedStrike(S_0, S, sigma_0, ttm)  # TODO: CHECK HERE!!
+        sigma = self.implied_vol(S, T)
 
         d1 = (log(S / S_0) + sigma * sigma * ttm / 2.0) / (sigma * sqrt(ttm))
         d2 = d1 - sigma * sqrt(ttm)
@@ -459,7 +618,7 @@ class jw7_params(vol_param):
 
         # catching nan-s
         if (up_part / down_part < 0.0):
-            logger.info("Caution: Imaginary local vol., returning ATM vol.")
+            logger.info("Caution: Imaginary local vol., using ATM vol.")
             return sigma_0
         else:
             return sqrt(up_part / down_part)
@@ -467,16 +626,23 @@ class jw7_params(vol_param):
         # return (up_part / down_part < 0.0) * self.sigma_0 + (up_part /
         # down_part >= 0.0) * sqrt (up_part/down_part)
 
-    def call_future_T(self, fwd, S0, K, ttm):
+    def callFutureT(self, fwd, S0, K, ttm):
         """
         Derivative of Black's call (with expirty time  T) on a futures contract 
            with maturity ttm (cond: T < ttm)
-        :param fwd: forward index that we are drawing the vol of
 
+        :param fwd: forward index that we are drawing the vol of
+        :param S0:
+        :param K: strike value
+        :param ttm: time to maturity
         """
-        
-        S0, sigma_0, A, B, C, P, alphaC, alphaP = self.get_params(
-            fwd).transpose()
+
+        S0      = self.S0[fwd]
+        sigma_0 = self.sigma_0[fwd]
+        A       = self.A[fwd]
+        B       = self.B[fwd]
+        C       = self.C[fwd]
+        P       = self.P[fwd]
 
         z = norm_strike(S0, K, sigma_0, ttm)
         sigma = self.implied_vol(fwd, K, ttm)
@@ -507,10 +673,6 @@ class jw7_params(vol_param):
     # first derivative of (undiscounted) Black's call wrt K
     def call_future_K(self, fwd, S0, K, ttm):
 
-        S00_local, sigma_0, A, B, C, P, alphaC, alphaP = self.get_params(
-            fwd).transpose()
-        S0_local = S0  # CHECK THIS IS WRONG WRONG WRONG
-        maturity = ttm  # CHECK IF THIS MATURITY IS CORRECT
 
         z = norm_strike(S0, K, sigma_0, maturity)
         sigma = self.implied_vol(fwd, K, ttm)  # CHECK IF THIS IS RIGHT
@@ -599,13 +761,58 @@ class jw7_params(vol_param):
 
     # find K : skewed_cdf_analy(K, quantile) = 0
     def inversion_skewed_cdf(self, fwd, S0, ttm, quantile):
-        optim_pr = openopt.NLP(lambda K: self.skewed_cdf(fwd, S0, K, ttm, quantile),
-                               S0, lb=0.01, ub=inf,
-                               maxIter=150, iprint=-9)
+        optim_pr = NLP( lambda K: self.skewed_cdf(fwd, S0, K, ttm, quantile)
+                      , S0
+                      , lb      = 0.01
+                      , ub      = np.inf
+                      , maxIter = 150
+                      , iprint  = -9 )
         return optim_pr.solve('scipy_cobyla').xf[0]
 
+    def jw7_buttons(self, fwd, root, ax, dataPlot_canvas):
+        fct_update = lambda cc: self.update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
+                                             dataPlot_canvas)
+        # root ... Tk root
+        # ax ... Axes3D object
+        # dataPlot_canvas ... canvas object
 
-class c0c1c2_vols(vol_param):
+        # parameter tk.SCALEs
+        c1 = tk.Scale(root, from_=80.0, to=120.0, resolution=0.1, label="S0", orient=tk.HORIZONTAL,
+                   command=fct_update)
+        c2 = tk.Scale(root, from_=0.05, to=0.8, resolution=0.05, label="sig", orient=tk.HORIZONTAL,
+                   command=fct_update)
+        c3 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="A", orient=tk.HORIZONTAL,
+                   command=fct_update)
+        c4 = tk.Scale(root, from_=0.0, to=1.0, resolution=0.05, label="B", orient=tk.HORIZONTAL,
+                   command=fct_update)
+        c5 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="C", orient=tk.HORIZONTAL,
+                   command=fct_update)
+        c6 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="P", orient=tk.HORIZONTAL,
+                   command=fct_update)
+        c7 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_C", orient=tk.HORIZONTAL,
+                   command=fct_update)
+        c8 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_P", orient=tk.HORIZONTAL,
+                   command=fct_update)
+
+        c1.grid(row=0, column=1)
+        c2.grid(row=1, column=1)
+        c3.grid(row=2, column=1)
+        c4.grid(row=3, column=1)
+        c5.grid(row=4, column=1)
+        c6.grid(row=5, column=1)
+        c7.grid(row=6, column=1)
+        c8.grid(row=7, column=1)
+
+        # replot button
+        b1 = Button(root, text="replot", command=lambda: update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
+                                                                      dataPlot_canvas)).grid(row=8, column=0)
+
+        dataPlot_canvas.show()
+        root.mainloop()
+
+
+
+class c0c1c2Volatility(Volatility):
     """
     c0-c1-c2 volatility parametrization
     smooth_ind is the smoothness indicator
@@ -613,15 +820,18 @@ class c0c1c2_vols(vol_param):
 
     """
 
+    def __init__(self, comName, mktDate):
+        super().__init__(comName, mktDate)  # defines _volParams, _fwdParams
+        self.volName = 'c0c1c2'
+
     # extracts the model parameters
     def extract_ind(self, p_mat):
-        self.name = 'c0c1c2'  # adds the name of the model
-        self.c0 = double(p_mat[:, 0])  # vector of c0s
-        self.c1 = double(p_mat[:, 1])  # vector of c1s
-        self.c2 = double(p_mat[:, 2])
-        self.theta = double(p_mat[:, 3])
-        self.smooth_ind = double(p_mat[:, 4])
-        self.alpha = double(p_mat[:, 5])
+        self._c0        = self._volParams[:, 0]  # vector of c0s
+        self._c1        = self._volParams[:, 1]  # vector of c1s
+        self._c2        = self._volParams[:, 2]
+        self.theta      = self._volParams[:, 3]
+        self.smooth_ind = self._volParams[:, 4]
+        self.alpha      = self._volParams[:, 5]
 
     def implied_vol(self, F, t):
         K = 100.  # WRONG WRONG WRONG ...
@@ -638,33 +848,12 @@ class c0c1c2_vols(vol_param):
             (self.smooth_ind == True)
 
 
-class ratiovol(vol_param):
-    """
-    ratiovol volatility parametrization
-    smooth_ind is the smoothness indicator
-    """
-    def extract_ind(self, p_mat):
-        """
-        # extracts the model parameters
-        """
-        self.name = 'ratiovol'  # adds the name of the model
-        self.sigma_0 = double(p_mat[:, 0])
-        self.rr_25 = double(p_mat[:, 1])  # vector of rr_25 marks
-        self.wg_25 = double(p_mat[:, 2])  # vector of wg
-
-    def implied_vol(self, F, t):
-        K = 100.  # WRONG WRONG WRONG WRONG
-        z = log(F / K)
-        d_1 = (z + self.sigma_0**2 * t / 2.) / (self.sigma_0 * sqrt(t))
-        n_25 = - 0.67448975019608  # N^(-1) ( 0.25 )
-        return self.sigma_0 + self.rr_25 * d_1 / \
-            2. / n_25 + self.wg_25 * (d_1 / n_25)**2.0
-
-
-class ci_param(vol_param):
+class CIVolatility(Volatility):
     """
     CI parametrization: accepts deltas and vols
+
     """
+
     def __init__(self, tenor_l, delta_mn_l, vols_l, omega_l):
         """
         tenor_l: tenors list [1., 2.]
@@ -672,6 +861,7 @@ class ci_param(vol_param):
         vols: list of lists of vols for corr. moneyness
         omega_l: list of omegas, smoothing parameters
         """
+
         self.name = 'ci'
         self.nb_fwds = len(tenor_l)
         self.tenor_l = tenor_l
@@ -762,44 +952,6 @@ class ci_param(vol_param):
         self.wg_25 = double(p_mat[:, 2])  # vector of wg
 
 
-class ci7_params(ci_param):
-    """
-    FX type parametrization of ATM, RR, WG at different deltas - 75, 90, 95
-
-    """
-
-    def __init__(self, date_, fwd_name, vol_name,
-                 nb_fwds_taken=-1,
-                 omega=1.):
-        """
-        reads the data from inputs and constructs
-        """
-        self.name = 'atm_rr_wg'
-        fwd_vol_array, option_tenors_dt = extract_param_matrix(date_,
-                                                               fwd_name, vol_name,
-                                                               nb_fwds_taken=nb_fwds_taken)
-        self.p_mat = np.array(fwd_vol_array, dtype=np.double)
-        pn = jw7_params.transform_from_jwss7(self.p_mat)
-        self.S0 = pn['S0']
-        self.sigma_0 = pn['sigma_0']
-        self.rr25 = pn['skew']
-        self.fly25 = pn['smile']
-        self.rr10_25 = pn['putSlope']
-        self.fly10_25 = pn['putBend']
-        self.rr5_10 = pn['callSlope']
-        self.fly5_10 = pn['callBend']
-        self.omega = omega
-        self.ttm_opt = np.array([(tenor_dt - ds.convert_str_datetime(date_)).days/365.25
-                                 for tenor_dt in option_tenors_dt])
-
-        tenor_l = []
-        delta_l = []
-        vol_l = []
-        omega_l = []
-        self.implied_vol = [[]] * len(self.S0)
-        # CONTINUING CONTINUING
-
-
 def interpolate_fwd_vols(fwd_tenors, fwd_prices, vol_tenors, vol_vols,
                          fwd_tenors_wanted, vol_tenors_wanted):
     """
@@ -832,97 +984,44 @@ def interpolate_fwd_vols(fwd_tenors, fwd_prices, vol_tenors, vol_vols,
     return res
 
 
-def black_vol_inverse_normalized(beta, x, theta, tol):
-    """
-    solving for sigma:  b_fct ( x, sigma, theta) = beta
-    :param tol: tolerance level
-    result: sigma * sqrt (t)
-    """
-    def b(x, sigma):
-        e1 = exp(x / 2)
-        d1 = x / sigma + sigma / 2
-        return theta * e1 * scipy.stats.norm.cdf(theta * d1 ) - \
-            theta / e1 * scipy.stats.norm.cdf(theta * (d1 - sigma))
-
-    sigma_c = lambda x: sqrt(2 * abs(x))  # inflection point function
-
-    def iota(x):
-        return (theta * x > 0) * theta * (exp(x / 2) - exp(-x / 2))
-
-    b_c = lambda x: b(x, sigma_c(x))  # b (sigma_c) function
-
-    sigma_low = lambda x: sqrt(
-        (2.0 * x**2) / (abs(x) - 4.0 * log((beta - iota(x)) / (b_c(x) - iota(x)))))
-
-    def sigma_high(x):
-        e1 = exp(theta * x / 2.0)
-        return -2.0 * scipy.stats.norm.ppf((e1 - beta) / (e1 - b_c(x)) *
-                                           scipy.stats.norm.cdf(- sqrt(abs(x) / 2.0)))
-
-    # one step of the iteration
-    def one_step(x, sigma):
-        b_der = exp(- 0.5 * (x / sigma)**2 - 0.5 *
-                    (sigma / 2)**2) / sqrt(2 * pi)
-        if (beta < b_c(x)):
-            return log((beta - iota(x)) / (b(x, sigma) - iota(x))) * \
-                (b(x, sigma) - iota(x)) / b_der
-        else:
-            return (beta - b(x, sigma)) / b_der
-
-    # complete iteration
-    def iteration(x):
-        if (beta < b_c(x)):  # initial value of sigma
-            sigma = sigma_low(x)
-        else:  # (beta >= b_c(x))
-            sigma = sigma_high(x)
-
-        # initial value of changed sigma, such that delta_sigma / sigma > tol
-        sigma_new = sigma * (1.0 + 2.0 * tol)
-        delta_sigma = 2.0 * tol  # this is actually precise
-        # nb_iterations = 0 # for debugging purposes only
-
-        while (delta_sigma / sigma > tol):
-            sigma_new = sigma + one_step(x, sigma)
-            delta_sigma = abs(sigma_new - sigma)
-            sigma = sigma_new
-            # nb_iterations += 1
-
-        return sigma_new
-
-    # iteration improved (Jaeckel final chapter)
-    def iteration_improved(x):
-        if (beta < b_c(x)):  # initial value of sigma
-            sigma = sigma_low(x)
-        else:  # (beta >= b_c(x))
-            sigma = sigma_high(x)
-
-        # initial value of changed sigma, such that delta_sigma / sigma > tol
-        sigma_new = sigma * (1.0 + 2.0 * tol)
-        delta_sigma = 2.0 * tol  # this is actually precise
-        nb_iterations = 0
-
-        while (delta_sigma / sigma > tol):
-            sigma_new = sigma + one_step(x, sigma)
-            delta_sigma = abs(sigma_new - sigma)
-            sigma = sigma_new
-            nb_iterations = nb_iterations + 1
-
-        return sigma_new
-
-    return iteration(x)
-
-
 def black_vol_inverse_vec(F, K_vec, p_vec, dt, DF, theta, tol):
+    """
+    Inverse black vol for a vector of strikes, and a vector or prices.
+
+    :param F: current forward vol.
+    :type F: double
+    :param K_vec: vector of strikes.
+    :type K_vec: np.array[double]
+    """
+
     return np.array([black_vol_inverse(F, K, p, dt, DF, theta, tol)
                      for K, p in zip(K_vec, p_vec)]).ravel()
 
 
 def black_vol_inverse(F, K, p, dt, DF, theta, tol):
-    x = log(double(F) / double(K))
-    beta = double(p) / (DF * sqrt(double(F) * double(K)))
+    """
+    Computation of black vol from option prices.
 
-    #return black_vol_inverse_normalized(beta, x, theta, tol) / sqrt(dt)
-    return vols_fast.black_vol_inverse_normalized(beta, x, theta, tol) / sqrt(dt)
+    :param F: forward price
+    :type F: double
+    :param K: strike price
+    :type K: double
+    :param p: option price
+    :type p: double
+    :param dt: time to maturity
+    :type dt: double
+    :param DF: discount factor until dt
+    :type DF: double
+    :param theta: call/put indicator
+    :type theta: TODO
+    :param tol: toleranca
+    :type tol: double
+    """
+
+    return vols_fast.black_vol_inverse_normalized( double(p) / (DF * sqrt(double(F) * double(K)))
+                                                 , log(double(F) / double(K))
+                                                 , theta
+                                                 , tol) / sqrt(dt)
 
 
 def black_vol_inverse_naive_vec(F, K_vec, p_vec, dt, DF, theta, tol, solver=None):
@@ -933,106 +1032,34 @@ def black_vol_inverse_naive_vec(F, K_vec, p_vec, dt, DF, theta, tol, solver=None
 def black_vol_inverse_naive(F, K, p, dt, DF, theta, tol, solver=None):
     """
     black vol computation
+
       theta = 1 ... call option, -1 ... put option
     """
+
     x = log(double(F) / double(K))  # insuring that no integer division is made
     beta = p / (DF * sqrt(F * K))
 
-    if solver is None:
-        solver_used = 'scipy_cobyla'
-    else:
-        solver_used = solver
-
-    def b(x, sigma):
-        e1 = exp(x / 2)
-        d1 = x / sigma + sigma / 2
-        return theta * e1 * scipy.stats.norm.cdf(theta * d1) - \
-            theta / e1 * scipy.stats.norm.cdf(theta * (d1 - sigma))
-
-    sigma_c = sqrt(2 * abs(x))  # inflection point function  (sigma_c)
-
     # optimization search, initial guess = sigma_c
-    optim_pr = openopt.NLP(lambda sigma: (b(x, sigma) - beta)**2, sigma_c,
-                           lb=1e-6, iprint=-1)  # lower bound just above 0
+    optim_pr = NLP( lambda sigma: (b(x, sigma, theta) - beta)**2
+                  , sqrt(2 * abs(x))  # inflection point function  (sigma_c)
+                  , lb = 1e-6
+                  , iprint = -1 )  # lower bound just above 0
 
-    return optim_pr.solve(solver_used).xf[0] / sqrt(dt)
+    return optim_pr.solve('scipy_cobyla' if solver is None else solver).xf[0] / sqrt(dt)
 
 
-class sabr(vol_param):
+def draw_surface( model
+                , fwd_idx
+                , Sd
+                , Su
+                , Sstep
+                , Tmin
+                , Tmax
+                , Tstep
+                , impl_local_ind = 'impl'
+                , cuda_ind       = False ):
     """
-    computing sabr vol
-      f ... futures contract
-      K ... strike price
-      t ... option expiry
-      alpha, beta, nu, rho ... SABR parameters
-    """
-    def __init__(self, alpha, beta, nu, rho):
-        self.name = 'sabr'
-        self.alpha = alpha
-        self.beta = beta
-        self.nu = nu
-        self.rho = rho
-
-
-    def get_params(self):
-        return np.array([self.alpha, self.beta, self.nu, self.rho])
-
-    def set_params(self, c):
-        self.alpha, self.beta, self.nu, self.rho = c
-
-    def implied_vol(self, K, t):
-        f = 100.  # TO CORRECT TO CORRECT TO CORRECT
-        return self.sabr_vol(f, K, t, self.alpha, self.beta, self.nu, self.rho)
-
-    # sabr implied vol
-    def sabr_vol(self, f, K, t, alpha, beta, nu, rho):
-
-        # this is needed, since the OpenOpt sometimes overshoots rho
-        if rho > 1.:
-            return alpha
-
-        if (f == K):  # ATM options
-            return alpha / f**(1. - beta) * (1 + t * ((1. - beta)**2 / 24. * alpha**2 / f**(2. - 2. * beta) +
-                                                      0.25 * rho * beta * nu * alpha / f**(1. - beta) + (2. - 3. * rho**2) / 24. * nu**2))
-        else:  # OTM, ITM options
-
-            z = nu / alpha * sqrt((f * K)**(1. - beta)) * log(f / K)
-            x = log((sqrt(1. - 2. * rho * z + z**2) + z - rho) / (1. - rho))
-
-            fK_b = (f * K)**(1. - beta)
-
-            ser_1 = 1. + (1. - beta)**2 / 24. * (log(f / K))**2 + \
-                (1. - beta)**4 / 1920. * (log(f / K))**4
-            ser_2 = (1. - beta)**2 / 24. * alpha**2 / fK_b + 0.25 * rho * \
-                beta * nu * alpha / \
-                sqrt(fK_b) + (2. - 3. * rho**2) / 24. * nu**2
-
-            sigma_B_1 = alpha / (sqrt(fK_b) * ser_1)
-            sigma_B_2 = 1 + ser_2 * t
-
-            return sigma_B_1 * z / x * sigma_B_2
-
-
-def sabr_option(f, K, t, DF, alpha, beta, nu, rho, call_ind=True):
-    """
-    # computing sabr call/put option
-     f ... future price
-     K ... strike
-     t ... time to maturity
-     DF ... discount factor function
-     alpha, beta, nu, rho ... SABR parameters
-     call_ind ... call indicator - True for Call, False for Put
-    """
-    call_val = pricers.black_greeks_no_branching(f, K, - log(DF(t)) / double(t),
-                                                 sabr_vol(f, K, t, alpha, beta, nu, rho), t, 0.)
-
-    return call_ind * call_val + (not call_ind) * (call_val + DF(t) * (K - f))
-
-
-def draw_surface(model, fwd_idx, Sd, Su, Sstep, Tmin, Tmax,
-                 Tstep, impl_local_ind='impl', cuda_ind=False):
-    """
-    draws the implied/local vol surface from
+    Draws the implied/local vol surface from
       model ... vol. surface model, it contains:
         name = jw7, sabr, c0c1c2, ratiovol
       [Sd, Su] x [Tmin, Tmax] with steps Sstep, Tstep
@@ -1041,6 +1068,7 @@ def draw_surface(model, fwd_idx, Sd, Su, Sstep, Tmin, Tmax,
       cuda_ind ... should the computations be performed on the cuda
       fwd_idx ... forward index we are trying to plot
     """
+
     K_grid = np.arange(Sd, Su, Sstep)
     ttm_grid = np.arange(Tmin, Tmax, Tstep)
     K_size = len(K_grid)
@@ -1104,73 +1132,7 @@ def draw_surface(model, fwd_idx, Sd, Su, Sstep, Tmin, Tmax,
             a.plot_surface(K_mesh, ttm_mesh, lv_surf)
         canvas.show()
 
-    # root ... Tk root
-    # ax ... Axes3D object
-    # dataPlot_canvas ... canvas object
-    def jw7_buttons(fwd, root, ax, dataPlot_canvas):
-        fct_update = lambda cc: update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
-                                             dataPlot_canvas)
 
-        # parameter tk.SCALEs
-        c1 = tk.Scale(root, from_=80.0, to=120.0, resolution=0.1, label="S0", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c2 = tk.Scale(root, from_=0.05, to=0.8, resolution=0.05, label="sig", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c3 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="A", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c4 = tk.Scale(root, from_=0.0, to=1.0, resolution=0.05, label="B", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c5 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="C", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c6 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="P", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c7 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_C", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c8 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_P", orient=tk.HORIZONTAL,
-                   command=fct_update)
-
-        c1.grid(row=0, column=1)
-        c2.grid(row=1, column=1)
-        c3.grid(row=2, column=1)
-        c4.grid(row=3, column=1)
-        c5.grid(row=4, column=1)
-        c6.grid(row=5, column=1)
-        c7.grid(row=6, column=1)
-        c8.grid(row=7, column=1)
-
-        # replot button
-        b1 = Button(root, text="replot", command=lambda: update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
-                                                                      dataPlot_canvas)).grid(row=8, column=0)
-
-        dataPlot_canvas.show()
-        root.mainloop()
-
-    # same as for jw7 buttons
-    def sabr_buttons(root, ax, dataPlot_canvas):
-        fct_update = lambda cc: update_graph(fwd, model, array(
-            [alpha.get(), beta.get(), nu.get(), rho.get()]), ax, dataPlot_canvas)
-
-        # parameter scales
-        alpha = tk.Scale(root, from_=80.0, to=120.0, resolution=0.1, label="alpha", orient=tk.HORIZONTAL,
-                      command=fct_update)
-        beta = tk.Scale(root, from_=0.05, to=0.8, resolution=0.05, label="beta", orient=tk.HORIZONTAL,
-                     command=fct_update)
-        nu = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="nu", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        rho = tk.Scale(root, from_=0.0, to=1.0, resolution=0.05, label="rho", orient=tk.HORIZONTAL,
-                    command=fct_update)
-
-        alpha.grid(row=0, column=1)
-        beta.grid(row=1, column=1)
-        nu.grid(row=2, column=1)
-        rho.grid(row=3, column=1)
-
-        # replot button
-        b1 = Button(root, text="replot", command=lambda: update_graph(fwd, model, array([alpha.get(), beta.get(), nu.get(), rho.get()]), ax,
-                                                                      dataPlot_canvas)).grid(row=8, column=0)
-
-        dataPlot_canvas.show()
-        root.mainloop()
 
     # same as for jw7 buttons
     def c0c1c2_buttons(root, ax, dataPlot_canvas):
@@ -1202,67 +1164,16 @@ def draw_surface(model, fwd_idx, Sd, Su, Sstep, Tmin, Tmax,
         dataPlot_canvas.show()
         root.mainloop()
 
-    # same as for ratiovol buttons
-    def ratiovol_buttons(root, ax, dataPlot_canvas):
-        fct_update = lambda cc: update_graph(fwd,
-                                             model,
-                                             np.array([sigma0.get(), rr25.get(), wg25.get()]),
-                                             ax, dataPlot_canvas)
-        # parameter scales
-        sigma0 = tk.Scale(root, from_=80.0, to=120.0, resolution=0.1, label="sigma_0", orient=tk.HORIZONTAL,
-                       command=fct_update)
-        rr25 = tk.Scale(root, from_=0.05, to=0.8, resolution=0.05, label="rr25", orient=tk.HORIZONTAL,
-                     command=fct_update)
-        wg25 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="wg25", orient=tk.HORIZONTAL,
-                     command=fct_update)
 
-        sigma0.grid(row=0, column=1)
-        rr25.grid(row=1, column=1)
-        wg25.grid(row=2, column=1)
-
-        # replot button
-        b1 = tk.Button(root, text="replot",
-                       command=lambda: update_graph(fwd, model,
-                                                    np.array([sigma0.get(), rr25.get(), wg25.get()]),
-                                                    ax,
-                                                    dataPlot_canvas)).grid(row=3, column=0)
-
-        dataPlot_canvas.show()
-        root.mainloop()
-
-    root = tk.Tk()  # root canvas
-    # plot market vols as initial
-    fig = plt.figure()
-    # construct canvas
-    dataPlot_canvas = FigureCanvasTkAgg(fig, master=root)
-    dataPlot_canvas.get_tk_widget().grid(row=0, column=0, rowspan=8)
-    ax = Axes3D(fig)  # plot it
-
-    if impl_local_ind == 'impl':  # cuda not important, so not implemented
-        impl_surf = model.gen_impl_surf(
-            fwd_idx,
-            ttm_grid,
-            K_grid)  # impl. vol surface
-        ax.plot_surface(ttm_mesh, K_mesh, impl_surf)  # initial impl. plot
-    else:
-        lv_surf = gen_lv_surf()  # updating the local vol surface
-        ax.plot_surface(ttm_mesh, K_mesh, lv_surf)  # initial lv. plot
-
-    # draw graphs
-    if model.name == 'jw7':
-        jw7_buttons(fwd_idx, root, ax, dataPlot_canvas)
-    elif model.name == 'c0c1c2':
-        c0c1c2_buttons(root, ax, dataPlot_canvas)
-    elif model.name == 'ratiovol':
-        ratiovol_buttons(root, ax, dataPlot_canvas)
-    elif model.name == 'sabr':
-        sabr_buttons(root, ax, dataPlot_canvas)
-
-
-# computes the squared integral of samuelson behavior
-# \int _s ^t (e^{-B(T_i - u)} + sigma_L )^2 du
 def sam_int(s, t, T_i, beta, sigma_L):
-    """samuelson vol function"""
+    """
+    Samuelson volatility function.
+
+    Computes the squared integral of samuelson behavior
+    \int _s ^t (e^{-B(T_i - u)} + sigma_L )^2 du
+
+    """
+
     t1 = exp(-2.0 * beta * (T_i - t)) / (2.0 * beta) - \
         exp(-2.0 * beta * (T_i - s)) / (2.0 * beta)
     t2 = sigma_L**2 * (t - s)
@@ -1295,25 +1206,15 @@ def forward_vols_sam(sigma_v, T, Ti_v, taui_v, beta, sigma_L):
         sam_int(0., taui_v[et], Ti_v[et], beta, sigma_L) for et in range(len(Ti_v))])
 
 
-#
-# CORRELATIONS SECTION
-#
-def corr_hyp_sec_basic(alpha, i, j):
+def getVolObject(mktDate, comName):
     """
-    correlation between months i, j
+    Gets the vol object for the commodity in question.
+
     """
-    return 1.0 / np.cosh(alpha * (i - j))
 
+    typeToObject = {'JWSS7': JW7Volatility
+                   , 'ATM' : ATMFVolatility }
 
-def corr_hyp_sec_two_fronts(rho, i, j):
-    alpha = sqrt(2 * (1 - rho))
-    return corr_hyp_sec_basic(alpha, i, j)
+    volType, _, _ = ds.vol_hash[comName]
 
-
-def corr_hyp_sec_mat(rho, ind_range):
-    """
-    generates a correlation matrix from the hyp sec function above
-    """
-    return np.array([[corr_hyp_sec_two_fronts(rho, i, j)
-                      for j in ind_range]
-                     for i in ind_range])
+    return typeToObject[volType](mktDate, comName)

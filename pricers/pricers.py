@@ -1,23 +1,21 @@
-from config import CUDA_PRESENT # general configuration
+from config import CUDA_PRESENT
+
 import numpy as np
-import scipy.optimize
 import scipy.integrate
-import scipy.special
 import scipy.stats
-import scipy.optimize
-import scipy.linalg
+import scipy.interpolate
 import multiprocessing as mp
-import copy
+import logging
 
 if CUDA_PRESENT:
     import pycuda.autoinit
-    import cuda_ops as co
+    import cuda.cuda_ops as co
 
-# abstract classes
-import ds
-import sg
-import pricers.pricers_fast as pricers_fast  # fast libs in cython
-import vols
+import ds, sg, vols, pricers.pricers_fast as pricers_fast
+
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def cdf_vec(x, ci=False):
@@ -35,11 +33,14 @@ def cdf_vec(x, ci=False):
     return cdf_vec_cpu(x) if not ci else co.cdf_vec_gpu(x)
 
 
-def cdf_vec_cpu(x):
+def cdf_vec_cpu(x: np.array) -> np.array:
     """
-    consult the function cdf in pricers_fast.pyx
-    works for both vectors and matrices
-    :param ci: cuda indicator
+    Computes the cdf of the standard normal random variable of a vector x.
+    Works for both vectors and matrices
+
+    :param x: vector/matrix to compute the standard normal variable of.
+    :returns: vector/matrix of results
+
     """
 
     l  = np.abs(np.array(x))
@@ -51,10 +52,11 @@ def cdf_vec_cpu(x):
     w = 1. - 0.3989422804 * np.exp(-l*l / 2) * (0.31938153 * k -0.356563782 * k2 +
                                                 1.781477937 * k2 * k + -1.821255978 * k4 + 1.330274429 * k4 * k)
 
+    # TODO: This part here is not optimal, as it computes both, but maybe it's faster than the conditional jump
     return w * (x >= 0.) + (1. - w) * (x < 0.)
 
 
-def pdf_vec(x):
+def pdf_vec(x: np.array) -> np.array :
     """
     Standardized normal vector of pdfs.
 
@@ -173,10 +175,14 @@ def apo_long_f(args):
                                       t, beta, sigma_L, cp_ind)
 
 
-def black_greeks( S_0, K, r, sigma, T
+def black_greeks( S_0   : np.double
+                , K     : np.double
+                , r     : np.double
+                , sigma : np.double
+                , T     : np.double
                 , cp_ind     = 'c'
                 , price_only = False
-                , fast_appx  = True ):
+                , fast_appx  = True ) -> np.array:
     """
     Black's formula implementation.
 
@@ -203,62 +209,48 @@ def black_greeks( S_0, K, r, sigma, T
     black = disc * (S_0 * n11 - K * n22)
 
     if price_only:
-        if cp_ind == 'c':
-            return black
-        else:
-            return black + (K - S_0) * disc
-    else:
-        n1 = scipy.stats.norm.pdf(d1)
-        if cp_ind == 'c':
-            delta = disc * n11
-            gamma = disc * n1 / (S_0 * sigma * sqrtt)
-            vega = disc * S_0 * n1 * sqrtt
-            theta = -S_0 * disc * n1 * sigma / (2. * sqrtt) + \
-                r * S_0 * disc * n11 - r * K * disc * n22
-            rho = K * T * disc * n22
-        else:
-            delta = disc * (n11 - 1.)
-            gamma = disc * n1 / (S_0 * sigma * sqrtt)
-            vega = disc * S_0 * n1 * sqrtt
-            theta = -S_0 * n1 * sigma / (2 * sqrtt) + \
-                r * K * disc * scipy.stats.norm.cdf(-d2) - r * S_0 * disc * scipy.stats.norm.cdf(-d1)
-            rho = - K * T * disc * scipy.stats.norm.cdf(-d2)
-        return np.array([black, delta, gamma, vega, theta, rho])
+        return black if cp_ind == 'c' else black + (K - S_0) * disc
+
+    # compute greeks too
+    n1 = scipy.stats.norm.pdf(d1)
+    delta = disc * n11
+    gamma = disc * n1 / (S_0 * sigma * sqrtt)
+    vega = disc * S_0 * n1 * sqrtt
+    theta = -S_0 * disc * n1 * sigma / (2. * sqrtt) + \
+            r * S_0 * disc * n11 - r * K * disc * n22
+    rho = K * T * disc * n22
+
+    if cp_ind == 'p':
+        # TODO: FINISH HERE!!!
+        delta = delta - disc
+        theta = -S_0 * n1 * sigma / (2 * sqrtt) + \
+              r * K * disc * scipy.stats.norm.cdf(-d2) - r * S_0 * disc * scipy.stats.norm.cdf(-d1)
+        rho   = - K * T * disc * scipy.stats.norm.cdf(-d2)  # TODO: THIS CAN BE MADE FASTER.
+
+    return np.array([black, delta, gamma, vega, theta, rho])
 
 
-def black_simple(date_, com, exp_, strike, quant=1.):
+def black_simple(mktDate, comName, expiry, strike):
     """
-    simple version of the black_simple
-    quant ... quantity
+    Simple version of the black volatility.
+
     """
-    T = ds.time_diff(date_, exp_)
-    fv = ds.read_data_matched_tenors(date_, com, com)
-    tenor_v, F_v = fv['fwd_tenors_dt'], fv['fwd_curve']
-    opt_ten_v, sigma_v = fv['option_tenors_dt'], fv['vol_surface_params']
-    tenor_idx = np.sum([t < ds.convert_str_datetime(exp_)
-                        for t in tenor_v])
-    S0 = F_v[tenor_idx]
-    vol_type = str(ds.vol_hash[com])
 
-    if vol_type == 'JWSS7':
-        vol_o = vols.jw7_params(date_, com, com)
-        sigma_u = vol_o.implied_vol(tenor_idx, strike, T)
-    elif vol_type == 'ATM_RR_WG':
-        vol_o = vols.ci7_param(date_, com, com)
-        sigma_u = vol_o.implied_vol_strike[tenor_idx](strike)
-    elif vol_type == 'ATM':
-        sigma_u = sigma_v[tenor_idx]
+    ttm = ds.time_diff(mktDate, expiry)  # time to maturity
+    sigma_u = vols.vols.getVolObject(mktDate, comName).implied_vol(tenor_idx, strike, )
 
-    return quant * black_greeks(S0, strike, -np.log(ds.DF(date_, exp_))/T, sigma_u, T)
+    return black_greeks(S0, strike, -np.log(ds.DF(mktDate, expiry))/ttm, sigma_u, ttm)
 
 
 def trivariate_spread_kirk(F_v, K, sigma_v, rho, T, DF,
                            lu_int_b=(-20., 20.) ):
     """
     trivariate spread option based on Kirk formula
+
       F_v = [F_1, F_2, F_3]
       sigma_v is a vector of sigmas [sigma_1, sigma_2, sigma_3]
       rho_v = [rho_12, rho_13, rho_23]
+
     """
 
     nu = sigma_v * np.sqrt(T)
@@ -429,7 +421,7 @@ def spread_option_exact(F_1, F_2, K, sigma_1, sigma_2, rho, T, DF):
                                     , np.inf )[0]
 
 
-def spread_option_krik_zero_strike(F_1, F_2, sigma_1, sigma_2, rho, T, DF):
+def spread_option_kirk_zero_strike(F_1, F_2, sigma_1, sigma_2, rho, T, DF):
     return spread_option_kirk(F_1, F_2, 0., sigma_1, sigma_2, rho, T, DF)
 
 
@@ -446,10 +438,11 @@ def apo_wo_basket (K, sim_t_i, T, mm, fwd_idx ):
                              for sim in range(mm.nb_simulations)]))
 
 
-def apo_long(F_c, K, df, T, sigma_c, rho_mat, Ti_c, ti_c, t, beta, sigma_L,
+def apoLong(F_c, K, df, T, sigma_c, rho_mat, Ti_c, ti_c, t, beta, sigma_L,
              call_put_ind='call'):
     """
     long APO calculation
+
     :param call_put_ind: 0 for CALL
                          1 for PUT
     :param F_c: futures curve
@@ -461,6 +454,7 @@ def apo_long(F_c, K, df, T, sigma_c, rho_mat, Ti_c, ti_c, t, beta, sigma_L,
     :param df: discount factor until the APO maturity  CHECK CHECK CHECK
     :param T: APO maturity CHECK CHECK CHECK
     """
+
     N = len(F_c)
 
     def A(T_a, T_b, t, t_i):
@@ -484,259 +478,3 @@ def apo_long(F_c, K, df, T, sigma_c, rho_mat, Ti_c, ti_c, t, beta, sigma_L,
     sigma = np.sqrt(np.log(M_2/M_1**2))/np.sqrt(T)
 
     return black_greeks(M_1, K, -np.log(df)/T, sigma, T, call_put_ind != 'call')
-
-
-def apo_vector(F_c_mat, apo_c_K, df, maturity,
-               sigma_c_fwd, rho_mat,
-               forward_tenors, option_tenors,
-               t, beta, sigma_L, cp_ind, nb_sims, nb_sims_switch=10000):
-    """
-    wrapper function for apo call/put
-    constructs a vector of apo prices for different F_c (columns of F_c_mat)
-    :param nb_sims_switch: at what number of simulations should it switch to the
-    """
-    if nb_sims < nb_sims_switch:
-        return np.array([pricers_fast.apo_long_fast(F_c_mat[:, sim], apo_c_K, df, maturity,
-                                                    sigma_c_fwd, rho_mat,
-                                                    forward_tenors, option_tenors,
-                                                    t, beta, sigma_L, cp_ind)
-                         for sim in range(nb_sims)])
-
-    else:  # nb_sims >= nb_sims_switch
-        nb_cores = mp.cpu_count()
-        pool = mp.Pool(processes=nb_cores)
-        # WRONG WRONG WRONG: EXT_TENORS MISSSING
-        return np.array(pool.map(apo_long_f, zip(range(nb_sims), [F_c_mat] * nb_sims,
-                                                 [apo_c_K] * nb_sims, [df] * nb_sims,
-                                                 [maturity] * nb_sims,
-                                                 [sigma_c_fwd] * nb_sims, [rho_mat] * nb_sims,
-                                                 [forward_tenors] * nb_sims,
-                                                 [option_tenors] * nb_sims,
-                                                 [t] * nb_sims,
-                                                 [beta] * nb_sims, [sigma_L] * nb_sims,
-                                                 [cp_ind]*nb_sims )))
-
-
-def cont_extend(mm, params):
-    """
-    contingent extendible pricing (extendible is a cont. ext with _one_ extension
-      period) - only multiple extensions currently allowed
-    forward curve simulated only up to 1 point
-    params - list of
-     [ ext_mat, swap_mat] ... maturity of the extendable and swap maturity (> ext_mat)
-     [ swap_K, ...] ... strikes of swap, APO call and puts
-     [ swap_nb ,...] ... amount of swaps, APO calls, and puts
-     [ beta, sigma_L ] ... samuelson params
-     sim_ind ... index of the mm.simulated_curves[0][sim_ind, appr. index, :] to take
-     fwd_corr ... correlation of the forward contracts, assumed constant
-    """
-    ext_mat_v = params[0][0]
-    swap_mat_v = params[0][1] # these two vectors have to be of the same length
-    # APO call/put strikes 
-    swap_K_v = params[1][0]
-    apo_c_K_v = params[1][1]
-    apo_p_K_v = params[1][2]
-    # APO call/put numbers 
-    swap_nb_v = params[2][0]
-    apo_c_nb_v = params[2][1]
-    apo_p_nb_v = params[2][2]
-    # samuelson params
-    beta = params[3][0]
-    sigma_L = params[3][1]
-    # additional params 
-    sim_ind = params[4]
-    fwd_corr = params[5] 
-    
-    nb_sims = shape (mm.simulated_curves[0])[2]
-    nb_ext = len (ext_mat_v) 
-    
-    # extract monthly indices between ext_mat and swap_mat for _first_ extension period 
-    ext_tenors = range ( sum (mm.forward_tenors_list[0] < ext_mat_v[0] ),
-                         sum (mm.forward_tenors_list[0] < swap_mat_v[0] ) ) 
-    
-    F_c_mat = mm.simulated_curves[0][sim_ind, ext_tenors, :] # the extendible maturiy time
-    sigma_c = mm.atm_vol_list[0][ext_tenors] # WRONG WRONG, NEEDS CORRECTION CORRECTION CORRECTION 
-    df = mm.DF(swap_mat_v[0]) / mm.DF(ext_mat_v[0])  # discount from beginning to the end
-    dfs = mm.DF(mm.forward_tenors_list[0][ext_tenors]) / mm.DF (ext_mat_v[0] ) # disc. factors until payment days
-    
-    rho_mat = vols.corr_hyp_sec_mat (fwd_corr, range(len (ext_tenors)))
-    t = 0.  # THIS SHOULD BE REMOVED REMOVED REMOVED 
-    
-    sigma_c_fwd = vols.forward_vols_sam(sigma_c, ext_mat_v[0], mm.forward_tenors_list[0][ext_tenors],
-                                        mm.option_tenors_list[0][ext_tenors], beta, sigma_L)
-
-    # skew adjustment of K (replaces sigma_c_fwd above)
-    call_K_mat_skew = pricers_fast.comp_skew_strikes (mm.simulated_curves[0][sim_ind, :, :], np.array(ext_tenors),
-                                                      mm.option_tenors_list[0], ext_mat_v[0], apo_c_K_v[0],
-                                                      beta, sigma_L)
-
-    delta_fwd = np.log(F_c_mat / call_K_mat_skew[ext_tenors, :]) / sigma_c.reshape((len(ext_tenors), 1))  # TENORS MISSING TENORS MISSING
-
-    sigma_skew_fwd = np.array([np.diag(mm.vol_surface_function[0](mm.option_tenors_list[0][ext_tenors],
-                                                                  delta_fwd[:, sim]))
-                               for sim in range (nb_sims)])
-
-    sigma_c_fwd = vols.forward_vols_sam(sigma_skew_fwd, ext_mat_v[0], mm.forward_tenors_list[0][ext_tenors],
-                                        mm.option_tenors_list[0][ext_tenors], beta, sigma_L)
-
-    # first extension 
-    # THIS EXTENSION CAN BE REWRITTEN 
-    nb_sims_switch = 100000
-    # apo call value computing 
-    if apo_c_nb_v[0] != 0:
-        apo_c_v = apo_vector(F_c_mat, apo_c_K_v[0], df, swap_mat_v[0] - ext_mat_v[0],
-                             sigma_c_fwd, rho_mat,
-                             mm.forward_tenors_list[0][ext_tenors],
-                             mm.option_tenors_list[0][ext_tenors],
-                             t, beta, sigma_L, 1., nb_sims, nb_sims_switch)
-    else:
-        apo_c_v = 0.
-
-    # apo put value computing 
-    if apo_p_nb_v[0] != 0.:
-        apo_p_v = apo_vector (F_c_mat, apo_c_K_v[0], df, swap_mat_v[0] - ext_mat_v[0],
-                              sigma_c_fwd, rho_mat,
-                              mm.forward_tenors_list[0][ext_tenors],
-                              mm.option_tenors_list[0][ext_tenors],
-                              t, beta, sigma_L, 0., nb_sims, nb_sims_switch)
-    else:
-        apo_p_v = 0.
-
-    # swap value computation 
-    disc_mat = dfs.reshape(len(dfs), 1)
-    swap_v = np.mean((F_c_mat - swap_K_v[0]) * disc_mat, axis=0)
-
-    if nb_ext == 1: 
-        portf = apo_c_nb_v[0] * apo_c_v + apo_p_nb_v[0] * apo_p_v + swap_nb_v[0] * swap_v
-    else: 
-        # further extensions (change of parameters) 
-        params_1 = [[ext_mat_v[1:nb_ext], swap_mat_v[1:nb_ext]],
-                    [swap_K_v[1:nb_ext], apo_c_K_v[1:nb_ext], apo_p_K_v[1:nb_ext]],
-                    [swap_nb_v[1:nb_ext], apo_c_nb_v[1:nb_ext], apo_p_nb_v[1:nb_ext]],
-                    [beta, sigma_L],
-                    sim_ind, fwd_corr]
-
-        # overwrite the market model for further extensions
-        ce = np.zeros(nb_sims)
-        mme = copy.deepcopy(mm)  # copy of the market object mm
-        for sim_nb in range(nb_sims):
-            mme.forward_curve_list[0] = mm.simulated_curves[0][sum (mm.forward_tenors_list[0] <ext_mat_v[0]) -1,:,sim_nb] 
-            sim_times = (ext_mat_v[1] - ext_mat_v[0]) * np.arange(5) / 5.
-            # THIS IS NOT COMPLETELY CORRECT NOT CORRECT, FORWARD_TENOR_LIST NOT UPDATED CORRECTLY
-            # + FORWARD VOLS IGNORED
-            mme.update_sim_times (sim_times) 
-            mme.simulate_curves(5000)
-            ce[sim_nb] = cont_extend(mme, params_1)
-
-        portf = apo_c_nb_v[0] * apo_c_v + apo_p_nb_v[0] * apo_p_v + swap_nb_v[0] * swap_v + ce
-    return mm.DF(ext_mat_v[0]) * np.mean(portf * (portf > 0))
-
-
-def spread_extend(mm, params):
-    """
-    spread extendible pricing
-    forward curve simulated only up to 1 point
-    :param [ext_mat, swap_mat]: maturity of the extendable and swap maturity (> ext_mat)
-    :param [swap_K, ...]: strikes of swap, APO call and puts
-    :param [swap_nb ,...]: amount of swaps, APO calls, and puts
-     [ beta, sigma_L ] ... samuelson params
-     sim_ind ... index of the mm.simulated_curves[0][sim_ind, appr. index, :] to take
-    """
-    ext_mat = params[0][0]
-    swap_mat = params[0][1]
-    # APO call/put strikes 
-    swap_K = params[1][0]
-    apo_c_K = params[1][1]
-    apo_p_K = params[1][2]
-    # APO call/put numbers 
-    swap_nb = params[2][0]
-    apo_c_nb = params[2][1]
-    apo_p_nb = params[2][2]
-    # samuelson params
-    beta = params[3][0]
-    sigma_L = params[3][1]
-    # additional params 
-    sim_ind = params[4] 
-    fwd_corr_1 = params[5][0]
-    fwd_corr_2 = params[5][1]
-
-    nb_sims = np.shape(mm.simulated_curves[0])[2]
-    
-    # extract monthly indices between ext_mat and swap_mat
-    ext_tenors = range(np.sum(mm.forward_tenors_list[0] < ext_mat),
-                       np.sum(mm.forward_tenors_list[0] < swap_mat))
-
-    F_c0_mat = mm.simulated_curves[0][sim_ind, ext_tenors, :]  # the extendible maturiy time of asset 0
-    F_c1_mat = mm.simulated_curves[1][sim_ind, ext_tenors, :]  # the extendible maturiy time of asset 1
-    sigma_c0 = mm.atm_vol_list[0][ext_tenors]  # WRONG WRONG, NEEDS CORRECTION CORRECTION CORRECTION
-    sigma_c1 = mm.atm_vol_list[1][ext_tenors]  # WRONG WRONG, NEEDS CORRECTION CORRECTION CORRECTION
-    df = mm.DF(swap_mat) / mm.DF(ext_mat)  # discount from beginning to the end
-    dfs = mm.DF(mm.forward_tenors_list[0][ext_tenors]) / mm.DF(ext_mat)  # disc. factors until payment days
-
-    rho_mat_0 = vols.corr_hyp_sec_mat (fwd_corr_1, range(len (ext_tenors))) # correlation for asset 0
-    rho_mat_1 = vols.corr_hyp_sec_mat (fwd_corr_2, range(len (ext_tenors))) # correlation for asset 1
-
-    t = 0.  # THIS SHOULD BE REMOVED REMOVED REMOVED 
-
-    sigma_c0_fwd = vols.forward_vols_sam(sigma_c0, ext_mat, mm.forward_tenors_list[0][ext_tenors], mm.option_tenors_list[0][ext_tenors], beta, sigma_L)
-    sigma_c1_fwd = vols.forward_vols_sam(sigma_c1, ext_mat, mm.forward_tenors_list[1][ext_tenors], mm.option_tenors_list[1][ext_tenors], beta, sigma_L)
-
-    # apo call value computing 
-    if (apo_c_nb != 0) and (nb_sims < 100000) :
-        apo_c_v = np.array([ pricers_fast.apo_long_fast (F_c0_mat[:,sim] - F_c1_mat[:,sim], apo_c_K, df,
-                                                         swap_mat - ext_mat,
-                                                         sigma_c_fwd, rho_mat,
-                                                         mm.forward_tenors_list[0][ext_tenors],
-                                                         mm.option_tenors_list[0][ext_tenors],
-                                                         t, beta, sigma_L, 1.)
-                             for sim in range(nb_sims)])
-
-    elif (apo_c_nb != 0.) and (nb_sims >= 100000):
-        # multiprocessing
-        nb_cores = mp.cpu_count()
-        pool = mp.Pool(processes=nb_cores)
-        apo_c_v = np.array(pool.map(apo_long_f, zip(range (nb_sims), [mm] * nb_sims, [F_c0_mat - F_c1_mat] * nb_sims,
-                                                    [apo_c_K] * nb_sims, [df] * nb_sims,
-                                                    [swap_mat - ext_mat] * nb_sims,
-                                                    [sigma_c] * nb_sims, [rho_mat] * nb_sims,
-                                                    [mm.forward_tenors_list[0][ext_tenors]] * nb_sims,
-                                                    [mm.option_tenors_list[0][ext_tenors]]* nb_sims,
-                                                    [t]* nb_sims, [beta]*nb_sims, [sigma_L]*nb_sims, 1.)))
-    else:
-        apo_c_v = 0.
-
-    # apo put value computing 
-    if (apo_p_nb != 0.) and (nb_sims < 100000):
-        apo_p_v = np.array([pricers_fast.apo_long_fast(F_c0_mat[:,sim] - F_c1_mat[:,sim], apo_p_K, df,
-                                                       swap_mat - ext_mat,
-                                                       sigma_c, rho_mat,
-                                                       mm.forward_tenors_list[0][ext_tenors],
-                                                       mm.option_tenors_list[0][ext_tenors],
-                                                       t, beta, sigma_L, 0.0)
-                            for sim in range(nb_sims)])
-    elif (apo_p_nb != 0.) and (nb_sims >= 100000):  # multiprocessing
-        nb_cores = mp.cpu_count()
-        pool = mp.Pool(processes=nb_cores)
-        apo_p_v = np.array(pool.map(apo_long_f, zip(range(nb_sims), [mm] * nb_sims, [F_c0_mat - F_c1_mat] * nb_sims,
-                                                    [apo_c_K] * nb_sims, [df] * nb_sims,
-                                                    [swap_mat - ext_mat] * nb_sims,
-                                                    [sigma_c] * nb_sims, [rho_mat] * nb_sims,
-                                                    [mm.forward_tenors_list[0][ext_tenors]] * nb_sims,
-                                                    [mm.option_tenors_list[0][ext_tenors]]* nb_sims,
-                                                    [t]* nb_sims, [beta]*nb_sims, [sigma_L]*nb_sims, 0.)))
-    else:
-        apo_p_v = 0.
-
-    # swap value computation 
-    disc_mat = dfs.reshape(len(dfs),1)
-    swap_v = np.mean((F_c0_mat - F_c1_mat - swap_K) * disc_mat, axis=0)
-    # final portfolio value
-    portf = apo_c_nb * apo_c_v + apo_p_nb * apo_p_v + swap_nb * swap_v
-    return mm.DF(ext_mat) * np.mean(portf * (portf > 0))
-
-
-def swap_cva(F_sim, swap_rate, cuda_ind=False):
-    if not cuda_ind:
-        return np.sum(F_sim - swap_rate, axis=0)
-    else:
-        return co.colsum_cuda_last(F_sim - swap_rate)

@@ -1,9 +1,10 @@
-# conmputes LMPs from generation prices
-import config
+#
+# conmputes location marginal pricing (LMP)
+#
+
 import numpy as np
 from openopt import LP
-import networkx as nx
-import matplotlib.pyplot as plt
+
 import copy
 import glpk
 
@@ -15,6 +16,7 @@ def find_pos_y(node_1, node_2, gl, pl):
     find the position of (node_1, node_2) connection in PL
     :param pl: list of (node_1, node_2, c_12)
     """
+
     n1, n2, c = pl[0]
     k = 0
     while ((node_1, node_2) != (n1, n2)) and ((node_2, node_1) != (n1, n2)):
@@ -109,14 +111,18 @@ def comp_val(gl, pl, show_sol=False, debug_ind=False,
     sol_v = solution.xf
     if show_sol:
         # bus generation: first nb_nodes
-        print "Bus: ", sol_v[:nb_nodes]
+        print("Bus: ", sol_v[:nb_nodes])
         for line_idx, (node_1, node_2, c) in enumerate(pl):
-            print "Line", (node_1, node_2), "transm:", sol_v[nb_nodes + line_idx]
+            print("Line", (node_1, node_2), "transm:", sol_v[nb_nodes + line_idx])
 
     return solution.ff
 
 
 def comp_lmp(gl, pl, show_sol=False, debug_ind=False, solver='glpk'):
+    """
+    Compute locational marginal pricing.
+
+    """
     comp_basic = comp_val(gl, pl, show_sol=show_sol, debug_ind=debug_ind)
     lmp = np.empty(len(gl))
     for node_nb, generation, load, gen_price in gl:

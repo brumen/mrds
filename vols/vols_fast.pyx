@@ -1,8 +1,7 @@
 # Fast version of the vol functions
 
 cimport numpy as np
-import pricers_fast
-import openopt
+cimport pricers.pricers_fast
 
 # declarations of external functions 
 cdef extern from "math.h":
@@ -32,9 +31,7 @@ cdef double norm_strike(double S0, double K, double sigma, double ttm):
 cdef double rational_approximation (double t):
     # Abramowitz and Stegun formula 26.2.23
     # absolute value of the error should be less than 4.5 e-4
-    numerator = (0.010328 * t + 0.802853)*t + 2.515517
-    denominator = ((0.001308*t + 0.189269)*t + 1.432788)*t + 1.
-    return t - numerator / denominator
+    return t - ((0.010328 * t + 0.802853)*t + 2.515517)/ (((0.001308*t + 0.189269)*t + 1.432788)*t + 1.)
 
 
 cdef double normal_ppf(double p):
@@ -50,7 +47,7 @@ cdef double b(double x, double sigma, double theta):
 
     if sigma != 0.:
         d1 = x/sigma + sigma /2.
-        return theta * e1 * pricers_fast.cdf(theta * d1) - theta/e1 * pricers_fast.cdf(theta*(d1 - sigma))
+        return theta * e1 * pricers.pricers_fast.cdf(theta * d1) - theta/e1 * pricers.pricers_fast.cdf(theta*(d1 - sigma))
     else:
         if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0): #d1 = +infty or d1 = -infty 
             return theta * e1 - theta / e1
@@ -94,12 +91,12 @@ def black_vol_inverse_normalized(double beta, double x, double theta, double tol
     else:
         e1 = exp(theta * x / 2.0)
         sigma = - 2. * normal_ppf((e1 - beta) / (e1 - b_c(x,theta)) * \
-                                         pricers_fast.cdf (-sqrt(fabs(x)/2.0)))
+                                         pricers.pricers_fast.cdf (-sqrt(fabs(x)/2.0)))
 
     sigma_new = sigma * (1. + 2. * tol )
     delta_sigma = 2. * tol 
 
-    # HACK, possible correct here
+    # TODO: possibly correct here
     if npy_isnan(sigma):
         return 1e-6
 
@@ -112,20 +109,3 @@ def black_vol_inverse_normalized(double beta, double x, double theta, double tol
         sigma = sigma_new
 
     return sigma_new
-
-
-# jw7 parameters structure
-cdef class jw7p:
-    cdef double sigma_0, A, B, C, P, alphaC, alphaP
-    def __init__(self, double sigma_0, 
-                 double A, double B, double C, double P, 
-                 double alphaC, double alphaP):
-        self.sigma_0 = sigma_0
-        self.A = A
-        self.B = B
-        self.C = C
-        self.P = P
-        self.alphaC = alphaC
-        self.alphaP = alphaP
-
-
