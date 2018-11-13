@@ -1,23 +1,35 @@
 # test for the freight model
-import config
-import numpy as np
+
+import datetime, numpy as np
+
 import freight
 
-fwd_date = '20150401'
+from unittest import TestCase
+
+mktDate = datetime.date(2015, 4, 1)  # '20150401'
 T = 4  # nb. time periods
-locs = ['AMS', 'NYC', 'MIA', 'LA', 'SHA']
-N_init = np.array([3, 4, 1, 1, 8])  # initial distribution of tankers
+
+N_init = { 'AMS': 3
+         , 'NYC': 4
+         , 'MIA': 1
+         , 'LA' : 1
+         , 'SHA': 8 }  # initial distribution of tankers
+
 fwd_curves = {'AMS': np.array([95., 96., 97., 98.]),
               'NYC': np.array([92., 93., 94., 95.]),
               'MIA': np.array([91., 92., 93., 94.]),
               'LA': np.array([90., 91., 95., 100.]),
               'SHA': np.array([85., 90., 95., 100.])}
 
+fwdFunction = lambda mktDate, location, t: fwd_curves[location][0]  # some sample
+
 vol_curves = {'AMS': np.array([0.3, 0.32, 0.35, 0.4]),
               'NYC': np.array([0.3, 0.32, 0.35, 0.4]),
               'MIA': np.array([0.3, 0.32, 0.35, 0.4]),
               'LA': np.array([0.3, 0.32, 0.35, 0.4]),
               'SHA': np.array([0.3, 0.32, 0.35, 0.4])}
+
+volFunction = lambda mktDate, location, t: vol_curves[location][0]  # simple
 
 # correlation matrix
 corr_mtx = {('AMS', 'AMS'): 0.98,
@@ -48,6 +60,24 @@ travel_mtx = {('AMS', 'NYC'): 1,
               ('MIA', 'SHA'): 5,
               ('LA', 'SHA'): 3}
 
-b = freight.Freight(fwd_date, locs, fwd_curves, vol_curves,
-                    corr_mtx, travel_mtx, N_init, T)
-#  b.set_n_solve()
+
+class FreightTest(TestCase):
+
+    def test_just_run(self):
+        """
+        Runs the test
+
+        """
+
+        freight1 = freight.Freight( mktDate
+                                  , fwdFunction
+                                  , volFunction
+                                  , corr_mtx
+                                  , travel_mtx
+                                  , N_init
+                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,30)])
+
+        result = freight1.freightHedge()
+        freight1.representHedge()  # this prints out the hedge
+
+        self.assertTrue(True)
