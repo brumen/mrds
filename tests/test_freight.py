@@ -75,9 +75,9 @@ class FreightTest(TestCase):
                                   , corr_mtx
                                   , travel_mtx
                                   , N_init
-                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,30)])
+                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
-        result = freight1.freightHedge()
+        # result = freight1.freightHedge()
         freight1.representHedge()  # this prints out the hedge
 
         self.assertTrue(True)

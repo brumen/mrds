@@ -18,11 +18,11 @@ class Freight(object):
     """
 
     def __init__( self
-                , mktDate     : datetime.date
-                , fwdCurveFct : function
-                , volCurveFct : function
-                , corrMatrix  : dict
-                , travelMatrix : dict
+                , mktDate          : datetime.date
+                , fwdCurveFct  # function
+                , volCurveFct  # function
+                , corrMatrix       : dict
+                , travelMatrix     : dict
                 , initialLocations : dict
                 , timeGrid
                 , dcf = 365.25):
@@ -45,9 +45,9 @@ class Freight(object):
         self.fwdCurveFct  = fwdCurveFct
         self.volCurveFct  = volCurveFct
         self._corrMatrix  = corrMatrix
-        self.travelMatrix = travelMatrix  # number of periods between different locations
-        self._timeGrid    = timeGrid      # grid used to compute the value of the freight portfolio.
-        self._dcf         = dcf           # day count factor
+        self._travelMatrix = travelMatrix  # number of periods between different locations
+        self._timeGrid    = timeGrid       # grid used to compute the value of the freight portfolio.
+        self._dcf         = dcf            # day count factor
         self._initialLocations = initialLocations  # initial locations of the portfolio
 
         # simple derived variables
@@ -55,9 +55,7 @@ class Freight(object):
         self._nbLocations     = len(self._locations)     # number of different locations
         self.__nbsToLocations = {idx: loc for (idx, loc) in enumerate(self._locations)}
         self.__nbsToTimeGrid  = {idx: timeStep for (idx, timeStep) in enumerate(self._timeGrid) }
-        self.__nbShips        = np.sum(initialLocations.values())  # number of tankers, ships
         self.__nbTimePeriods  = len(self._timeGrid)                # number of time periods
-
 
         # cached values, used as properties
         self.__valueVec = None  # vector of all individual values
@@ -209,33 +207,33 @@ class Freight(object):
                             self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods-1)//2 + 3 * self._nbLocations * self.__nbTimePeriods))
 
         # equality vector
-        self.__EV = np.zeros((self._nbLocations * self.__nbTimePeriods + self.__nbTimePeriods - 1, 1))
+        self.__EV = np.zeros(self._nbLocations * self.__nbTimePeriods + self.__nbTimePeriods - 1)
 
         row_eq_idx = 0  # row indx. for equalities
 
         # initial setting of N 
         for i in range(self._nbLocations):
             self.__EM[row_eq_idx, self.N(i, 0)] = 1.
-            self.__EV[row_eq_idx] = self._initialLocations[self._nbsToLocations[i]]
+            self.__EV[row_eq_idx] = self._initialLocations[self.__nbsToLocations[i]]
             row_eq_idx += 1
 
         # sum_i n_i,t = K 
         for t in range(1, self.__nbTimePeriods):  # t=0 already given above
             for i in range(self._nbLocations):
                 self.__EM[row_eq_idx, self.N(i, t)] = 1
-            self.__EV[row_eq_idx] = self.__nbShips
+            self.__EV[row_eq_idx] = sum(self._initialLocations.values())  # number of tankers, ships
             row_eq_idx += 1
 
         # constraint n_i,t = n_i,t-1 + sum + sum
         for t in range(1, self.__nbTimePeriods):
             for i in range(self._nbLocations):
-                self.__EM[row_eq_idx, self.N(i, t)] = 1
-                self.__EM[row_eq_idx, self.N(i, t-1)] = -1  # set up
+                self.__EM[row_eq_idx, self.N(i, t)]   = 1.
+                self.__EM[row_eq_idx, self.N(i, t-1)] = -1.
                 for j in range(self._nbLocations):
                     for u in range(t):
-                        self.__EM[row_eq_idx, self.X(j, i, u, t)] = -1
+                        self.__EM[row_eq_idx, self.X(j, i, u, t)] = -1.
                     for u in range(t+1, self.__nbTimePeriods):
-                        self.__EM[row_eq_idx, self.X(i, j, t, u)] = 1
+                        self.__EM[row_eq_idx, self.X(i, j, t, u)] = 1.
                 row_eq_idx += 1
 
         return self.__EM, self.__EV
@@ -243,7 +241,7 @@ class Freight(object):
     @property
     def valueVec(self):
         """
-        Setting the valuation vector
+        Setting the valuation vector - this is set for _MINIMIZING FUNCTION, THEREFORE THE SIGNS ARE INVERSED.
 
         """
 
@@ -252,15 +250,19 @@ class Freight(object):
 
         self.__valueVec = np.zeros(self._nbLocations ** 2 * self.__nbTimePeriods * (self.__nbTimePeriods - 1) // 2 + 3 * self._nbLocations * self.__nbTimePeriods)
 
-        fwdCurves = [self.fwdVolCurves(self.__nbsToLocations[location], self._timeGrid) for location in self._locations]
+        fwdCurves = [self.fwdVolCurves(location, self._timeGrid) for location in self._locations]
 
         for t in range(self.__nbTimePeriods):  # time period
             for i in range(self._nbLocations):  # cities
-                self.__valueVec[self.Z(i, t)] =   fwdCurves[i][t]
-                self.__valueVec[self.Y(i, t)] = - fwdCurves[i][t]
+                self.__valueVec[self.Z(i, t)] = - fwdCurves[i][t]
+                self.__valueVec[self.Y(i, t)] =   fwdCurves[i][t]
                 for j in range(self._nbLocations):
                     for u in range(t+1, self.__nbTimePeriods):  # TODO: CHECK IF THIS IS t+1 or NOT
-                        self.__valueVec[self.X(i, j, t, u)] = self.V(i, j, t, u)
+
+                        self.__valueVec[self.X(i, j, t, u)] = - self.V( self.__nbsToLocations[i]
+                                                                      , self.__nbsToLocations[j]
+                                                                      , self.__nbsToTimeGrid[t]
+                                                                      , self.__nbsToTimeGrid[u] )
 
         return self.__valueVec
 
@@ -288,18 +290,22 @@ class Freight(object):
         """
 
         result = self.freightHedge()
+        value  = np.sum(np.array(self.valueVec) * np.array(result))
+
+        print('Portfolio value: {0}'.format(value))
 
         # TODO: THIS IS BRUTE FORCE, COULD DEFINITELY BE IMPROVED.
         for t in range(self.__nbTimePeriods):  # time period
             for i in range(self._nbLocations):  # cities
                 if result[self.Z(i,t)] != 0.:
-                    print("Withdrawal from city {0} on {1}".format(self.__nbsToLocations[i], t))
+                    print("Withdrawal {2} from city {0} on {1}".format(self.__nbsToLocations[i], self._timeGrid[t], result[self.Z(i,t)]))
                 if result[self.Y(i,t)] != 0:
-                    print("Injecting into city {0} on {1}".format(self.__nbsToLocations[i], t))
+                    print("Injecting {2} into city {0} on {1}".format(self.__nbsToLocations[i], self._timeGrid[t], result[self.Y(i,t)]))
                 for j in range(self._nbLocations):
                     for u in range(t + 1, self.__nbTimePeriods):  # TODO: CHECK IF THIS IS t+1 or NOT
                         if result[self.X(i, j, t, u)] != 0.:
-                            print("Withdraw/Inject from {0} to {1} between {2} - {3}".format( self.__nbsToLocations[i]
-                                                                                            , self.__nbsToLocations[j]
-                                                                                            , self._timeGrid[t]
-                                                                                            , self._timeGrid[u]))
+                            print("Withdraw/Inject {4} from {0} to {1} between {2} - {3}".format( self.__nbsToLocations[i]
+                                                                                                , self.__nbsToLocations[j]
+                                                                                                , self._timeGrid[t]
+                                                                                                , self._timeGrid[u]
+                                                                                                , result[self.X(i,j,t,u)]))

@@ -1,6 +1,5 @@
 # ONLY USED DATE POSSIBLE: 20150401
 import datetime, numpy as np, scipy.interpolate, matplotlib.pyplot as plt, calendar as cal
-
 import ds_data
 
 # forward codes
@@ -246,49 +245,16 @@ def add_days_str(date_, days):
     return convert_datetime_str(convert_str_datetime(date_) + datetime.timedelta(days=days))
 
 
-def get_forward_curve(fwd: str, date_ : datetime.date):
+def get_forward_curve( comName: str
+                     , date_ : datetime.date):
     """
     Gets the forward curve (ALWAYS USE DATE 20150410) for a particular date.
 
-    :param fwd: name of the curve
-    :type fwd: str
-    :param date_: forward date
-    :type date_: datetime.date
+    :param comName: name of the commodity curve
+    :param date_: date for which the com curve is needed (not used here, but the interface should be such)
     """
 
-    if fwd == 'WTI':
-        return ds_data.wti_curve_dates, ds_data.wti_curve_vals
-
-    if fwd == 'BRENT':
-        curve_dates = ds_data.brent_curve_dates
-        curve_vals_init = ds_data.brent_curve_vals
-        brent_spread = np.linspace(6, 7, len(curve_vals_init))  # fictitious spread
-        curve_vals = [x + s for x, s in zip(curve_vals_init, brent_spread)]
-        return curve_dates, curve_vals
-
-    if fwd == 'ATSI-PEAK':
-        return ds_data.atsi_peak_curve_dates, ds_data.atsi_peak_curve_vals
-
-    if fwd == 'ATSI_7X8':
-        return ds_data.atsi_7x8_curve_dates, ds_data.atsi_7x8_curve_vals
-
-    if fwd == 'ATSI_2X16':
-        return ds_data.atsi_2x16_curve_dates, ds_data.atsi_2x16_curve_vals
-
-    if fwd == 'NG_MICHCON_GD-PEAK':
-        return ds_data.ng_michcon_gd_peak_dates, ds_data.ng_michcon_gd_peak_curve_vals
-
-    if fwd == 'NG_MICHCON_CASHVOL':
-        return ds_data.ng_michcon_cv_curve_dates, ds_data.ng_michcon_cv_curve_vals
-
-    if fwd == 'PJMW-OFFPEAK_CV':
-        return ds_data.pjm_offpeak_cv_curve_dates, ds_data.pjm_offpeak_cv_curve_vals
-
-    if fwd == 'PJMW-PEAK_CV':
-        return ds_data.pjm_peak_cv_curve_dates, ds_data.pjm_peak_cv_curve_vals
-
-    if fwd == 'DISCOUNT':
-        return ds_data.discount_curve_dates, ds_data.discount_curve_vals
+    return fwd_hash[comName]
 
 
 def get_forward_curve_slice(fwd, date_, date_b, date_e,
@@ -339,30 +305,16 @@ def get_forward_curve_plot(fwd, date_):
     plt.show()
 
 
-def get_vol_curve(fwd, date_):
+def get_vol_curve( comName : str
+                 , date_   : datetime.date ):
     """
-    Gets the vol curve, date_ in string form '20150416'
+    Gets the vol curve comName for date date_.
 
     """
 
-    if fwd == 'WTI':
-        return ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals
-    elif fwd == 'BRENT':
-        return ds_data.brent_vol_dates    , ds_data.brent_vol_vals
-    elif fwd == 'ATSI-PEAK':
-        return ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals
-    elif fwd == 'ATSI_2X16':
-        return ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals
-    elif fwd == 'ATSI_7X8':
-        return ds_data.atsi_7x8_vol_dates , ds_data.atsi_7x8_vol_vals
-    elif fwd == 'NG_MICHCON_GD-PEAK':
-        return ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals
-    elif fwd == 'NG_MICHCON_CASHVOL':
-        return ds_data.ng_michcon_cv_vol_dates     , ds_data.ng_michcon_cv_vol_vals
-    elif fwd == 'PJMW-OFFPEAK_CV':
-        return ds_data.pjm_offpeak_cv_vol_dates    , ds_data.pjm_offpeak_cv_vol_vals
-    elif fwd == 'PJMW-PEAK_CV':
-        return ds_data.pjm_peak_cv_vol_dates       , ds_data.pjm_peak_cv_vol_vals
+    volType, volDates, volCurve = vol_hash[comName]
+
+    return {'vol_name': comName, 'vol_type': volType, 'vol_dates': volDates, 'vol_curve': volCurve}
 
 
 def get_vol_curve_pretty2(fwd, date_):
@@ -498,14 +450,15 @@ def read_data_matched_tenors(sim_date, fwd_curve, vol_curve,
             'vol_surface_params': np.array(vol_surface_params_final)}
 
 
-def read_discount_curve(date_):
+def read_discount_curve(date_ : datetime.date, dcf = 365.25):
     """
-    Returns the discount curve from ????
+    Returns the discount curve on date date_
+
     """
-    base_date = convert_str_datetime(date_)
+
     disc_tenors, yield_rates = get_forward_curve('DISCOUNT', date_)
-    diffs = [ten_ - base_date for ten_ in disc_tenors]
-    disc_tenors_numeric = np.array([float(elt.days) for elt in diffs])/365.
+    diffs = [tenor - date_ for tenor in disc_tenors]
+    disc_tenors_numeric = np.array([float(elt.days) for elt in diffs])/dcf
     yield_rates = np.array([float(x) for x in yield_rates])
     disc_curve = np.exp(-disc_tenors_numeric * yield_rates)
 
@@ -528,42 +481,61 @@ def code_to_date(code_):
     return year_str + month_str + '01'
 
 
-def DF_single(date_, date_fut):
+def DF_single(date_ : datetime.date, date_fut : datetime.date, dcf = 365.25) -> float :
+    """
 
-    def DF_new(date_, t):
-        return scipy.interpolate.splev(t, read_discount_curve(date_)['discount_function'])
+    """
 
-    def DF_code_new(date_, code_):
-        return DF_date_new(date_, code_to_date(code_))
-
-    def DF_date_new(date_, date_DF):
-        return DF_new(date_, (convert_str_datetime(date_DF) - convert_str_datetime(date_)).days / 365.)
-
-    if (type(date_fut) is int) or (type(date_fut) is float) or \
-            (type(date_fut) is np.double):  # format double
-        return DF_new(date_, date_fut)
-    else:
-        return DF_date_new(date_, date_fut)
+    return scipy.interpolate.splev( (date_fut - date_).days / dcf, read_discount_curve(date_)['discount_function'])
 
 
-def DF(date_, date_fut):
+def DF(date_ : datetime.date , date_fut):
+    """
+    Discount factor from date date_ till date_fut.
+
+    :param date_: from date
+    :param date_fut: future date to which the discount is constructed.
+    :returns: discount between two dates
+    """
 
     if type(date_fut) is list:
-        return [DF_single(date_, date_f_single) for date_f_single in date_fut]
-    elif type(date_fut) is np.ndarray:
-        return np.array([DF_single(date_, date_f_single) for date_f_single in date_fut])
-    else:
-        return DF_single(date_, date_fut)
+        return [DF_single(date_, date_f) for date_f in date_fut]
+
+    return DF_single(date_, date_fut)
 
     
-# vol hash, has to be moved
-vol_hash = dict()
-vol_hash['WTI'      ] = 'JWSS7'
-vol_hash['BRENT'    ] = 'JWSS7'
-vol_hash['ATSI-PEAK'] = 'JWSS7'
-vol_hash['ATSI_7X8' ] = 'JWSS7'
-vol_hash['ATSI_2X16'] = 'JWSS7'
-vol_hash['NG_MICHCON_GD-PEAK'] = 'ATM'
-vol_hash['NG_MICHCON_CASHVOL'] = 'ATM'
-vol_hash['PJMW-OFFPEAK_CV'   ] = 'ATM'
-vol_hash['PJMW-PEAK_CV'      ] = 'ATM'
+# mapping of commodity names to vol parametrization
+vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals)
+           , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates, ds_data.brent_vol_vals)
+           , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals)
+           , 'ATSI_7X8'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)
+           , 'ATSI_2X16'         : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals)
+           , 'NG_MICHCON_GD-PEAK': ('ATM', ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals)
+           , 'NG_MICHCON_CASHVOL': ('ATM', ds_data.ng_michcon_cv_vol_dates, ds_data.ng_michcon_cv_vol_vals)
+           , 'PJMW-OFFPEAK_CV'   : ('ATM', ds_data.pjm_offpeak_cv_vol_dates, ds_data.pjm_offpeak_cv_vol_vals)
+           , 'PJMW-PEAK_CV'      : ('ATM', ds_data.pjm_peak_cv_vol_dates, ds_data.pjm_peak_cv_vol_vals) }
+
+
+def brentCurve():
+    """
+    Ancillary routine to generate brent curve.
+    """
+
+    curve_dates = ds_data.brent_curve_dates
+    curve_vals_init = ds_data.brent_curve_vals
+    brent_spread = np.linspace(6, 7, len(curve_vals_init))  # fictitious spread
+    curve_vals = [x + s for x, s in zip(curve_vals_init, brent_spread)]
+
+    return curve_dates, curve_vals
+
+
+fwd_hash = { 'WTI':                (ds_data.wti_curve_dates, ds_data.wti_curve_vals)
+           , 'BRENT':              brentCurve()
+           , 'ATSI-PEAK':          (ds_data.atsi_peak_curve_dates, ds_data.atsi_peak_curve_vals)
+           , 'ATSI_7X8':           (ds_data.atsi_7x8_curve_dates, ds_data.atsi_7x8_curve_vals)
+           , 'ATSI_2X16':          (ds_data.atsi_2x16_curve_dates, ds_data.atsi_2x16_curve_vals)
+           , 'NG_MICHCON_GD-PEAK': (ds_data.ng_michcon_gd_peak_dates, ds_data.ng_michcon_gd_peak_curve_vals)
+           , 'NG_MICHCON_CASHVOL': (ds_data.ng_michcon_cv_curve_dates, ds_data.ng_michcon_cv_curve_vals)
+           , 'PJMW-OFFPEAK_CV':    (ds_data.pjm_offpeak_cv_curve_dates, ds_data.pjm_offpeak_cv_curve_vals)
+           , 'PJMW-PEAK_CV':       (ds_data.pjm_peak_cv_curve_dates, ds_data.pjm_peak_cv_curve_vals)
+           , 'DISCOUNT':           (ds_data.discount_curve_dates, ds_data.discount_curve_vals) }
