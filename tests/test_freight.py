@@ -1,6 +1,6 @@
 # test for the freight model
 
-import datetime, numpy as np
+import datetime, numpy as np, scipy.interpolate
 
 import freight
 
@@ -21,15 +21,33 @@ fwd_curves = {'AMS': np.array([95., 96., 97., 98.]),
               'LA': np.array([90., 91., 95., 100.]),
               'SHA': np.array([85., 90., 95., 100.])}
 
-fwdFunction = lambda mktDate, location, t: fwd_curves[location][0]  # some sample
+fwd_dates_all = [datetime.date(2015, 4, 1), datetime.date(2015, 5,1), datetime.date(2015, 6, 1), datetime.date(2015, 7, 1)]
+fwd_dates = {'AMS': fwd_dates_all,
+             'NYC': fwd_dates_all,
+             'MIA': fwd_dates_all,
+             'LA': fwd_dates_all,
+             'SHA': fwd_dates_all }
 
-vol_curves = {'AMS': np.array([0.3, 0.32, 0.35, 0.4]),
-              'NYC': np.array([0.3, 0.32, 0.35, 0.4]),
-              'MIA': np.array([0.3, 0.32, 0.35, 0.4]),
-              'LA': np.array([0.3, 0.32, 0.35, 0.4]),
-              'SHA': np.array([0.3, 0.32, 0.35, 0.4])}
 
-volFunction = lambda mktDate, location, t: vol_curves[location][0]  # simple
+def fwdFunction(date_ : datetime.date, location : str, future_date : datetime.date, dcf = 365.25, fwdVol='fwd'):
+    """
+    Returns the discount curve on date date_
+
+    """
+
+    diffs = [tenor - date_ for tenor in (fwd_dates if fwdVol == 'fwd' else vol_dates)[location]]
+    disc_tenors_numeric = np.array([float(elt.days) for elt in diffs])/dcf
+    curve_numeric = scipy.interpolate.splrep(disc_tenors_numeric, (fwd_curves if fwdVol == 'fwd' else vol_curves)[location])
+
+    return scipy.interpolate.splev((future_date - date_).days / dcf, curve_numeric)
+
+
+vol_curves = {'AMS': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
+              'NYC': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
+              'MIA': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
+              'LA': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
+              'SHA': np.array([0.3, 0.32, 0.35, 0.4]) + 10}
+vol_dates = fwd_dates
 
 # correlation matrix
 corr_mtx = {('AMS', 'AMS'): 0.98,
@@ -63,6 +81,10 @@ travel_mtx = {('AMS', 'NYC'): 1,
 
 class FreightTest(TestCase):
 
+    def test_fwd_vol_fct(self):
+        print (fwdFunction(datetime.date(2015, 4, 1), 'NYC', datetime.date(2015, 5, 1)))
+        self.assertTrue(True)
+
     def test_just_run(self):
         """
         Runs the test
@@ -71,7 +93,7 @@ class FreightTest(TestCase):
 
         freight1 = freight.Freight( mktDate
                                   , fwdFunction
-                                  , volFunction
+                                  , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
                                   , corr_mtx
                                   , travel_mtx
                                   , N_init
