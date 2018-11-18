@@ -1,14 +1,14 @@
 # test for the freight model
 
 import datetime, numpy as np, scipy.interpolate
+from unittest import TestCase
 
 import freight
 
-from unittest import TestCase
 
-mktDate = datetime.date(2015, 4, 1)  # '20150401'
-T = 4  # nb. time periods
+mktDate = datetime.date(2015, 4, 1)
 
+# initial location of tankers.
 N_init = { 'AMS': 3
          , 'NYC': 4
          , 'MIA': 1
@@ -94,12 +94,9 @@ cost_mtx = {('AMS', 'NYC'): 0.1,
 
 class FreightTest(TestCase):
 
-    def test_fwd_vol_fct(self):
-        print (fwdFunction(datetime.date(2015, 4, 1), 'NYC', datetime.date(2015, 5, 1)))
-        self.assertTrue(True)
-
     def test_xyz_locations(self):
 
+        nbTimePeriods = 5
         freight1 = freight.Freight( mktDate
                                   , fwdFunction
                                   , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
@@ -107,21 +104,23 @@ class FreightTest(TestCase):
                                   , travel_mtx
                                   , cost_mtx
                                   , N_init
-                                  , [mktDate + datetime.timedelta(days=30*idx) for idx in range(0,2)])
+                                  , [mktDate + datetime.timedelta(days=30*idx) for idx in range(0,nbTimePeriods)])
 
+        allIndices = []
         for i in range(freight1._nbLocations):
-            for t in range(0, freight1._Freight__nbTimePeriods):
-                print('N', (i, t), freight1._N(i, t))
+            for t in range(nbTimePeriods):
+                allIndices.append(freight1._N(i,t))
                 for j in range(freight1._nbLocations):
                     for u in range(t):
-                        print ('X', (i,j,u, t), freight1._X(i, j, u, t))                        
-                        print ('Y', (i,j,u, t), freight1._Y(i, j, u, t))
+                        allIndices.append(freight1._X(i, j, u, t))
+                        allIndices.append(freight1._Y(i, j, u, t))
 
-        self.assertTrue(True)
+        self.assertEqual(sorted(allIndices), range(5**2 * nbTimePeriods* (nbTimePeriods- 1) \
+               + nbTimePeriods * 5 ))  # 5 - number of locations
 
     def test_just_run(self):
         """
-        Runs the test
+        Runs the test and reports results.
 
         """
 
@@ -132,9 +131,8 @@ class FreightTest(TestCase):
                                   , travel_mtx
                                   , cost_mtx
                                   , N_init
-                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,100)])
+                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
-        # result = freight1.freightHedge()
         freight1.representHedge()  # this prints out the hedge
 
         self.assertTrue(True)

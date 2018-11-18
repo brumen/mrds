@@ -1,7 +1,7 @@
 # Freight model implementation
 #
 
-import datetime, numpy as np
+import datetime, numpy as np, logging
 from scipy.optimize import linprog
 
 from ds import DF
@@ -13,6 +13,7 @@ class FreightException(Exception):
 
 
 LARGE_NUMBER = 1000000.  # large number to prohibit travel between certain directions & times.
+logger = logging.getLogger(__name__)
 
 
 class Freight(object):
@@ -122,7 +123,7 @@ class Freight(object):
         """
         Conditional transport variable.
         Location of the variable x_(i,j,t,u) in the matrix, t<u
-        Index corresponding to shipping from city i to city j between time t and u conditional. This is a BENEFIT.
+        Index corresponding to shipping from city i to city j between time t and u conditional.
 
         """
 
@@ -147,7 +148,7 @@ class Freight(object):
                + i + t * self._nbLocations
 
     @property
-    def _nbLPVariables(self):
+    def _nbLPVariables(self) -> int:
         """
         Number of variables for the Linear problem. (X, Y, Z, N)
         """
@@ -155,25 +156,23 @@ class Freight(object):
         return self._nbLocations**2 * self.__nbTimePeriods* (self.__nbTimePeriods - 1) \
                + self.__nbTimePeriods * self._nbLocations
 
-    def _travelAllowed(self, i:int, j:int, u:int, t:int):
+    def _travelAllowed(self, i:int, j:int, u:int, t:int) -> bool:
         """
-        Is travel between i and j allowed between times u & t:
-        t> u
+        Is travel between i and j allowed between times u & t: t> u
         """
 
         if i == j:  # that is always allowed
             return True
 
         city_i, city_j = self.__nbsToLocations[i], self.__nbsToLocations[j]
-        city_i_used, city_j_used = (city_i, city_j) if (city_i, city_j) in self._travelMatrix else (city_j, city_i)
 
-        return t - u >= self._travelMatrix[(city_i_used, city_j_used)]
+        return t - u >= self._travelMatrix[(city_i, city_j) if (city_i, city_j) in self._travelMatrix else (city_j, city_i)]
 
     @property
-    def _LMMat(self):
+    def _LMMat(self) -> np.array:
         """
-        sets the inequality matrix LM (lower matrix???)
-
+        Constructs the inequality matrix self.__LM, i.e. for conditions:
+        self.__LM * x <= 0. (0. is a vector)
         """
 
         if self.__LM is not None:
@@ -197,10 +196,10 @@ class Freight(object):
         return self.__LM
 
     @property
-    def _EMVMat(self):
+    def _EMVMat(self) -> (np.array, np.array):
         """
-        Sets the equality matrix (EM) and equality vector (EV)
-
+        Sets the equality matrix (EM) and equality vector (EV), for constraints:
+        EM * x = EV, EM is a matrix, EV is a vector.
         """
 
         if (self.__EM is not None) and (self.__EV is not None):
@@ -224,10 +223,10 @@ class Freight(object):
             __equalityVector.append(sum(self._initialLocations.values()))  # number of tankers, ships
             __equalityMatrix.append(consVec)
 
-        # constraint n_i,t = n_i,t-1 + sum_{j, u<t} X(j, i, u, t) - sum_{j, u>t-1) X_{i, j, t-1, u}
+        # constraint n_i,t = n_i,t-1 + sum_{j, u<t} (X(j, i, u, t) + Y(j,i,t,u)) - sum _{u>t-1, j} (X(i,j,t-1, u) + Y(i,j,t-1,u))
         for t in range(1, self.__nbTimePeriods):
             for i in range(self._nbLocations):
-                consVec = np.zeros(self._nbLPVariables)
+                consVec = np.zeros(self._nbLPVariables)  # consVec is constraints vector
                 consVec[self._N(i, t)]     =  1.
                 consVec[self._N(i, t - 1)] = -1.
                 for j in range(self._nbLocations):
@@ -248,7 +247,7 @@ class Freight(object):
     @property
     def _valueVec(self):
         """
-        Setting the valuation vector - this is set for _MINIMIZING (COST) FUNCTION, THEREFORE THE SIGNS ARE INVERSED.
+        Setting the valuation vector - this is set for _MINIMIZING (COST) FUNCTION, therefore the values are negative.
 
         """
 
@@ -284,7 +283,7 @@ class Freight(object):
                         , b_ub   = np.zeros(self._LMMat.shape[0])  # zeros the shape of LMMat
                         , A_eq   = EM
                         , b_eq   = EV )
-                        # , bounds = list(zip(self.lowerBound, [None] * len(self.lowerBound) ) ) )
+                        # , bounds = list(zip(self.lowerBound, [None] * len(self.lowerBound) ) ) )  # this bounds are by default.
 
         if result.success:
             return result.x  # actual result
@@ -300,23 +299,22 @@ class Freight(object):
         result = self.freightHedge()
         value  = - np.sum(np.array(self._valueVec) * np.array(result))  # self.valueVec is negative, cuase linprog is minimized
 
-        print('Portfolio value: {0}'.format(value))
+        logger.info('Portfolio value: {0}'.format(value))
 
         for t in range(self.__nbTimePeriods):  # time period
             for i in range(self._nbLocations):  # cities
-                print ('Tankers {0} at {1}: {2}'.format(self._timeGrid[t], self.__nbsToLocations[i], result[self._N(i,t)]))
+                logger.info('Tankers {0} at {1}: {2}'.format(self._timeGrid[t], self.__nbsToLocations[i], result[self._N(i,t)]))
                 for j in range(self._nbLocations):
                     for u in range(t + 1, self.__nbTimePeriods):
                         if result[self._X(i, j, t, u)] != 0.:
-                            print("Buying conditional from {0} on {2} and selling in {1} on {3} : {4}".format(self.__nbsToLocations[i]
-                                                                                                 , self.__nbsToLocations[j]
-                                                                                                 , self._timeGrid[t]
-                                                                                                 , self._timeGrid[u]
-                                                                                                 , result[self._X(i, j, t, u)]))
+                            logger.info("Buying conditional from {0} on {2} and selling in {1} on {3} : {4}".format(self.__nbsToLocations[i]
+                                                                                                                   , self.__nbsToLocations[j]
+                                                                                                                   , self._timeGrid[t]
+                                                                                                                   , self._timeGrid[u]
+                                                                                                                   , result[self._X(i, j, t, u)]))
                         if result[self._Y(i, j, t, u)] != 0.:
-                            print(
-                                "Buying unconditional from {0} on {2} and selling in {1} on {3} : {4}".format( self.__nbsToLocations[i]
-                                                                                                             , self.__nbsToLocations[j]
-                                                                                                             , self._timeGrid[t]
-                                                                                                             , self._timeGrid[u]
-                                                                                                             , result[self._Y(i, j, t,u)]))
+                            logger.info("Buying unconditional from {0} on {2} and selling in {1} on {3} : {4}".format( self.__nbsToLocations[i]
+                                                                                                                     , self.__nbsToLocations[j]
+                                                                                                                     , self._timeGrid[t]
+                                                                                                                     , self._timeGrid[u]
+                                                                                                                     , result[self._Y(i, j, t,u)]))
