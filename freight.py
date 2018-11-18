@@ -297,24 +297,20 @@ class Freight(object):
         """
 
         result = self.freightHedge()
-        value  = - np.sum(np.array(self._valueVec) * np.array(result))  # self.valueVec is negative, cuase linprog is minimized
 
-        logger.info('Portfolio value: {0}'.format(value))
+        tankerLocations = { self._timeGrid[t]: {self.__nbsToLocations[i]: result[self._N(i,t)] for i in range(self._nbLocations)}
+                            for t in range(self.__nbTimePeriods) }
 
-        for t in range(self.__nbTimePeriods):  # time period
-            for i in range(self._nbLocations):  # cities
-                logger.info('Tankers {0} at {1}: {2}'.format(self._timeGrid[t], self.__nbsToLocations[i], result[self._N(i,t)]))
-                for j in range(self._nbLocations):
-                    for u in range(t + 1, self.__nbTimePeriods):
-                        if result[self._X(i, j, t, u)] != 0.:
-                            logger.info("Buying conditional from {0} on {2} and selling in {1} on {3} : {4}".format(self.__nbsToLocations[i]
-                                                                                                                   , self.__nbsToLocations[j]
-                                                                                                                   , self._timeGrid[t]
-                                                                                                                   , self._timeGrid[u]
-                                                                                                                   , result[self._X(i, j, t, u)]))
-                        if result[self._Y(i, j, t, u)] != 0.:
-                            logger.info("Buying unconditional from {0} on {2} and selling in {1} on {3} : {4}".format( self.__nbsToLocations[i]
-                                                                                                                     , self.__nbsToLocations[j]
-                                                                                                                     , self._timeGrid[t]
-                                                                                                                     , self._timeGrid[u]
-                                                                                                                     , result[self._Y(i, j, t,u)]))
+        tankerMovementsConditional = { self._timeGrid[t]: {self.__nbsToLocations[i]: [(self.__nbsToLocations[j], self._timeGrid[u], result[self._X(i, j, t, u)])
+                                                                                      for j in range(self._nbLocations) for u in range(t + 1, self.__nbTimePeriods)]
+                                                           for i in range(self._nbLocations)}
+                                       for t in range(self.__nbTimePeriods)}
+
+        tankerMovementsUnConditional = { self._timeGrid[t]: {self.__nbsToLocations[i]: [(self.__nbsToLocations[j], self._timeGrid[u], result[self._Y(i, j, t, u)])
+                                                                                        for j in range(self._nbLocations) for u in range(t + 1, self.__nbTimePeriods)]
+                                                             for i in range(self._nbLocations)}
+                                         for t in range(self.__nbTimePeriods)}
+
+        return { 'portfolioValue': - np.sum(np.array(self._valueVec) * np.array(result))  # self.valueVec is negative, cuase linprog is minimized
+               , 'locations'     : tankerLocations
+               , 'movements'     : (tankerMovementsConditional, tankerMovementsUnConditional) }
