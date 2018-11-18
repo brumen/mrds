@@ -4,7 +4,6 @@ import numpy as np
 import scipy.integrate
 import scipy.stats
 import scipy.interpolate
-import multiprocessing as mp
 import logging
 
 if CUDA_PRESENT:

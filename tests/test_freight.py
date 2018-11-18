@@ -42,11 +42,12 @@ def fwdFunction(date_ : datetime.date, location : str, future_date : datetime.da
     return scipy.interpolate.splev((future_date - date_).days / dcf, curve_numeric)
 
 
-vol_curves = {'AMS': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
-              'NYC': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
-              'MIA': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
-              'LA': np.array([0.3, 0.32, 0.35, 0.4]) + 10,
-              'SHA': np.array([0.3, 0.32, 0.35, 0.4]) + 10}
+vol_adder = 0.
+vol_curves = {'AMS': np.array([0.3, 0.32, 0.35, 0.4]) + vol_adder,
+              'NYC': np.array([0.3, 0.32, 0.35, 0.4]) + vol_adder,
+              'MIA': np.array([0.3, 0.32, 0.35, 0.4]) + vol_adder,
+              'LA' : np.array([0.3, 0.32, 0.35, 0.4]) + vol_adder,
+              'SHA': np.array([0.3, 0.32, 0.35, 0.4]) + vol_adder}
 vol_dates = fwd_dates
 
 # correlation matrix
@@ -78,11 +79,44 @@ travel_mtx = {('AMS', 'NYC'): 1,
               ('MIA', 'SHA'): 5,
               ('LA', 'SHA'): 3}
 
+# how much it costs to transport between locations
+cost_mtx = {('AMS', 'NYC'): 0.1,
+              ('AMS', 'MIA'): 0.1,
+              ('AMS', 'LA'): 0.2,
+              ('AMS', 'SHA'): 0.5,
+              ('NYC', 'MIA'): 0.1,
+              ('NYC', 'LA'): 0.3,
+              ('NYC', 'SHA'): 0.6,
+              ('MIA', 'LA'): 0.2,
+              ('MIA', 'SHA'): 0.5,
+              ('LA', 'SHA'): 0.3}
+
 
 class FreightTest(TestCase):
 
     def test_fwd_vol_fct(self):
         print (fwdFunction(datetime.date(2015, 4, 1), 'NYC', datetime.date(2015, 5, 1)))
+        self.assertTrue(True)
+
+    def test_xyz_locations(self):
+
+        freight1 = freight.Freight( mktDate
+                                  , fwdFunction
+                                  , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
+                                  , corr_mtx
+                                  , travel_mtx
+                                  , cost_mtx
+                                  , N_init
+                                  , [mktDate + datetime.timedelta(days=30*idx) for idx in range(0,2)])
+
+        for i in range(freight1._nbLocations):
+            for t in range(0, freight1._Freight__nbTimePeriods):
+                print('N', (i, t), freight1._N(i, t))
+                for j in range(freight1._nbLocations):
+                    for u in range(t):
+                        print ('X', (i,j,u, t), freight1._X(i, j, u, t))                        
+                        print ('Y', (i,j,u, t), freight1._Y(i, j, u, t))
+
         self.assertTrue(True)
 
     def test_just_run(self):
@@ -96,8 +130,9 @@ class FreightTest(TestCase):
                                   , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
                                   , corr_mtx
                                   , travel_mtx
+                                  , cost_mtx
                                   , N_init
-                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
+                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,100)])
 
         # result = freight1.freightHedge()
         freight1.representHedge()  # this prints out the hedge

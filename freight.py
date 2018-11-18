@@ -5,16 +5,20 @@ import datetime, numpy as np
 from scipy.optimize import linprog
 
 from ds import DF
-from pricers.pricers import spread_option_kirk_zero_strike
+from pricers.pricers import spread_option_kirk
+
+
+class FreightException(Exception):
+    pass
+
+
+LARGE_NUMBER = 1000000.  # large number to prohibit travel between certain directions & times.
 
 
 class Freight(object):
     """
     Freight class:
-      N ... initial distribution of the fleet ... IN WHICH FORMAT SHOULD THIS BE?
-      K ... number of tankers ... CHECK CHECK CHECK
-      I ... number of cities
-      T ... number of time periods
+      N ... initial distribution of the tanker fleet
     """
 
     def __init__( self
@@ -23,6 +27,7 @@ class Freight(object):
                 , volCurveFct  # function
                 , corrMatrix       : dict
                 , travelMatrix     : dict
+                , costMatrix       : dict
                 , initialLocations : dict
                 , timeGrid
                 , dcf = 365.25):
@@ -37,6 +42,7 @@ class Freight(object):
         :param travelMatrix: the amount of time it takes between different locations, a dictionary
                              where keys are location pairs (loc_1, loc_2) and values are time as fractions of
                              a year (i.e. 1. means 1 year).
+        :param costMatrix: same as travelMatrix, but refers to costs between cities.
         :param timeGrid: time grid for the problem, meaning that the  list[datetime.date]
         :param dcf: day count factor, used for discounting and option evaluation.
         """
@@ -46,6 +52,7 @@ class Freight(object):
         self.volCurveFct  = volCurveFct
         self._corrMatrix  = corrMatrix
         self._travelMatrix = travelMatrix  # number of periods between different locations
+        self._costMatrix   = costMatrix    # same as travel matrix, costs between locations
         self._timeGrid    = timeGrid       # grid used to compute the value of the freight portfolio.
         self._dcf         = dcf            # day count factor
         self._initialLocations = initialLocations  # initial locations of the portfolio
@@ -55,32 +62,29 @@ class Freight(object):
         self._nbLocations     = len(self._locations)     # number of different locations
         self.__nbsToLocations = {idx: loc for (idx, loc) in enumerate(self._locations)}
         self.__nbsToTimeGrid  = {idx: timeStep for (idx, timeStep) in enumerate(self._timeGrid) }
-        self.__nbTimePeriods  = len(self._timeGrid)                # number of time periods
+        self.__nbTimePeriods  = len(self._timeGrid)                # length of grid = number of time periods + 1
 
         # cached values, used as properties
-        self.__valueVec = None  # vector of all individual values
-        self.__LM   = None
-        self.__EM   = None
-        self.__EV   = None
+        self.__valueVec   = None  # vector of all individual values
+        self.__LM         = None
+        self.__EM         = None
+        self.__EV         = None
         self.__lowerBound = None
 
     def fwdVolCurves( self
                     , location : str
-                    , timeList : list
-                    , fwdVolInd = 'fwd' ) -> np.array:
+                    , futureDate : datetime.date
+                    , fwdVolInd = 'fwd' ) -> float:
         """
         Gets the forward curves for market date for the times requested in timeList
 
         :param location: location, string
-        :param timeList: list of times for which the forward curve is requested, list[datetime.date]
+        :param futureDate: time for which the forward curve is requested
         :param fwdVolIndict: indicating whether 'fwd' or 'vol' is computed (string)
         :returns: array of forwards or vols for that timeList and location (returns vector)
         """
 
-        fwdVolFctUsed = self.fwdCurveFct if fwdVolInd == 'fwd' else self.volCurveFct
-
-        return np.array([fwdVolFctUsed(self.mktDate, location, t)
-                         for t in timeList]) if type(timeList) is list else fwdVolFctUsed(self.mktDate, location, timeList)
+        return (self.fwdCurveFct if fwdVolInd == 'fwd' else self.volCurveFct)(self.mktDate, location, futureDate)
 
     @property
     def lowerBound(self):
@@ -92,107 +96,64 @@ class Freight(object):
         if self.__lowerBound is not None:
             return self.__lowerBound
 
-        self.__lowerBound = np.zeros(self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods - 1)//2 +
-                                     3 * self._nbLocations * self.__nbTimePeriods )
+        self.__lowerBound = np.zeros(self._nbLPVariables)
 
         return self.__lowerBound
 
-    def V( self
-         , city1 : str
-         , city2 : str
-         , t1    : datetime.date
-         , t2    : datetime.date ):
+    def spreadOption( self
+                    , city1 : str
+                    , city2 : str
+                    , t1    : datetime.date
+                    , t2    : datetime.date ) -> float:
         """
-        construction of spread option matrices
-        between cities city1, city2, and times t1, t2
-        between times t_1 and t_2 and between cities c_1 and c_2.
-        V[t_1][t_2] [c_1, c_2], t_1 < t_2
-
+        Spread option value between city1, city2 and times t1, t2, t1<t2.
         """
 
-        # reverse cities if necessary
-        c1_used, c2_used = (city1, city2) if (city1, city2) in self._corrMatrix else (city2, city1)
+        return spread_option_kirk( self.fwdVolCurves(city1, t1)
+                                 , self.fwdVolCurves(city2, t2)
+                                 , self._costMatrix[(city1, city2) if (city1, city2) in self._costMatrix else (city2, city1)] if city1 != city2 else 0.
+                                 , self.fwdVolCurves(city1, t1, fwdVolInd='vol')
+                                 , self.fwdVolCurves(city2, t2, fwdVolInd='vol')
+                                 , self._corrMatrix[(city1, city2) if (city1, city2) in self._corrMatrix else (city2, city1)]
+                                 , (t2 - t1).days / self._dcf
+                                 , DF(self.mktDate, t2))
 
-        return spread_option_kirk_zero_strike( self.fwdVolCurves(city1, t1)
-                                             , self.fwdVolCurves(city2, t2)
-                                             , self.fwdVolCurves(city1, t1, fwdVolInd='vol')
-                                             , self.fwdVolCurves(city2, t2, fwdVolInd='vol')
-                                             , self._corrMatrix[(c1_used, c2_used)]
-                                             , (t2 - t1).days / self._dcf
-                                             , DF(self.mktDate, t1))
-
-    def X(self, i : int, j : int , t : int, u :int ):
+    def _X(self, i : int, j : int, t : int, u :int) -> int:
         """
+        Conditional transport variable.
         Location of the variable x_(i,j,t,u) in the matrix, t<u
-        Index corresponding to shipping from city i to city j between time t and u. This is a BENEFIT.
+        Index corresponding to shipping from city i to city j between time t and u conditional. This is a BENEFIT.
 
         """
 
         return i + j * self._nbLocations + self._nbLocations**2 * (self.__nbTimePeriods - 1 - u + (self.__nbTimePeriods * t - t * (t+1)//2))
 
-    def Y(self, i : int, t : int):
-        """
-        Injection at location i at time t. Location of the variable y_(i,t) in the matrix. This is a BENEFIT.
+    def _Y(self, i : int, j: int, t : int, u: int) -> int:
         """
 
-        return self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods - 1)//2 + i + t * self._nbLocations
-
-    def Z(self, i, t):
-        """
-        Withdrawal at i, t. Location of the variable z_(i,t) in the matrix. This is a COST.
-
+        Unconditional transport variable.
         """
 
-        return self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods - 1)//2 + self._nbLocations * self.__nbTimePeriods + i + t * self._nbLocations
+        # first line is the number of variables X
+        return self._nbLocations**2 * self.__nbTimePeriods* (self.__nbTimePeriods - 1)//2 \
+               + self._X(i, j, t, u)
 
-    def N(self, i, t):
+    def _N(self, i, t) -> int:
         """
-        Initial value of the tankers. Location of the variable n_(i,t) in the matrix
+        Number of tankers in city i at time t. Location of the variable n_(i,t) in the vector of all variables.
         """
 
-        return self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods - 1)//2 + 2*self._nbLocations*self.__nbTimePeriods + i + t * self._nbLocations
+        return self._nbLocations**2 * self.__nbTimePeriods* (self.__nbTimePeriods - 1) \
+               + i + t * self._nbLocations
 
     @property
-    def LMMat(self):
+    def _nbLPVariables(self):
         """
-        sets the inequality matrix LM (lower matrix???)
-
+        Number of variables for the Linear problem. (X, Y, Z, N)
         """
 
-        if self.__LM is not None:
-            return self.__LM
-
-        self.__LM = np.zeros((self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods-1)//2 + 4 * self._nbLocations * self.__nbTimePeriods,
-                              self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods-1)//2 + 3 * self._nbLocations * self.__nbTimePeriods))
-
-        # constraint n(i,t) - y(i,t) + z(i,t) > 0
-        row_ineq_idx = 0  # initial row idx for inequalities
-        for t in range(self.__nbTimePeriods):
-            for i in range(self._nbLocations):
-                self.__LM[row_ineq_idx, self.N(i, t)] = -1.
-                self.__LM[row_ineq_idx, self.Z(i, t)] = -1.
-                self.__LM[row_ineq_idx, self.Y(i, t)] = 1.
-                row_ineq_idx += 1
-
-        # constraint x_i,j,t,u >= 0
-        for i in range(self._nbLocations):
-            for j in range(self._nbLocations):
-                for t in range(self.__nbTimePeriods-1):  # -1 is important here
-                    for u in range(t+1, self.__nbTimePeriods):
-                        self.__LM[row_ineq_idx, self.X(i, j, t, u)] = -1
-                        row_ineq_idx += 1
-
-        # constraints n_i,t and y_i,t and z_i,t >= 0
-        for t in range(self.__nbTimePeriods):
-            for i in range(self._nbLocations):
-                self.__LM[row_ineq_idx, self.Y(i, t)] = -1.
-                row_ineq_idx += 1
-                self.__LM[row_ineq_idx, self.Z(i, t)] = -1.
-                row_ineq_idx += 1
-                self.__LM[row_ineq_idx, self.N(i, t)] = -1.
-                row_ineq_idx += 1
-
-        return self.__LM
+        return self._nbLocations**2 * self.__nbTimePeriods* (self.__nbTimePeriods - 1) \
+               + self.__nbTimePeriods * self._nbLocations
 
     def _travelAllowed(self, i:int, j:int, u:int, t:int):
         """
@@ -209,7 +170,34 @@ class Freight(object):
         return t - u >= self._travelMatrix[(city_i_used, city_j_used)]
 
     @property
-    def EMVMat(self):
+    def _LMMat(self):
+        """
+        sets the inequality matrix LM (lower matrix???)
+
+        """
+
+        if self.__LM is not None:
+            return self.__LM
+
+        consMat = []  # constraint matrix
+
+        # constraint n_{i,t} >= sum_{j,u} X(i,j,t,u) + Y(i,j,t,u)
+        for t in range(self.__nbTimePeriods):
+            for i in range(self._nbLocations):
+                consVec = np.zeros(self._nbLPVariables)
+                consVec[self._N(i, t)] = -1.
+                for j in range(self._nbLocations):
+                    for u in range(t+1, self.__nbTimePeriods):
+                        consVec[self._X(i, j, t, u)] = 1.
+                        consVec[self._Y(i, j, t, u)] = 1.
+                consMat.append(consVec)
+
+        self.__LM = np.array(consMat)
+
+        return self.__LM
+
+    @property
+    def _EMVMat(self):
         """
         Sets the equality matrix (EM) and equality vector (EV)
 
@@ -218,48 +206,47 @@ class Freight(object):
         if (self.__EM is not None) and (self.__EV is not None):
             return self.__EM, self.__EV
 
-        # equality matrix
-        self.__EM = np.zeros((self._nbLocations * self.__nbTimePeriods + self.__nbTimePeriods - 1,
-                              self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods-1)//2 + 3 * self._nbLocations * self.__nbTimePeriods))
-
-        # equality vector
-        self.__EV = np.zeros(self._nbLocations * self.__nbTimePeriods + self.__nbTimePeriods - 1)
-
-        row_eq_idx = 0  # row indx. for equalities
+        __equalityMatrix = []
+        __equalityVector = []
 
         # initial setting of N: N(i,0) = initialLocation(i)
         for i in range(self._nbLocations):
-            self.__EM[row_eq_idx, self.N(i, 0)] = 1.
-            self.__EV[row_eq_idx] = self._initialLocations[self.__nbsToLocations[i]]
-            row_eq_idx += 1
+            consVec = np.zeros(self._nbLPVariables)
+            consVec[self._N(i, 0)] = 1.
+            __equalityVector.append(self._initialLocations[self.__nbsToLocations[i]])
+            __equalityMatrix.append(consVec)
 
         # sum_i n_i,t = K 
         for t in range(1, self.__nbTimePeriods):  # t=0 already given above
+            consVec = np.zeros(self._nbLPVariables)
             for i in range(self._nbLocations):
-                self.__EM[row_eq_idx, self.N(i, t)] = 1.
-            self.__EV[row_eq_idx] = sum(self._initialLocations.values())  # number of tankers, ships
-            row_eq_idx += 1
+                consVec[self._N(i, t)] = 1.
+            __equalityVector.append(sum(self._initialLocations.values()))  # number of tankers, ships
+            __equalityMatrix.append(consVec)
 
-        # constraint n_i,t = n_i,t-1 + sum_{j, u<t} X(j, i, u, t) - sum_{j, u>t) X_{i, j, t, u} - y(i,t) + z(i,t)
+        # constraint n_i,t = n_i,t-1 + sum_{j, u<t} X(j, i, u, t) - sum_{j, u>t-1) X_{i, j, t-1, u}
         for t in range(1, self.__nbTimePeriods):
             for i in range(self._nbLocations):
-                self.__EM[row_eq_idx, self.N(i, t)]   = 1.
-                self.__EM[row_eq_idx, self.N(i, t-1)] = -1.
-                self.__EM[row_eq_idx, self.Y(i,t)]    = -1.
-                self.__EM[row_eq_idx, self.Z(i, t)] = 1.
+                consVec = np.zeros(self._nbLPVariables)
+                consVec[self._N(i, t)]     =  1.
+                consVec[self._N(i, t - 1)] = -1.
                 for j in range(self._nbLocations):
                     for u in range(t):
-                        if self._travelAllowed(i, j, u, t):
-                            self.__EM[row_eq_idx, self.X(j, i, u, t)] = -1.
-                    for u in range(t+1, self.__nbTimePeriods):
-                        if self._travelAllowed(i, j, t, u):  # only if travel between cities is allowed
-                            self.__EM[row_eq_idx, self.X(i, j, t, u)] = 1.
-                row_eq_idx += 1
+                        consVec[self._X(j, i, u, t)] = -1.
+                        consVec[self._Y(j, i, u, t)] = -1.
+                    for u in range(t, self.__nbTimePeriods):
+                        consVec[self._X(i, j, t - 1, u)] = 1.
+                        consVec[self._Y(i, j, t - 1, u)] = 1.
+                __equalityMatrix.append(consVec)
+                __equalityVector.append(0.)
+
+        self.__EM = np.array(__equalityMatrix)
+        self.__EV = np.array(__equalityVector)
 
         return self.__EM, self.__EV
 
     @property
-    def valueVec(self):
+    def _valueVec(self):
         """
         Setting the valuation vector - this is set for _MINIMIZING (COST) FUNCTION, THEREFORE THE SIGNS ARE INVERSED.
 
@@ -268,39 +255,41 @@ class Freight(object):
         if self.__valueVec is not None:
             return self.__valueVec
 
-        self.__valueVec = np.zeros(self._nbLocations ** 2 * self.__nbTimePeriods * (self.__nbTimePeriods - 1) // 2 + 3 * self._nbLocations * self.__nbTimePeriods)
-
-        fwdCurves = [self.fwdVolCurves(location, self._timeGrid) for location in self._locations]
+        self.__valueVec = np.zeros(self._nbLPVariables)
 
         for t in range(self.__nbTimePeriods):  # time period
             for i in range(self._nbLocations):  # cities
-                self.__valueVec[self.Z(i, t)] =   fwdCurves[i][t]  # this is a cost
-                self.__valueVec[self.Y(i, t)] = - fwdCurves[i][t]  # this is a benefit
                 for j in range(self._nbLocations):
                     for u in range(t+1, self.__nbTimePeriods):
-                        self.__valueVec[self.X(i, j, t, u)] = - self.V( self.__nbsToLocations[i]
-                                                                      , self.__nbsToLocations[j]
-                                                                      , self.__nbsToTimeGrid[t]
-                                                                      , self.__nbsToTimeGrid[u] )  # this are benefits.
+                        self.__valueVec[self._X(i, j, t, u)] = - self.spreadOption( self.__nbsToLocations[i]
+                                                                                  , self.__nbsToLocations[j]
+                                                                                  , self.__nbsToTimeGrid[t]
+                                                                                  , self.__nbsToTimeGrid[u]) if self._travelAllowed(i,j,t,u) else LARGE_NUMBER
+                        self.__valueVec[self._Y(i,j,t,u)] = -(self.fwdVolCurves(self.__nbsToLocations[j], self.__nbsToTimeGrid[u])
+                                                              - self.fwdVolCurves(self.__nbsToLocations[i], self.__nbsToTimeGrid[t])) \
+                                                              if self._travelAllowed(i,j,t,u) else LARGE_NUMBER
 
         return self.__valueVec
 
     def freightHedge(self):
         """
-        Find optimum freight hedge.
+        Find optimum freight hedge, solve the linear program.
 
         """
 
-        EM, EV = self.EMVMat
+        EM, EV = self._EMVMat  # equality matrix condition EM * x = EV
 
-        result =linprog( self.valueVec
-                       , A_ub   = self.LMMat
-                       , A_eq   = EM
-                       , b_ub   = np.zeros((self._nbLocations**2 * self.__nbTimePeriods * (self.__nbTimePeriods-1)//2 + 4 * self._nbLocations * self.__nbTimePeriods, 1))
-                       , b_eq   = EV
-                       , bounds = list(zip(self.lowerBound, [None] * len(self.lowerBound) ) ) )
+        result = linprog( self._valueVec
+                        , A_ub   = self._LMMat  # inequality condition A_ub * x <= b_ub
+                        , b_ub   = np.zeros(self._LMMat.shape[0])  # zeros the shape of LMMat
+                        , A_eq   = EM
+                        , b_eq   = EV )
+                        # , bounds = list(zip(self.lowerBound, [None] * len(self.lowerBound) ) ) )
 
-        return result.x  # actual result
+        if result.success:
+            return result.x  # actual result
+        else:
+            raise FreightException(result.message)
 
     def representHedge(self):
         """
@@ -309,22 +298,25 @@ class Freight(object):
         """
 
         result = self.freightHedge()
-        value  = - np.sum(np.array(self.valueVec) * np.array(result))  # self.valueVec is negative, cuase linprog is minimized
+        value  = - np.sum(np.array(self._valueVec) * np.array(result))  # self.valueVec is negative, cuase linprog is minimized
 
         print('Portfolio value: {0}'.format(value))
 
-        # TODO: THIS IS BRUTE FORCE, COULD DEFINITELY BE IMPROVED.
         for t in range(self.__nbTimePeriods):  # time period
             for i in range(self._nbLocations):  # cities
-                if result[self.Z(i,t)] != 0.:
-                    print("Selling {2} from city {0} on {1}".format(self.__nbsToLocations[i], self._timeGrid[t], result[self.Z(i,t)]))
-                if result[self.Y(i,t)] != 0:
-                    print("Buying {2} into city {0} on {1}".format(self.__nbsToLocations[i], self._timeGrid[t], result[self.Y(i,t)]))
+                print ('Tankers {0} at {1}: {2}'.format(self._timeGrid[t], self.__nbsToLocations[i], result[self._N(i,t)]))
                 for j in range(self._nbLocations):
-                    for u in range(t + 1, self.__nbTimePeriods):  # TODO: CHECK IF THIS IS t+1 or NOT
-                        if result[self.X(i, j, t, u)] != 0.:
-                            print("Buying from {0}/Selling to {1} between {2} - {3} : {4}".format( self.__nbsToLocations[i]
+                    for u in range(t + 1, self.__nbTimePeriods):
+                        if result[self._X(i, j, t, u)] != 0.:
+                            print("Buying conditional from {0} on {2} and selling in {1} on {3} : {4}".format(self.__nbsToLocations[i]
                                                                                                  , self.__nbsToLocations[j]
                                                                                                  , self._timeGrid[t]
                                                                                                  , self._timeGrid[u]
-                                                                                                 , result[self.X(i,j,t,u)]))
+                                                                                                 , result[self._X(i, j, t, u)]))
+                        if result[self._Y(i, j, t, u)] != 0.:
+                            print(
+                                "Buying unconditional from {0} on {2} and selling in {1} on {3} : {4}".format( self.__nbsToLocations[i]
+                                                                                                             , self.__nbsToLocations[j]
+                                                                                                             , self._timeGrid[t]
+                                                                                                             , self._timeGrid[u]
+                                                                                                             , result[self._Y(i, j, t,u)]))
