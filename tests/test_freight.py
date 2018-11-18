@@ -1,12 +1,11 @@
 # test for the freight model
 
-import datetime, numpy as np, scipy.interpolate
+import datetime, numpy as np, scipy.interpolate, logging
 from unittest import TestCase
-from logging  import getLogger
 
 import freight
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 mktDate = datetime.date(2015, 4, 1)
 
@@ -142,6 +141,6 @@ class FreightTest(TestCase):
                                   , N_init
                                   , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
-        freight1.representHedge()  # this prints out the hedge
+        print (freight1.representHedge())
 
         self.assertTrue(True)
