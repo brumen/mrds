@@ -1,6 +1,5 @@
-import config
 import numpy as np
-from openopt import LP
+from scipy.optimize import linprog
 import networkx as nx
 import matplotlib.pyplot as plt
 
@@ -85,13 +84,11 @@ def cons_lp(nb_nodes, gl, p):
     b_eq = np.array(b_eq)
     b_ineq = np.array(b_ineq)
 
-    problem = LP(-opt_vec, Aeq=A_eq, A=A_ineq, b=b_ineq, beq=b_eq, lb=np.zeros(nb_vars))
-    # solution = problem.minimize('nlp:ralg', iprint=-1)  # scipy_cobyla, cvxopt_lp
-    solution = problem.minimize('cvxopt_lp', iprint=-1)  # scipy_cobyla, cvxopt_lp
-    solution_raw = solution.xf
-    solution_val = solution.ff
+    problem = linprog(-opt_vec, A_eq=A_eq, A_ub=A_ineq, b_ub=b_ineq, b_eq=b_eq)
+    solution_raw = problem.x
+    solution_val = problem.fun
 
-    solution_per_node = solution_raw.reshape((len(solution_raw)/2, 2))
+    solution_per_node = solution_raw.reshape((len(solution_raw)//2, 2))
     solution_pres = [t_left * (t_left >= t_right) - t_right * (t_right > t_left)
                      for (t_left, t_right) in solution_per_node]
     solution_edges = zip(p, solution_pres)
@@ -101,10 +98,14 @@ def cons_lp(nb_nodes, gl, p):
             'solution_edges': solution_edges}
 
 
-def draw_network(nb_nodes, gl, sol_edges, pos=None):
+def draw_network(sol_edges, pos=None):
     """
     draws the network graph
+
+    :param sol_edges: edges of the graph solution.
+
     """
+
     nodes = set([n1 for (n1, n2, cap, cap_cost), p_sol in sol_edges] +
                 [n2 for (n1, n2, cap, cap_cost), p_sol in sol_edges])
     edges = [(n1, n2) for (n1, n2, cap, cap_cost), p_sol in sol_edges

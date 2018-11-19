@@ -1,5 +1,5 @@
-import config
 import numpy as np
+
 import lmp
 
 gl_simple = [(1, 150., 0., 10.), (2, 150., 120., 15.)]
@@ -18,8 +18,8 @@ pl_1 = [(1, 2, 300.), (2, 3, 40.), (1, 3, 200.)]
 gl_2 = [(1, 300., 100., 10.), (2, 0., 100., 0.), (3, 0., 100., 0.),
         (4, 300., 100., 20.), (5, 0., 100., 0.)]
 pl_2 = [(1, 2, 500.), (1, 3, 200.), (2, 3, 200.), (3, 4, 500.), (4, 5, 150.)]
-print lmp.comp_val(gl_2, pl_2)
-print lmp.comp_lmp(gl_2, pl_2, show_sol=True)
+print (lmp.comp_val(gl_2, pl_2))
+print (lmp.comp_lmp(gl_2, pl_2, show_sol=True))
 
 
 # large network

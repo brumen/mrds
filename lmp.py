@@ -1,12 +1,11 @@
 #
-# conmputes location marginal pricing (LMP)
+# computes location marginal pricing (LMP)
 #
 
 import numpy as np
-from openopt import LP
+from scipy.optimize import linprog
 
 import copy
-import glpk
 
 
 # nodes in the network are buses
@@ -58,16 +57,11 @@ def find_connected(node_nb, pl):
     return res_l
 
 
-def comp_val(gl, pl, show_sol=False, debug_ind=False,
-             solver='glpk'):
+def comp_val(gl, pl, show_sol=False):
     """
     computes the value of the optimization problem given gl and pl
     :param show_sol: shows the solution
     """
-    if debug_ind is False:
-        glpk.glp_term_out(glpk.GLP_OFF)
-    else:
-        glpk.glp_term_out(glpk.GLP_ON)
 
     nb_nodes = len(gl)
     nb_lines = len(pl) # each line counted 2x
@@ -106,16 +100,21 @@ def comp_val(gl, pl, show_sol=False, debug_ind=False,
     opt_vec = np.zeros(nb_vars)
     opt_vec[:nb_nodes] = np.array([p for (node_nb, gen, load, p) in gl])
 
-    problem = LP(opt_vec, A=np.array(A_ineq), b=np.array(b_ineq), A_eq=A_eq, b_eq=b_eq, lb=lb, ub=ub)
-    solution = problem.minimize(solver, iprint=-10)
-    sol_v = solution.xf
+    if A_eq:  # linprog cannon handle empty matrices
+        problem = linprog(opt_vec, A_ub=np.array(A_ineq), b_ub=np.array(b_ineq), A_eq=A_eq, b_eq=b_eq
+                         , bounds = list(zip(lb, ub)))
+    else:
+        problem = linprog(opt_vec, A_ub=np.array(A_ineq), b_ub=np.array(b_ineq)
+                          , bounds=list(zip(lb, ub)))
+
+    sol_v = problem.x
     if show_sol:
         # bus generation: first nb_nodes
         print("Bus: ", sol_v[:nb_nodes])
         for line_idx, (node_1, node_2, c) in enumerate(pl):
             print("Line", (node_1, node_2), "transm:", sol_v[nb_nodes + line_idx])
 
-    return solution.ff
+    return problem.fun
 
 
 def comp_lmp(gl, pl, show_sol=False, debug_ind=False, solver='glpk'):
@@ -123,13 +122,14 @@ def comp_lmp(gl, pl, show_sol=False, debug_ind=False, solver='glpk'):
     Compute locational marginal pricing.
 
     """
-    comp_basic = comp_val(gl, pl, show_sol=show_sol, debug_ind=debug_ind)
+    comp_basic = comp_val(gl, pl, show_sol=show_sol)
     lmp = np.empty(len(gl))
     for node_nb, generation, load, gen_price in gl:
-        glt = copy.deepcopy(gl)
-        glt[node_nb-1] = (node_nb, generation, load + 1., gen_price)
-        new_value = comp_val(glt, pl, show_sol=show_sol, debug_ind=debug_ind,
-                             solver=solver)
+        # glt = copy.deepcopy(gl)
+        gl_orig = copy.deepcopy(gl[node_nb-1])
+        gl[node_nb-1] = (node_nb, generation, load + 1., gen_price)
+        new_value = comp_val(gl, pl, show_sol=show_sol)
+        gl[node_nb-1] = gl_orig
         lmp[node_nb-1] = new_value - comp_basic
 
     return lmp
