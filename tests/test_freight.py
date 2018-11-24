@@ -3,7 +3,8 @@
 import datetime, numpy as np, scipy.interpolate, logging
 from unittest import TestCase
 
-import freight
+from freight         import Freight
+from freight_display import FreightDisplay
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class FreightTest(TestCase):
         """
 
         nbTimePeriods = 5
-        freight1 = freight.Freight( mktDate
+        freight1 = Freight( mktDate
                                   , fwdFunction
                                   , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
                                   , corr_mtx
@@ -132,7 +133,7 @@ class FreightTest(TestCase):
 
         """
 
-        freight1 = freight.Freight( mktDate
+        freight1 = Freight( mktDate
                                   , fwdFunction
                                   , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
                                   , corr_mtx
@@ -142,5 +143,24 @@ class FreightTest(TestCase):
                                   , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
         print (freight1.representHedge())
+
+        self.assertTrue(True)
+
+    def test_freight_display(self):
+        """
+        Demonstrates the usage of the display class.
+
+        """
+
+        freight1 = FreightDisplay( mktDate
+                                 , fwdFunction
+                                 , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
+                                 , corr_mtx
+                                 , travel_mtx
+                                 , cost_mtx
+                                 , N_init
+                                 , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
+
+        freight1.displayMovement()
 
         self.assertTrue(True)
