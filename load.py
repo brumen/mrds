@@ -1,3 +1,7 @@
+#
+# Load generation network.
+#
+
 import numpy as np
 from scipy.optimize import linprog
 import networkx as nx
@@ -5,6 +9,12 @@ import matplotlib.pyplot as plt
 
 
 def find_node(node, gl):
+    """
+    Finds the node node in the graph gl.
+    :param node: name of the node you are searching in graph gl
+    :param gl: load network graph
+    """
+
     pot_res_raw = [(gen_load, price) for (node_1, gen_load, price) in gl
                    if node is node_1]
     if pot_res_raw == []:  # nothing found
@@ -14,6 +24,14 @@ def find_node(node, gl):
 
 
 def cons_lp(nb_nodes, gl, p):
+    """
+    Constraints
+
+    :param nb_nodes:
+    :param gl: graph in the form of: (node, generation or load, price)
+    :param p:
+
+    """
 
     nb_vars = 2 * len(p)
     gen_load_nodes = [node for (node, gen_load, price) in gl]
@@ -60,6 +78,7 @@ def cons_lp(nb_nodes, gl, p):
     for nb_conn, (orig, dst, cap, trans) in enumerate(p):
         lr_row = np.zeros(nb_vars)
         lr_row[(2*nb_conn):(2*nb_conn + 2)] = (1, 1)
+        # TODO: check if this can be rewritten w/ equalities.
         A_ineq.append(lr_row)
         b_ineq.append(cap)
         A_ineq.append(-lr_row)
@@ -79,30 +98,25 @@ def cons_lp(nb_nodes, gl, p):
             else:
                 opt_vec[2*nb_conn+1] -= dst_price
 
-    A_eq = np.array(A_eq)
-    A_ineq = np.array(A_ineq)
-    b_eq = np.array(b_eq)
-    b_ineq = np.array(b_ineq)
-
-    problem = linprog(-opt_vec, A_eq=A_eq, A_ub=A_ineq, b_ub=b_ineq, b_eq=b_eq)
+    problem = linprog(-opt_vec, A_eq=np.array(A_eq), A_ub=np.array(A_ineq), b_ub=np.array(b_ineq), b_eq=np.array(b_eq))
     solution_raw = problem.x
-    solution_val = problem.fun
 
-    solution_per_node = solution_raw.reshape((len(solution_raw)//2, 2))
     solution_pres = [t_left * (t_left >= t_right) - t_right * (t_right > t_left)
-                     for (t_left, t_right) in solution_per_node]
+                     for (t_left, t_right) in solution_raw.reshape((len(solution_raw)//2, 2))]
     solution_edges = zip(p, solution_pres)
 
-    return {'value': solution_val,
-            'solution': solution_raw,
-            'solution_edges': solution_edges}
+    return { 'value'         : problem.fun
+           , 'solution'      : solution_raw
+           , 'solution_edges': solution_edges }
 
 
 def draw_network(sol_edges, pos=None):
     """
-    draws the network graph
+    Draws the transmission network graph.
 
-    :param sol_edges: edges of the graph solution.
+    :param sol_edges: edges of the graph to display in the form
+                      (node1, node2, capacity, capacity_cost)
+    :param sol_edges: list[tuple]
 
     """
 
