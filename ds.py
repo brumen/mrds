@@ -1,5 +1,10 @@
-# ONLY USED DATE POSSIBLE: 20150401
-import datetime, numpy as np, scipy.interpolate, matplotlib.pyplot as plt, calendar as cal
+# ONLY MARKET DATE POSSIBLE: 20150401, i.e. 2015, 04, 01; Apr 4, 2015
+import datetime
+import numpy as np
+import scipy.interpolate
+import matplotlib.pyplot as plt
+import calendar as cal
+
 import ds_data
 
 # forward codes
@@ -33,6 +38,42 @@ fwd_codes = {'f': 1,
              'v': 10,
              'x': 11,
              'z': 12 }
+
+# mapping of commodity names to vol parametrization
+vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals)
+           , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates, ds_data.brent_vol_vals)
+           , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals)
+           , 'ATSI_7X8'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)
+           , 'ATSI_2X16'         : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals)
+           , 'NG_MICHCON_GD-PEAK': ('ATM', ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals)
+           , 'NG_MICHCON_CASHVOL': ('ATM', ds_data.ng_michcon_cv_vol_dates, ds_data.ng_michcon_cv_vol_vals)
+           , 'PJMW-OFFPEAK_CV'   : ('ATM', ds_data.pjm_offpeak_cv_vol_dates, ds_data.pjm_offpeak_cv_vol_vals)
+           , 'PJMW-PEAK_CV'      : ('ATM', ds_data.pjm_peak_cv_vol_dates, ds_data.pjm_peak_cv_vol_vals) }
+
+
+def brentCurve():
+    """
+    Ancillary routine to generate brent curve.
+    """
+
+    curve_dates = ds_data.brent_curve_dates
+    curve_vals_init = ds_data.brent_curve_vals
+    brent_spread = np.linspace(6, 7, len(curve_vals_init))  # fictitious spread
+    curve_vals = [x + s for x, s in zip(curve_vals_init, brent_spread)]
+
+    return curve_dates, curve_vals
+
+
+fwd_hash = { 'WTI':                (ds_data.wti_curve_dates, ds_data.wti_curve_vals)
+           , 'BRENT':              brentCurve()
+           , 'ATSI-PEAK':          (ds_data.atsi_peak_curve_dates, ds_data.atsi_peak_curve_vals)
+           , 'ATSI_7X8':           (ds_data.atsi_7x8_curve_dates, ds_data.atsi_7x8_curve_vals)
+           , 'ATSI_2X16':          (ds_data.atsi_2x16_curve_dates, ds_data.atsi_2x16_curve_vals)
+           , 'NG_MICHCON_GD-PEAK': (ds_data.ng_michcon_gd_peak_dates, ds_data.ng_michcon_gd_peak_curve_vals)
+           , 'NG_MICHCON_CASHVOL': (ds_data.ng_michcon_cv_curve_dates, ds_data.ng_michcon_cv_curve_vals)
+           , 'PJMW-OFFPEAK_CV':    (ds_data.pjm_offpeak_cv_curve_dates, ds_data.pjm_offpeak_cv_curve_vals)
+           , 'PJMW-PEAK_CV':       (ds_data.pjm_peak_cv_curve_dates, ds_data.pjm_peak_cv_curve_vals)
+           , 'DISCOUNT':           (ds_data.discount_curve_dates, ds_data.discount_curve_vals) }
 
 
 def convert_str_datetime(date_):
@@ -178,7 +219,8 @@ def construct_date_range(date_b, date_e):
     date_e_dt = convert_str_date(date_e)
     year_b, month_b, day_b = date_b_dt.year, date_b_dt.month, date_b_dt.day
     year_e, month_e, day_e = date_e_dt.year, date_e_dt.month, date_e_dt.day
-    T_l = []  # construction of the date list 
+
+    T_l = []  # construction of the date list
 
     def process_mm(m, year, month, day_b, day_e):
         """
@@ -222,36 +264,13 @@ def construct_date_range(date_b, date_e):
     return T_l
 
 
-def time_diff(date1, date2, dt_format=365.25):
-    """
-    Computes numerical difference between date1 date2
-
-    """
-
-    if type(date1) is datetime.datetime:
-        return (date2 - date1).days / dt_format
-    else:
-        date1_dt = convert_str_datetime(date1)
-        date2_dt = convert_str_datetime(date2)
-        return (date2_dt - date1_dt).days / dt_format
-
-
-def add_days_str(date_, days):
-    """
-    Adds the number of days to date_
-
-    """
-
-    return convert_datetime_str(convert_str_datetime(date_) + datetime.timedelta(days=days))
-
-
 def get_forward_curve( comName: str
-                     , date_ : datetime.date):
+                     , mktDate : datetime.date):
     """
     Gets the forward curve (ALWAYS USE DATE 20150410) for a particular date.
 
     :param comName: name of the commodity curve
-    :param date_: date for which the com curve is needed (not used here, but the interface should be such)
+    :param mktDate: market date for which the com curve is needed (not used here, but the interface should be such)
     """
 
     return fwd_hash[comName]
@@ -305,10 +324,10 @@ def get_forward_curve_plot(fwd, date_):
     plt.show()
 
 
-def get_vol_curve( comName : str
-                 , date_   : datetime.date ):
+def getVolCurve( comName : str
+               , mktDate : datetime.date):
     """
-    Gets the vol curve comName for date date_.
+    Gets the vol curve comName for a particular market date. In out example, we don't use the second parameter.
 
     """
 
@@ -317,83 +336,74 @@ def get_vol_curve( comName : str
     return {'vol_name': comName, 'vol_type': volType, 'vol_dates': volDates, 'vol_curve': volCurve}
 
 
-def get_vol_curve_pretty2(fwd, date_):
-    tenors, vol_params = get_vol_curve(fwd, date_)
-    tenors_codes = [str(fwd_mth_codes[tenor.month-1]) + str(tenor.year-2000)
-                    for tenor in tenors]
-    return dict(zip(tenors_codes, vol_params)), tenors_codes
+def get_fwd_vol_curve_numeric_tenor( curveName : str
+                                   , mktDate   : datetime.date
+                                   , fwd_vol_ind     = 'fwd'
+                                   , adj_tenors_days = None ):
+    """
+    Gets the raw forward or vol curve name.
 
+    :param curveName: forward or vol curve name.
+    :param mktDate: market date.
+    :param fwd_vol_ind: indicator of forward or vol curve
+    :param adj_tenors_days: integer, to adjust the number of days in the forward/vol curve.
 
-def get_fwd_vol_curve_numeric_tenor(fwd_vol, date_, base_date_,
-                                    fwd_vol_ind='fwd',
-                                    adj_fwd_tenors_days=None,
-                                    adj_vol_tenors_days=None):
+    """
 
     if fwd_vol_ind is 'fwd':
-        fwd_vol_tenors_raw, fwd_vol_values_raw = get_forward_curve(fwd_vol, date_)
-        if adj_fwd_tenors_days is not None:
-            fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_fwd_tenors_days), val)
+        fwd_vol_tenors_raw, fwd_vol_values_raw = get_forward_curve(curveName, mktDate)
+        if adj_tenors_days is not None:
+            fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_tenors_days), val)
                                    for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
-                                   if ot - datetime.timedelta(days=adj_fwd_tenors_days) > base_date_]
-            fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
-        else:
-            fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
-    else:
-        fwd_vol_tenors_raw, fwd_vol_values_raw = get_vol_curve(fwd_vol, date_)
-        if adj_vol_tenors_days is not None:
-            fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_vol_tenors_days), val)
-                                   for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
-                                   if ot - datetime.timedelta(days=adj_vol_tenors_days) > base_date_]
+                                   if ot - datetime.timedelta(days=adj_tenors_days) > mktDate ]
             fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
         else:
             fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
 
-    diffs = [ten_ - base_date_ for ten_ in fwd_vol_tenors if ten_ > base_date_]
+    else:
+        fwd_vol_tenors_raw, fwd_vol_values_raw = getVolCurve(curveName, mktDate)
+        if adj_tenors_days is not None:
+            fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_tenors_days), val)
+                                   for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
+                                   if ot - datetime.timedelta(days=adj_tenors_days) > mktDate ]
+            fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
+        else:
+            fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
+
+    diffs = [ten_ - mktDate for ten_ in fwd_vol_tenors if ten_ > mktDate ]
     fwd_vol_tenors_numeric = np.array([elt.days for elt in diffs])/365.
-    fwd_vol_tenors_code = [(fwt.month, fwt.year) for fwt in fwd_vol_tenors if fwt > base_date_]
+    fwd_vol_tenors_code = [(fwt.month, fwt.year) for fwt in fwd_vol_tenors if fwt > mktDate ]
     fwd_vol_values_unexpired = np.array([fwd_vol_vals for fwt, fwd_vol_vals
                                          in zip(fwd_vol_tenors, fwd_vol_values)
-                                         if fwt > base_date_])
+                                         if fwt > mktDate])
 
-    return fwd_vol_tenors_numeric, fwd_vol_values_unexpired, \
-        fwd_vol_tenors_code, fwd_vol_tenors
+    return fwd_vol_tenors_numeric, fwd_vol_values_unexpired, fwd_vol_tenors_code, fwd_vol_tenors
 
 
-def read_data(sim_date, fwd_curve, vol_curve,
-              adj_fwd_tenors_days=None, adj_vol_tenors_days=None):
-    base_date = convert_str_datetime(sim_date)
+def read_data_matched_tenors(mktDate : datetime.date
+                             , fwdCurveName : str
+                             , volCurveName : str
+                             , adj_fwd_tenors_days = None
+                             , adj_vol_tenors_days = None):
+
+    """
+    Matches the tenors of the forward and volatility curves.
+
+    :param mktDate: market date for which the curves are obtained.
+    :param fwdCurveName: forward curve
+    """
+
     fwd_tenors, fwd_curve, fwd_tenors_code, fwd_tenors_dt = \
-        get_fwd_vol_curve_numeric_tenor(fwd_curve, sim_date, base_date, 'fwd',
-                                        adj_fwd_tenors_days=adj_fwd_tenors_days)
-    vol_curve_tenors, vol_curve_params, vol_curve_tenors_code, vol_tenors_dt = \
-        get_fwd_vol_curve_numeric_tenor(vol_curve, sim_date, base_date, 'vol',
-                                        adj_vol_tenors_days=adj_vol_tenors_days)
+        get_fwd_vol_curve_numeric_tenor(fwdCurveName
+                                        , mktDate
+                                        , fwd_vol_ind     = 'fwd'
+                                        , adj_tenors_days = adj_fwd_tenors_days)
 
-    return {'fwd_tenors': fwd_tenors,
-            'fwd_curve': fwd_curve,
-            'fwd_tenors_dt': fwd_tenors_dt,
-            'fwd_tenors_code': fwd_tenors_code,
-            'option_tenors': vol_curve_tenors,
-            'option_tenors_dt': vol_tenors_dt,
-            'option_tenors_code': vol_curve_tenors_code,
-            'vol_surface_params': vol_curve_params
-            }
-
-
-def read_data_matched_tenors(sim_date, fwd_curve, vol_curve,
-                             adj_fwd_tenors_days=None,
-                             adj_vol_tenors_days=None):
-    fwd_vol_data = read_data(sim_date, fwd_curve, vol_curve,
-                             adj_fwd_tenors_days=adj_fwd_tenors_days,
-                             adj_vol_tenors_days=adj_vol_tenors_days)
-    fwd_tenors = fwd_vol_data['fwd_tenors']
-    fwd_tenors_dt = fwd_vol_data['fwd_tenors_dt']
-    option_tenors = fwd_vol_data['option_tenors']
-    option_tenors_dt_orig = fwd_vol_data['option_tenors_dt']
-    fwd_curve = fwd_vol_data['fwd_curve']
-    fwd_tenors_code = fwd_vol_data['fwd_tenors_code']
-    option_tenors_code = fwd_vol_data['option_tenors_code']
-    vol_params = fwd_vol_data['vol_surface_params']
+    option_tenors, vol_params, option_tenors_code, option_tenors_dt_orig = \
+        get_fwd_vol_curve_numeric_tenor( volCurveName
+                                       , mktDate
+                                       , fwd_vol_ind     = 'vol'
+                                       , adj_tenors_days = adj_vol_tenors_days)
 
     # if option_tenors_dt and fwd_tenors_dt are the same, remove 1 day from option_tenors
     if fwd_tenors_dt == option_tenors_dt_orig:
@@ -420,7 +430,7 @@ def read_data_matched_tenors(sim_date, fwd_curve, vol_curve,
     fwd_tenors_matched = select_elts(fwd_tenors, match_idx, 'fwd')
     fwd_tenors_code_matched = select_elts(fwd_tenors_code, match_idx, 'fwd')
     fwd_tenors_dt_matched = select_elts(fwd_tenors_dt, match_idx, 'fwd')
-    fwd_curve_matched = select_elts(fwd_curve, match_idx, 'fwd')
+    fwd_curve_matched = select_elts(fwdCurveName, match_idx, 'fwd')
     option_tenors_dt_matched = select_elts(option_tenors_dt, match_idx, 'opt')
     option_tenors_matched = select_elts(option_tenors, match_idx, 'opt')
     option_tenors_code_matched = select_elts(option_tenors_code, match_idx, 'opt')
@@ -440,13 +450,13 @@ def read_data_matched_tenors(sim_date, fwd_curve, vol_curve,
     vol_surface_params_final = sorting_fct(option_tenors_dt_matched, vol_surface_params_matched)
     option_tenors_dt_final = np.sort(option_tenors_dt_matched)
 
-    return {'fwd_tenors': np.array(fwd_tenors_final),
-            'fwd_curve': np.array(fwd_curve_final),
-            'fwd_tenors_code': np.array(fwd_tenors_code_final),
-            'fwd_tenors_dt': fwd_tenors_dt_final,
-            'option_tenors': np.array(option_tenors_final),
+    return {'fwd_tenors'        : np.array(fwd_tenors_final),
+            'fwd_curve'         : np.array(fwd_curve_final),
+            'fwd_tenors_code'   : np.array(fwd_tenors_code_final),
+            'fwd_tenors_dt'     : fwd_tenors_dt_final,
+            'option_tenors'     : np.array(option_tenors_final),
             'option_tenors_code': np.array(option_tenors_code_final),
-            'option_tenors_dt': option_tenors_dt_final,
+            'option_tenors_dt'  : option_tenors_dt_final,
             'vol_surface_params': np.array(vol_surface_params_final)}
 
 
@@ -489,53 +499,18 @@ def DF_single(date_ : datetime.date, date_fut : datetime.date, dcf = 365.25) -> 
     return scipy.interpolate.splev( (date_fut - date_).days / dcf, read_discount_curve(date_)['discount_function'])
 
 
-def DF(date_ : datetime.date , date_fut):
+def DF(mktDate : datetime.date , fwdDate : datetime.date ):
     """
     Discount factor from date date_ till date_fut.
 
-    :param date_: from date
-    :param date_fut: future date to which the discount is constructed.
+    :param mktDate: market date for discount factor
+    :param fwdDate: forward date to which the discount is constructed.
     :returns: discount between two dates
     """
 
-    if type(date_fut) is list:
-        return [DF_single(date_, date_f) for date_f in date_fut]
+    if type(fwdDate) is list:
+        return [DF_single(mktDate, date_f) for date_f in fwdDate]
 
-    return DF_single(date_, date_fut)
+    return DF_single(mktDate, fwdDate)
 
     
-# mapping of commodity names to vol parametrization
-vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals)
-           , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates, ds_data.brent_vol_vals)
-           , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals)
-           , 'ATSI_7X8'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)
-           , 'ATSI_2X16'         : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals)
-           , 'NG_MICHCON_GD-PEAK': ('ATM', ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals)
-           , 'NG_MICHCON_CASHVOL': ('ATM', ds_data.ng_michcon_cv_vol_dates, ds_data.ng_michcon_cv_vol_vals)
-           , 'PJMW-OFFPEAK_CV'   : ('ATM', ds_data.pjm_offpeak_cv_vol_dates, ds_data.pjm_offpeak_cv_vol_vals)
-           , 'PJMW-PEAK_CV'      : ('ATM', ds_data.pjm_peak_cv_vol_dates, ds_data.pjm_peak_cv_vol_vals) }
-
-
-def brentCurve():
-    """
-    Ancillary routine to generate brent curve.
-    """
-
-    curve_dates = ds_data.brent_curve_dates
-    curve_vals_init = ds_data.brent_curve_vals
-    brent_spread = np.linspace(6, 7, len(curve_vals_init))  # fictitious spread
-    curve_vals = [x + s for x, s in zip(curve_vals_init, brent_spread)]
-
-    return curve_dates, curve_vals
-
-
-fwd_hash = { 'WTI':                (ds_data.wti_curve_dates, ds_data.wti_curve_vals)
-           , 'BRENT':              brentCurve()
-           , 'ATSI-PEAK':          (ds_data.atsi_peak_curve_dates, ds_data.atsi_peak_curve_vals)
-           , 'ATSI_7X8':           (ds_data.atsi_7x8_curve_dates, ds_data.atsi_7x8_curve_vals)
-           , 'ATSI_2X16':          (ds_data.atsi_2x16_curve_dates, ds_data.atsi_2x16_curve_vals)
-           , 'NG_MICHCON_GD-PEAK': (ds_data.ng_michcon_gd_peak_dates, ds_data.ng_michcon_gd_peak_curve_vals)
-           , 'NG_MICHCON_CASHVOL': (ds_data.ng_michcon_cv_curve_dates, ds_data.ng_michcon_cv_curve_vals)
-           , 'PJMW-OFFPEAK_CV':    (ds_data.pjm_offpeak_cv_curve_dates, ds_data.pjm_offpeak_cv_curve_vals)
-           , 'PJMW-PEAK_CV':       (ds_data.pjm_peak_cv_curve_dates, ds_data.pjm_peak_cv_curve_vals)
-           , 'DISCOUNT':           (ds_data.discount_curve_dates, ds_data.discount_curve_vals) }
