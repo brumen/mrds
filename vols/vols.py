@@ -1,4 +1,4 @@
-.# volatilities' module
+# volatilities' module
 
 from abc import ABC, abstractmethod
 
@@ -52,7 +52,11 @@ def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
     return fv_array, option_tenors_dt
 
 
-class Volatility(ABC):
+class VolatilityException(Exception):
+    pass
+
+
+class Volatility(object):
     """
     Base class for vol parametrization
 
@@ -68,7 +72,7 @@ class Volatility(ABC):
 
         self.mktDate    = mktDate
         self.comName    = comName
-        self._volParams = ds.get_vol_curve    (comName, mktDate)
+        self._volParams = ds.getVolCurve    (comName, mktDate)
         self._fwdParams = ds.get_forward_curve(comName, mktDate)
 
     @staticmethod
@@ -77,7 +81,7 @@ class Volatility(ABC):
                         , sigma: np.double
                         , ttm_v: np.array ) -> np.array:
         """
-        Vectorized form of norm_strike
+        Vectorized form of normalized log(S0/K)/(sigma * sqrt(T))
 
         :param S0: initial stock (forward) price
         :param K_v: strike price
@@ -103,7 +107,6 @@ class Volatility(ABC):
 
         return exp(scipy.stats.norm.ppf(delta_v) * sigma * sqrt(double(ttm)) - 0.5 * sigma ** 2 * ttm)
 
-    @abstractmethod
     def impliedVol(self, S0, K, ttm):
         """
         Implied vol needs to be implemented in the subclass.
@@ -113,9 +116,8 @@ class Volatility(ABC):
         :type ttm: double
         """
 
-        return 0.2
+        raise VolatilityException('Method impliedVol not implemented in Volatility class.')
 
-    @abstractmethod
     def delta( self
              , K : np.double
              , ttm : np.double ):
@@ -124,7 +126,7 @@ class Volatility(ABC):
 
         """
 
-        pass
+        raise VolatilityException('Method delta not implemented in Volatility class.')
 
     def callFutureK( self
                    , K : np.double
@@ -239,6 +241,7 @@ class Volatility(ABC):
         ttm_grid = np.arange(Tmin, Tmax, Tstep)
         K_size = len(K_grid)
         ttm_size = len(ttm_grid)
+
         if cuda_ind:
             K_grid_d = to_gpu(K_grid).astype(np.float32)  # K, ttm grid on device
             ttm_grid_d = to_gpu(ttm_grid).astype(np.float32)
@@ -252,16 +255,13 @@ class Volatility(ABC):
         if cuda_ind:
             impl_surf_d = to_gpu(impl_surf).astype(np.float32)  # impl. surf on cuda
             lv_surf_d = to_gpu(lv_surf).astype(np.float32)  # lv surf. on cuda
+
+            with open(config.work_dir + "imp_vol_kern.cu") as impVolKernFile:
+                imp_vol_mod    = SourceModule(impVolKernFile.read() % {'K_size': K_size, 'ttm_size': ttm_size})
+                comp_imp_vol   = imp_vol_mod.get_function('comp_imp_vol')
+                comp_local_vol = imp_vol_mod.get_function('comp_local_vol')
+
             c_d = to_gpu(c).astype(np.float32)
-            imp_vol_kern_string = open(config.work_dir + "imp_vol_kern.cu").read()
-            imp_vol_mod = SourceModule(
-                imp_vol_kern_string % {
-                    "K_size": K_size,
-                    "ttm_size": ttm_size})
-            # extracting compute vol function
-            comp_imp_vol = imp_vol_mod.get_function("comp_imp_vol")
-            comp_local_vol = imp_vol_mod.get_function(
-                "comp_local_vol")  # extracting compute vol function
             # compute both local and implied vol
             comp_imp_vol(impl_surf_d, c_d, K_grid_d, ttm_grid_d,
                          block=(ttm_size, 1, 1), grid=(K_size, 1))
@@ -331,7 +331,6 @@ class Volatility(ABC):
         canvas.show()
 
 
-
 class ATMFVolatility(Volatility):
     """
     Simplest flat volatility.
@@ -375,10 +374,12 @@ class JW7Volatility(Volatility):
 
         """
         super().__init__(comName, mktDate)  # date and comName are defined here
-        params_names = self.transform_from_jwss7(self._volParams)  # self.p_mat)
+        _, fwdCurveVals = self._fwdParams
+        self.S0        = fwdCurveVals
+        self.fwd_curve = self.S0  # TODO: TO REMOVE LATER
 
-        self.S0        = params_names['S0']
-        self.fwd_curve = self.S0
+        params_names = self.transform_from_jwss7(self._volParams, self._fwdParams)
+
         self.sigma_0   = params_names['sigma_0']
         self.skew      = params_names['skew']
         self.smile     = params_names['smile']
@@ -386,13 +387,12 @@ class JW7Volatility(Volatility):
         self.putBend   = params_names['putBend']
         self.callBend  = params_names['callBend']
         self.callSlope = params_names['callSlope']
-
-        self.B      = params_names['B']
-        self.A      = params_names['A']
-        self.C      = params_names['C']
-        self.P      = params_names['P']
-        self.alphaC = params_names['alphaC']
-        self.alphaP = params_names['alphaP']
+        self.B         = params_names['B']
+        self.A         = params_names['A']
+        self.C         = params_names['C']
+        self.P         = params_names['P']
+        self.alphaC    = params_names['alphaC']
+        self.alphaP    = params_names['alphaP']
         self.ttm_opt = np.array([(tenor_dt - self.market_date_dt).days / 365.25
                                  for tenor_dt in option_tenors_dt])
 
@@ -400,8 +400,7 @@ class JW7Volatility(Volatility):
     def volName(self):
         return 'jw7'
 
-    def atmVol( self
-              , fwdDate ):
+    def atmVol( self, fwdDate ):
         """
         Returns the atm forward for the fwd date.
         """
@@ -413,6 +412,7 @@ class JW7Volatility(Volatility):
         leaves in the object only the tenors specified in tenors_list
         :param tenors_list: list [3, 4, 5]
         """
+
         self.p_mat = self.p_mat[tenors_list, :]
         self.S0 = self.S0[tenors_list]
         self.fwd_curve = self.fwd_curve[tenors_list]
@@ -429,89 +429,105 @@ class JW7Volatility(Volatility):
         self.P = self.P[tenors_list]
         self.alphaC = self.alphaC[tenors_list]
         self.alphaP = self.alphaP[tenors_list]
-        market_date_diff = (ds.convert_str_datetime(new_market_date) - self.market_date_dt).days / 365.25
+        market_date_diff = (ds.convert_str_datetime(new_market_date) - self.market_date).days / 365.25
         self.ttm_opt = self.ttm_opt[tenors_list] - market_date_diff
-        self.market_date = new_market_date
-        self.market_date_dt = ds.convert_str_datetime(self.market_date)
+        self.market_date = new_market_date  # datetime.date format
 
     @staticmethod
-    def transform_from_jwss7(p_mat):
+    def transform_from_jwss7(volCurve, fwdCurve):
         """
         Returns jw7 parametrization from jwss7.
         p_mat in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
         p_mat in jw7: [S0, atm, A, B, C, P, alphaC, alphaP]
 
+        :param fwdCurve: forward curve, needed, tuple(dates, forward prices)
+
         """
 
-        S0 = double(p_mat[:, 0])
-        sigma_0 = double(p_mat[:, 1])
-        skew = double(p_mat[:, 2])
-        smile = double(p_mat[:, 3])
-        put_slope = double(p_mat[:, 4])
-        put_bend = double(p_mat[:, 5])
-        call_slope = double(p_mat[:, 6])
-        call_bend = double(p_mat[:, 7])
+        _, S0 = fwdCurve
+
+        paramMtx = volCurve['vol_curve']
+
+        sigma_0    = double(paramMtx[:, 1])
+        skew       = double(paramMtx[:, 2])
+        smile      = double(paramMtx[:, 3])
+        put_slope  = double(paramMtx[:, 4])
+        put_bend   = double(paramMtx[:, 5])
+        call_slope = double(paramMtx[:, 6])
+        call_bend  = double(paramMtx[:, 7])
 
         B = (2. * skew + put_slope) / (put_slope + call_slope)
-        A = 0.5 * B * \
-            (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
-        C = call_slope / A
-        P = put_slope / A
-        alphaC = call_bend
-        alphaP = put_bend
+        A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
 
-        return {'S0'     : S0,
-                'sigma_0': sigma_0,
-                'skew'   : skew,
-                'smile': smile,
-                'putSlope': put_slope,
-                'putBend': put_bend,
+        return {'S0'       : S0,
+                'sigma_0'  : sigma_0,
+                'skew'     : skew,
+                'smile'    : smile,
+                'putSlope' : put_slope,
+                'putBend'  : put_bend,
                 'callSlope': call_slope,
-                'callBend': call_bend,
+                'callBend' : call_bend,
                 'B': B,
                 'A': A,
-                'C': C,
-                'P': P,
-                'alphaC': alphaC,
-                'alphaP': alphaP }
+                'C': call_slope / A,
+                'P': put_slope / A,
+                'alphaC': call_bend,
+                'alphaP': put_bend }
 
     @staticmethod
     def _vol_compute(z, alphaC, alphaP, sigma_0, A, B, C, P):
         """
         Computes the volatility given the following parameters:
 
+        :param z: normalized strike
+        :param alphaC:
+
         """
 
         return sigma_0 * sqrt(1. + A * log(B * exp(C * (z / (1.0 + z * z) ** (alphaC/2))) + \
                                            (1. - B) * exp(- P * (z / (1.0 + z * z) ** (alphaP/2)))))
 
-    def implied_vol(self, fwd, K, ttm):
-        z = norm_strike(self.S0[fwd], K, self.sigma_0[fwd], ttm)
-        return self._vol_compute(z, self.alphaC[fwd], self.alphaP[fwd],
-                                 self.sigma_0[fwd], self.A[fwd], self.B[fwd],
-                                 self.C[fwd], self.P[fwd])
+    def implied_vol(self, fwd : int, K : np.double, ttm : np.double):
+        """
+        Implied vol for the fwd
 
-    def _norm_strike_inv_exact(self, fwd, delta_val):
+        :param fwd: forward tenor
+        :param K: strike price
+        :param ttm: time to maturity
+        """
+
+        return self._vol_compute( JW7Volatility.normalizedStrike(self.S0[fwd], K, self.sigma_0[fwd], ttm)
+                                , self.alphaC[fwd]
+                                , self.alphaP[fwd]
+                                , self.sigma_0[fwd]
+                                , self.A[fwd]
+                                , self.B[fwd]
+                                , self.C[fwd]
+                                , self.P[fwd] )
+
+    def _normStrikeInverse(self, fwd, delta_val):
         """
         solution to N(d1) = delta_val, where d1(vol)
+
         """
 
-        optim_pr = NLP(lambda K: vols_fast.invert_delta( K
-                                                               , delta_val
-                                                               , self.ttm_opt[fwd],
-                                               self.fwd_curve[fwd],
-                                               self.alphaC[fwd],
-                                               self.alphaP[fwd],
-                                               self.sigma_0[fwd],
-                                               self.A[fwd], self.B[fwd],
-                                               self.C[fwd], self.P[fwd])
+        return NLP(lambda K: vols_fast.invert_delta( K
+                                                       , delta_val
+                                                       , self.ttm_opt[fwd],
+                                                         self.fwd_curve[fwd],
+                                                         self.alphaC[fwd],
+                                                         self.alphaP[fwd],
+                                                         self.sigma_0[fwd],
+                                                         self.A[fwd]
+                                                       , self.B[fwd]
+                                                       , self.C[fwd]
+                                                       , self.P[fwd] )
                               , self.fwd_curve[fwd]
                               , lb      = 0.001
                               , ub      = np.inf
                               , maxIter = 150
-                              , iprint  = -9)
-
-        return optim_pr.solve('scipy_cobyla').xf[0]
+                              , iprint  = -9 )\
+                  .solve('scipy_cobyla').xf[0]
 
     def implied_vol_all_fwd_standard(self, delta_v):
 
@@ -526,38 +542,6 @@ class JW7Volatility(Volatility):
                                                      self.A[tenor_nb], self.B[tenor_nb],
                                                      self.C[tenor_nb], self.P[tenor_nb])
         return vol_mat
-
-    def gen_impl_surf_v(self, fwd, ttm_grid, K_grid):
-        self.impl_surf = self.implied_vol_v(fwd, K_grid, ttm_grid)
-        return self.impl_surf
-
-    def gen_impl_surf_cuda(self, fwd,
-                           ttm_grid_d, K_grid_d,
-                           ttm_grid_len, K_grid_len,
-                           impl_surf_d,
-                           comp_imp_vol):
-        """
-        computes the implied surface on cuda
-          fwd ... forward index that we are plotting
-          ttm_grid_d, K_grid_d ... grids for time to maturity, K on the _device_
-          comp_imp_vol ... kernel for computing implied vol
-        """
-        c_d = gpa.to_gpu(self.get_params(fwd)).astype(np.float32)
-        comp_imp_vol(impl_surf_d, c_d, K_grid_d, ttm_grid_d,
-                     block=(K_grid_len, 1, 1), grid=(ttm_grid_len, 1))
-        return impl_surf_d.get()
-
-    def gen_lv_surf_cuda(self, fwd, ttm_grid, K_grid):
-        """
-        Computes local vol on cuda
-
-        """
-
-        c_d = gpa.to_gpu(self.get_params(fwd)).astype(np.float32)
-
-        self.comp_local_vol(self.lv_surf_d, c_d, self.K_grid_d, self.ttm_grid_d,
-                            block=(len(K_grid), 1, 1), grid=(len(ttm_grid), 1))
-        self.lv_surf = self.lv_surf_d.get()
 
     def local_vol(self, fwd, S, T, ttm):
         """
@@ -672,7 +656,10 @@ class JW7Volatility(Volatility):
 
     # first derivative of (undiscounted) Black's call wrt K
     def call_future_K(self, fwd, S0, K, ttm):
+        """
+        Derivative of a call option in this parametrization wrt strike price K.
 
+        """
 
         z = norm_strike(S0, K, sigma_0, maturity)
         sigma = self.implied_vol(fwd, K, ttm)  # CHECK IF THIS IS RIGHT
@@ -704,8 +691,7 @@ class JW7Volatility(Volatility):
         def normpdfD(x):
             return scipy.stats.norm.pdf(x) * (-x)
 
-        S00_local, sigma_0, A, B, C, P, alphaC, alphaP = self.get_params(
-            fwd).transpose()
+        S00_local, sigma_0, A, B, C, P, alphaC, alphaP = self.get_params(fwd).transpose()
         S0_local = S0
 
         z = norm_strike(S0, K, sigma_0, ttm)
@@ -752,22 +738,25 @@ class JW7Volatility(Volatility):
         return (S0 * normpdfD(d1) * d1K * d1K + S0_local * scipy.stats.norm.pdf(d1) * d1KK -
                 2.0 * scipy.stats.norm.pdf(d2) * d2K - K * normpdfD(d2) * d2K * d2K - K * scipy.stats.norm.pdf(d2) * d2KK)
 
-    # ARGUMENTS NOT CONSISTENT W/ PARENT CLASS, although it works
     def skewed_distribution(self, fwd, S0, K, ttm):
         return 1. + self.call_future_K(fwd, S0, K, ttm)
 
     def skewed_cdf(self, fwd, S0, K, ttm, quantile):
+        """
+        Computes the CDF of the stock price distribution.
+
+        """
+
         return (self.skewed_distribution(fwd, S0, K, ttm) - quantile)**2
 
     # find K : skewed_cdf_analy(K, quantile) = 0
     def inversion_skewed_cdf(self, fwd, S0, ttm, quantile):
-        optim_pr = NLP( lambda K: self.skewed_cdf(fwd, S0, K, ttm, quantile)
+        return NLP( lambda K: self.skewed_cdf(fwd, S0, K, ttm, quantile)
                       , S0
                       , lb      = 0.01
                       , ub      = np.inf
                       , maxIter = 150
-                      , iprint  = -9 )
-        return optim_pr.solve('scipy_cobyla').xf[0]
+                      , iprint  = -9 ).solve('scipy_cobyla').xf[0]
 
     def jw7_buttons(self, fwd, root, ax, dataPlot_canvas):
         fct_update = lambda cc: self.update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
@@ -804,7 +793,7 @@ class JW7Volatility(Volatility):
         c8.grid(row=7, column=1)
 
         # replot button
-        b1 = Button(root, text="replot", command=lambda: update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
+        b1 = tk.Button(root, text="replot", command=lambda: update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
                                                                       dataPlot_canvas)).grid(row=8, column=0)
 
         dataPlot_canvas.show()
@@ -998,30 +987,30 @@ def black_vol_inverse_vec(F, K_vec, p_vec, dt, DF, theta, tol):
                      for K, p in zip(K_vec, p_vec)]).ravel()
 
 
-def black_vol_inverse(F, K, p, dt, DF, theta, tol):
+def black_vol_inverse( F         : np.double
+                     , K         : np.double
+                     , p         : np.double
+                     , dt        : np.double
+                     , DF        : np.double
+                     , theta     : np.double
+                     , tolerance : np.double ):
     """
     Computation of black vol from option prices.
 
     :param F: forward price
-    :type F: double
     :param K: strike price
-    :type K: double
     :param p: option price
-    :type p: double
     :param dt: time to maturity
-    :type dt: double
     :param DF: discount factor until dt
-    :type DF: double
     :param theta: call/put indicator
     :type theta: TODO
-    :param tol: toleranca
-    :type tol: double
+    :param tolerance: tolerance
     """
 
-    return vols_fast.black_vol_inverse_normalized( double(p) / (DF * sqrt(double(F) * double(K)))
-                                                 , log(double(F) / double(K))
-                                                 , theta
-                                                 , tol) / sqrt(dt)
+    return vols_fast.black_vol_inverse_normalized(double(p) / (DF * sqrt(double(F) * double(K)))
+                                                  , log(double(F) / double(K))
+                                                  , theta
+                                                  , tolerance) / sqrt(dt)
 
 
 def black_vol_inverse_naive_vec(F, K_vec, p_vec, dt, DF, theta, tol, solver=None):

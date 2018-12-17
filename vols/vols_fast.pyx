@@ -1,7 +1,7 @@
 # Fast version of the vol functions
 
 cimport numpy as np
-cimport pricers.pricers_fast
+import pricers.pricers_fast  # This _HAS_ to be import and _not_ cimport
 
 # declarations of external functions 
 cdef extern from "math.h":
@@ -83,6 +83,7 @@ def black_vol_inverse_normalized(double beta, double x, double theta, double tol
     tol ... tolerance level
     result: sigma * sqrt (t)
     """
+
     cdef double sigma, sigma_new, delta_sigma, e1
 
     if (beta < b_c(x,theta)):
