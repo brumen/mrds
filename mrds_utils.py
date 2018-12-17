@@ -1,11 +1,8 @@
 # utility functions for the mrds model
 
-import os
-import csv
-import pickle
-import numpy as np
+import os, csv, pickle, numpy as np
 
-from mrds   import MrdSkew
+from mrds   import ComSkew
 from config import work_dir
 
 import logging
@@ -20,7 +17,7 @@ multi_asset_mm_calib = work_dir + mm_calib_multi_file_actual
 
 def read_mm_hash(multi_single_ind):
     """
-    Reads the market model hash tables.
+    Reads the market model hash tables from the file
 
     :param  multi_single_ind: indicator to load single or multiple asset models
                               puts together a hash table of all already calibrated market models
@@ -32,22 +29,26 @@ def read_mm_hash(multi_single_ind):
     mm_calib_file = single_asset_mm_calib if multi_single_ind is 'single' else multi_asset_mm_calib
     logger.info('Reading prev. calibrated market models from' + mm_calib_file)
 
-    mm_hash = dict()
+    if os.stat(mm_calib_file).st_size == 0:  # file is empty
+        return {}  # empty dict
 
-    if os.stat(mm_calib_file)[6] != 0:  # is file empty
-        f1 = open(mm_calib_file)
-        f2 = csv.reader(f1)  # csv format
-        for com, date_, nb_fwd_str in f2:
+    # file is not empty section
+    with open(mm_calib_file) as mm_calib_file_handle:
+
+        mm_hash = dict()
+
+        for com, date_, nb_fwd_str in csv.reader(mm_calib_file_handle):  # csv format
+
             if multi_single_ind is 'single':
                 nb_fwd = int(nb_fwd_str)
                 if com not in mm_hash.keys():
-                    mm_hash[com] = dict()
-                    mm_hash[com][date_] = nb_fwd
+                    mm_hash[com] = {date_: nb_fwd}
                 else:
                     if date_ not in mm_hash[com].keys():
                         mm_hash[com][date_] = nb_fwd
                     else:
-                        mm_hash[com][date_] = max(mm_hash[com][date_], nb_fwd)
+                        mm_hash[com][date_] = max(mm_hash[com][date_], nb_fwd)  # take the maximum of the two calibrated models TODO: THIS IS BAD, KEEP BOTH MODELS
+
             else:  # multiple models
                 nb_fwd_l = tuple(nb_fwd_str.split('___'))  # in the form A1___A2
                 nb_fwd_l_int = tuple([int(o) for o in nb_fwd_l])
@@ -61,6 +62,7 @@ def read_mm_hash(multi_single_ind):
                     else:
                         if nb_fwd_l_int not in mm_hash[com_l][date_]:
                             mm_hash[com_l][date_].append(nb_fwd_l_int)
+
     return mm_hash
 
 mm_hash = read_mm_hash('single')
@@ -72,28 +74,34 @@ def write_mm_hash(multi_single_ind, mm_hash):
     Writes the hash tables into the file.
     TODO: DESCRIBE HERE BETTER.
 
+    :param multi_single_ind: Indicator whether the model calibrates single or multiple asset,
+                             ('single', 'multiple')
+    :type multi_single_ind: str
+    :param mm_hash:
+    :type mm_hash:
+
     """
 
-    f = open(single_asset_mm_calib if multi_single_ind is 'single' else multi_asset_mm_calib, 'w')
+    with open(single_asset_mm_calib if multi_single_ind is 'single' else multi_asset_mm_calib, 'w') as hashFile:
 
-    for com in mm_hash.keys():
-        for date_ in mm_hash[com].keys():
-            if multi_single_ind is 'single':
-                f.write(com + ',' + date_ + ',' + str(mm_hash[com][date_]) + '\n')
-            else:
-                # go through all fwd list
-                string_comp = ''
-                for asset in com:
-                    string_comp += asset + '___'
-                string_comp = string_comp[:-3]  # remove last ___
-                string_comp += ',' + date_ + ','
-                for fwd_pair in mm_hash[com][date_]:
-                    string_final = string_comp
-                    for nb_fwds in fwd_pair:
-                        string_final += str(nb_fwds) + '___'
-                    string_final = string_final[:-3]
-                    string_final += '\n'
-                    f.write(string_final)
+        for com in mm_hash.keys():
+            for date_ in mm_hash[com].keys():
+                if multi_single_ind is 'single':
+                    hashFile.write(com + ',' + date_ + ',' + str(mm_hash[com][date_]) + '\n')
+                else:
+                    # go through all fwd list
+                    string_comp = ''
+                    for asset in com:
+                        string_comp += asset + '___'
+                    string_comp = string_comp[:-3]  # remove last ___
+                    string_comp += ',' + date_ + ','
+                    for fwd_pair in mm_hash[com][date_]:
+                        string_final = string_comp
+                        for nb_fwds in fwd_pair:
+                            string_final += str(nb_fwds) + '___'
+                        string_final = string_final[:-3]
+                        string_final += '\n'
+                        hashFile.write(string_final)
 
 
 def find_adj_tenors(com_nb,
@@ -229,7 +237,7 @@ def mrds_calib_db( com_fwd
                  , model_ind = 'skew'
                  , cuda_ind  = False ):
 
-    mm = MrdSkew( 1
+    mm = ComSkew( 1
                  , date_
                  , multi_thread_ind  = mt
                  , model_skew_ln_ind = model_ind
@@ -337,3 +345,69 @@ def mrds_calib_db_multiple( com_fwd_l
     mm.generate_large_corr_mat()
 
     return mm
+
+
+def compute_partial_deltas(mm
+                           , pricer
+                           , params
+                           , nb_sim
+                           , subset_idx
+                           , delta=.01
+                           , seed=None
+                           , verbose=None):
+    """
+    computes partial deltas for all assets
+    :param mm: calibrated market model
+    :type mm:
+    :param pricer:  has to be in the form
+       pricer (mo, params) where
+         mo ... market object
+         params ... parameters
+    :param nb_sim: nb. of simulations
+    :type nb_sim: int
+    :param subset_idx: for which futures to compute the deltas
+    :type subset_idx: list[int]
+    :param delta: bump, default is the same as for structured desk
+    # seed ... seed for random numbers
+    # verbose ... prints additional things
+    """
+
+    deltas = mm._empty_list_fct(mm.nb_assets)  # empty list of deltas
+
+    # TODO: WOULD BE BETTER INTERPRETED AS A DICTIONARY CORRECT CORRECT CORRECT
+    for asset_nb in range(mm.nb_assets):
+        deltas[asset_nb] = np.zeros(len(subset_idx))
+        for idx in range(len(subset_idx)):
+            logging.debug("Computing deltas for asset", asset_nb, "and fwd. idx.", subset_idx[idx])
+            logging.debug("Original price of future's", subset_idx[idx], "for asset", asset_nb, "=", \
+                          mm.forward_curve_list[asset_nb][subset_idx[idx]])
+            mm.forward_curve_list[asset_nb][subset_idx[idx]] *= (1.0 + delta)
+            mm.simulate_curves(nb_sim, seed)
+            deltas[asset_nb][idx] = pricer(mm, params)  # pricer with forward curves bumped
+            mm.forward_curve_list[asset_nb][subset_idx[idx]] /= (1.0 + delta)
+            mm.simulate_curves(nb_sim, seed)
+            price2 = pricer(mm, params)
+            deltas[asset_nb][idx] -= price2
+            logging.debug("Bumped price", mm.forward_curve_list[asset_nb][subset_idx[idx]])
+            logging.debug("price 1:", deltas[asset_nb][idx])
+            logging.debug("price 2:", price2)
+    return np.array(deltas)
+
+
+def compute_partial_vegas(mm, pricer, params, nb_sim, subset_idx,
+                          delta=0.001, seed=None, verbose='none'):
+    vegas = mm._empty_list_fct(mm.nb_assets)  # empty list of deltas
+
+    for asset_nb in range(mm.nb_assets):
+        vegas[asset_nb] = np.zeros(len(subset_idx))
+        for idx in range(len(subset_idx)):
+            # WRONG WRONG WRONG - HERE RECALIBRATION IS NEEDED
+            mm.__sigmaVecList[asset_nb][subset_idx[idx]] += delta
+            mm.simulate_curves(nb_sim, seed)
+            vegas[asset_nb][idx] = pricer(mm, params)  # pricer with vol curves bumped
+            mm.atm_vol_list[asset_nb][subset_idx[idx]] -= delta
+            mm.simulate_curves(nb_sim, seed)
+            vegas[asset_nb][idx] -= pricer(mm, params)
+            vegas[asset_nb][idx] *= 100.0  # scaling
+
+    return vegas

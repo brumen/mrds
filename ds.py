@@ -460,46 +460,49 @@ def read_data_matched_tenors(mktDate : datetime.date
             'vol_surface_params': np.array(vol_surface_params_final)}
 
 
-def read_discount_curve(date_ : datetime.date, dcf = 365.25):
+def read_discount_curve(mktDate : datetime.date, dcf = 365.25):
     """
     Returns the discount curve on date date_
 
+    :param mktDate: market date
+
     """
 
-    disc_tenors, yield_rates = get_forward_curve('DISCOUNT', date_)
-    diffs = [tenor - date_ for tenor in disc_tenors]
+    disc_tenors, discountYields = get_forward_curve('DISCOUNT', mktDate)
+    diffs = [tenor - mktDate for tenor in disc_tenors]
     disc_tenors_numeric = np.array([float(elt.days) for elt in diffs])/dcf
-    yield_rates = np.array([float(x) for x in yield_rates])
-    disc_curve = np.exp(-disc_tenors_numeric * yield_rates)
+    discountYields = np.array([float(x) for x in discountYields])
 
-    return {'disc_tenors_numeric': disc_tenors_numeric,
-            'yield_rates'        : yield_rates,
-            'disc_curve'         : disc_curve,
-            'discount_function'  : scipy.interpolate.splrep(disc_tenors_numeric, disc_curve)}
-
-
-def DF_hash(disc_data, t):
-    return scipy.interpolate.splev(t, disc_data['discount_function'])
+    return scipy.interpolate.splrep( disc_tenors_numeric
+                                   , np.exp(-disc_tenors_numeric * discountYields) )  # interpolation function
 
 
 def code_to_date(code_):
     """
     converts fwd code into date (z15 in 20151201)
     """
+
     month_str = d2s(fwd_codes[code_[0]])
     year_str = '20' + code_[1:3]
     return year_str + month_str + '01'
 
 
-def DF_single(date_ : datetime.date, date_fut : datetime.date, dcf = 365.25) -> float :
+def DF_single(mktDate : datetime.date, fwdDate : datetime.date, dcf = 365.25
+              , discountCurve = None) -> float :
+    """
+    Discount factor for a single forward date fwdDate.
+
+    :param mktDate: market date of the yield curve.
+    :param fwdDate: forward date.
+    :param dcf: date count convention
+    :param discountCurve: discount curve, if provided.
     """
 
-    """
+    return scipy.interpolate.splev( (fwdDate - mktDate).days / dcf
+                                  , discountCurve if discountCurve else read_discount_curve(mktDate) )
 
-    return scipy.interpolate.splev( (date_fut - date_).days / dcf, read_discount_curve(date_)['discount_function'])
 
-
-def DF(mktDate : datetime.date , fwdDate : datetime.date ):
+def DF(mktDate : datetime.date , fwdDate ):
     """
     Discount factor from date date_ till date_fut.
 

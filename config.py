@@ -3,8 +3,10 @@ import sys
 from subprocess import Popen, PIPE
 
 # cuda check
-p = Popen(['prime-select', 'query'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
-output, _ = p.communicate()
+output, _ = Popen( ['prime-select', 'query']
+                 , stdin  = PIPE
+                 , stdout = PIPE
+                 , stderr = PIPE).communicate()
 CUDA_PRESENT = True if output == b'nvidia\n' else False
 
 # adding various paths
