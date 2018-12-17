@@ -1,4 +1,3 @@
-# TODO: THIS LINE HERE IS WEAK, ONLY IMPORT FILES THAT 
 cimport numpy as np
 
 # declarations of external functions 
@@ -11,10 +10,11 @@ cdef extern from "math.h":
 cdef extern from "math.h":
     double exp(double)
 
-# EXTERNAL LIBRARY DEPENDENCY USE 
-# perhaps these two fcs. can also be obtained from the 
+cdef extern from "math.h":
+    double M_PI
+    
 cdef double pdf(double x):
-    return exp(-x**2 / 2.0) / sqrt(2 * np.pi)
+    return exp(-x**2 / 2.0) / sqrt(2 * M_PI)  # SQRT(2 *PI) CAN BE OBTAINED FROM math.h
 
 cpdef double cdf(double x):
     cdef double L, K, w
@@ -26,7 +26,7 @@ cpdef double cdf(double x):
         L = x
 
     K = 1.0 / (1.0 + 0.2316419 * L)
-    w = 1.0 - 1.0 / sqrt(2 * np.pi) * exp(-L *L / 2) * (0.31938153 * K - 0.356563782 * K*K + 1.781477937 * K**3 -1.821255978 * K**4 + 1.330274429 * K**5)
+    w = 1.0 - 1.0 / sqrt(2 * M_PI) * exp(-L *L / 2) * (0.31938153 * K - 0.356563782 * K*K + 1.781477937 * K**3 -1.821255978 * K**4 + 1.330274429 * K**5)
 
     if x < 0 :
         return 1. - w
@@ -36,9 +36,6 @@ cpdef double cdf(double x):
 
 ## same as black_greeks in pricers module
 def black_greeks_fast(double S_0, double K, double r, double sigma, double T, int call_put_ind):
-    #if abs(sigma) < 1e-10:
-    #    return array ([exp ( - r * T ) * (S_0 - K), 1, 0, 0, 0, 0 ])
-    #else:
     cdef double d1 = ( log(S_0/K) + 0.5 *sigma**2 * T ) / (sigma * sqrt (T) )
     cdef double d2 = d1 - sigma * sqrt (T)
 
@@ -195,7 +192,7 @@ cpdef double spread_option_appx(double F_1, double F_2, double K,
         s += w_integ[idx] * d11_helper(F_1, F_2, K, sigma_1, sigma_2, rho, 
                                        T, p_integ[idx] * sqrt(2.))
 
-    return DF * s / sqrt(np.pi)
+    return DF * s / sqrt(M_PI)
 
 
 def trivariate_spread_exact_integrat_fast2 (double X_3, double Y_2, np.ndarray[np.float64_t, ndim=1] F_v,
@@ -212,7 +209,7 @@ def trivariate_spread_exact_integrat_fast2 (double X_3, double Y_2, np.ndarray[n
     return black_greeks_fast ( F_v[0] * exp ( mu[0] + rho[1] * X_3 * nu[0] + rho_Y1_Y2 * Y_2 * nu_1_d + 0.5 * nu_1_d ** 2 * ( 1 - rho_Y1_Y2**2 ) ), \
                                K + F_v[2] * exp (X_3 * nu[2] + mu[2] ) + F_v[1] * exp (Y_2 * nu_2_d + mu[1] + rho[2] * X_3 * nu[1] ) , \
                                - log (DF) / T, nu_1_d * sqrt(1 - rho_Y1_Y2**2) / sqrt(T), T, 0)[0]  \
-                               / ( 2 * np.pi ) * exp ( - ( X_3**2 + Y_2 **2) / 2.0 )
+                               / ( 2 * M_PI ) * exp ( - ( X_3**2 + Y_2 **2) / 2.0 )
 
 
 
