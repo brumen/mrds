@@ -11,9 +11,9 @@
 #include <emmintrin.h>
 #endif
 
-#define PO PyObject 
+#define PO PyObject
 
-#include <python2.7/Python.h>
+#include <python3.5m/Python.h>
 #include <numpy/ndarraytypes.h>
 #include <numpy/arrayobject.h>
 #include "opd_avx.h"
@@ -22,16 +22,16 @@
 #ifdef XMM
 #define DOUBLE_INCR 2
 #define SHORT_INCR 8
-#define reg __m128d
+#define reg     __m128d
 #define reg_int __m128i
-#define madd _mm_add_pd
-#define mmul _mm_mul_pd
-#define mset _mm_set_pd1
-#define mseti _mm_set1_epi16  // setting of integers 
-#define msetz _mm_setzero_pd
-#define mloa _mm_load_pd
-#define msto _mm_store_pd
-#define msub _mm_sub_pd
+#define madd    _mm_add_pd
+#define mmul    _mm_mul_pd
+#define mset    _mm_set_pd1
+#define mseti   _mm_set1_epi16  // setting of integers
+#define msetz   _mm_setzero_pd
+#define mloa    _mm_load_pd
+#define msto    _mm_store_pd
+#define msub    _mm_sub_pd
 #endif
 
 #ifdef AVX2
@@ -41,8 +41,8 @@
 #define reg_int __m256i
 #define madd _mm256_add_pd
 #define mmul _mm256_mul_pd
-#define mset _mm256_set1_pd  // setting of doubles 
-#define mseti _mm256_set1_epi16  // setting of integers 
+#define mset _mm256_set1_pd  // setting of doubles
+#define mseti _mm256_set1_epi16  // setting of integers
 #define msetz _mm256_setzero_pd
 #define mloa _mm256_loadu_pd
 #define mloa_int _mm256
@@ -50,151 +50,68 @@
 #define msub _mm256_sub_pd
 #endif
 
-#define cp(name) PyArrayObject *npy_## name = (PyArrayObject *) (name)  // change pointer
-#define cn(name) npy_## name->data  // change name 
+#define CP(name) PyArrayObject *npy_## name = (PyArrayObject *) (name)  // mnemonic for change pointer
+#define CN(name) npy_## name->data  // mnemonic for change name
 
-void add4_internal(double *r, double *a, double *b, double *c, double *d, double *y, 
-		   int nSize) {
+void add4_internal( double *r,
+                  double *a,
+                  double *b,
+                  double *c,
+                  double *d,
+                  double *y,
+                  int nSize ) {
   // computes r - (a+b+c+d)
-  // fast, not much faster than add4_simple, but nSize has to be divisible by 4
-  size_t idx = 0;
-  size_t idx2;
-  reg a_xmm, b_xmm, c_xmm, d_xmm, r_xmm;
-  size_t nb_repeats = nSize/DOUBLE_INCR -1;
-  
-  for (idx2=0; idx2<nb_repeats; idx2 += 1) {
-    a_xmm = mloa(a + idx);
-    b_xmm = mloa(b + idx);
-    c_xmm = mloa(c + idx);
-    d_xmm = mloa(d + idx);
-    r_xmm = mloa(r + idx);
-    a_xmm = madd(a_xmm, b_xmm);
-    c_xmm = madd(c_xmm, d_xmm);
-    a_xmm = madd(a_xmm, c_xmm);
-    a_xmm = msub(r_xmm, a_xmm);
-    msto(y+idx, a_xmm);
-    idx += DOUBLE_INCR;
-  }
-  // handling the last few items
-  for (idx2=idx; idx2<nSize; idx2+=1) {
-    y[idx2] = r[idx2] - (a[idx2] + b[idx2] + c[idx2] + d[idx2]);
-  }
-}
+  // Using g++-8 the compiler opimizes this using vaddpd instructions.
 
-void add4_simple(double *r, double *a, double *b, double *c, double *d, double *y, 
-		 int nSize) {
-  // computes r - (a+b+c+d)
-  // this routine is a bit slower than add4_internal, but it handles any number of elements
-  size_t idx;
-  for (idx=0; idx<nSize; idx += 1)
+  for (size_t idx=0; idx<nSize; idx += 1)
     y[idx] = r[idx] - (a[idx] + b[idx] + c[idx] + d[idx]);
 }
 
 
 void add4(PO *r, PO *a, PO *b, PO *c, PO *d, PO *y, int n) {
 
-  cp(r); cp(a); cp(b); cp(c); cp(d); cp(y);
+  CP(r); CP(a); CP(b); CP(c); CP(d); CP(y);
 
-  add4_internal( (double *) cn(r)
-		       , (double *) cn(a)
-		       , (double *) cn(b)
-		       , (double *) cn(c)
-		       , (double *) cn(d)
-		       , (double *) cn(y)
-		       , n);
+  add4_internal( (double *) CN(r)
+               , (double *) CN(a)
+               , (double *) CN(b)
+               , (double *) CN(c)
+               , (double *) CN(d)
+               , (double *) CN(y)
+               , n );
 }
 
 
-void mul4_internal(double *r, double *a, double *b, double c, double *y, 
-		   int nSize) {
-  // computes: r * a * b * c (c scalar, all other vectors)
-  size_t idx;
-  reg r_xmm, a_xmm, b_xmm;
-  reg c_xmm = mset(c);
-  for (idx=0; idx<nSize; idx += DOUBLE_INCR) {
-    a_xmm = mloa(a + idx);
-    b_xmm = mloa(b + idx);
-    r_xmm = mloa(r + idx);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, b_xmm);
-    a_xmm = madd(a_xmm, c_xmm);
-    msto(y+idx, a_xmm);
-  }
-}
-
-void mul4(PO *r, PO *a, PO *b, double c, PO *y,
-	  int n) {
-  // computes: r * a * b * c (c scalar, all other vectors)
-  cp(r); cp(a); cp(b); cp(y);
-  mul4_internal((double *) cn(r),
-		(double *) cn(a), 
-		(double *) cn(b),
-		c,
-		(double *) cn(y),
-		n);
-}
-
-void mul5_internal(double *r, double *a, double *b, double c, double *y, 
-		   int nSize) {
-  // computes: r * a * b * c (c scalar, all other vectors)
-  size_t idx;
-  reg r_xmm, a_xmm, b_xmm;
-  reg c_xmm = mset(c);
-  for (idx=0; idx<nSize; idx += DOUBLE_INCR) {
-    a_xmm = mloa(a + idx);
-    b_xmm = mloa(b + idx);
-    r_xmm = mloa(r + idx);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, b_xmm);
-    a_xmm = madd(a_xmm, c_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    a_xmm = madd(a_xmm, r_xmm);
-    msto(y+idx, a_xmm);
-  }
-}
-
-void mul5(PO *r, PO *a, PO *b, double c, PO *y,
-	  int n) {
-  cp(r); cp(a); cp(b); cp(y);
-  mul5_internal((double *) cn(r),
-		(double *) cn(a),
-		(double *) cn(b),
-		c,
-		(double *) cn(y),
-		n);
-}
-
-void mul6_internal(double *r, double *a, double *b, double c, double *y, int nSize) {
+void mul4_simple(double *r,
+                   double *a,
+                   double *b,
+                   double c,
+                   double *y,
+                   int nSize) {
   // computes: r * a * b * c (c scalar, all other vectors)
 
-  size_t idx;
-  reg a_xmm;
-  reg c_xmm = mset(c);
-  for (idx=0; idx<nSize; idx += DOUBLE_INCR) {
-    a_xmm = madd(a_xmm, c_xmm);
-    a_xmm = madd(a_xmm, c_xmm);
-  }
+  for (size_t idx=0; idx<nSize; idx += 1)
+    y[idx] = r[idx] * a[idx] * b[idx] * c;
 }
 
-void mul6(PO *r, PO *a, PO *b, double c, PO *y,
-	  int n) {
-  cp(r); cp(a); cp(b); cp(y);
-  mul6_internal((double *) cn(r),
-		(double *) cn(a),
-		(double *) cn(b),
-		c,
-		(double *) cn(y),
-		n);
+
+void mul4(PO *r, PO *a, PO *b, double c, PO *y, int n) {
+  // computes: r * a * b * c (c scalar, all other vectors)
+  CP(r);
+  CP(a);
+  CP(b);
+  CP(y);
+
+  mul4_internal((double *) CN(r),
+                (double *) CN(a),
+                (double *) CN(b),
+                c,
+                (double *) CN(y),
+                n);
 }
+
+
+
 
 void mul7_internal(double *r, double *a, double *b, double c, double *y, 
 		   int nSize) {
@@ -213,114 +130,65 @@ void mul7_internal(double *r, double *a, double *b, double c, double *y,
 
 void mul7(PO *r, PO *a, PO *b, double c, PO *y,
 	  int n) {
-  cp(r); cp(a); cp(b); cp(y); 
-  mul7_internal((double *) cn(r),
-		(double *) cn(a),
-		(double *) cn(b),
+  CP(r); CP(a); CP(b); CP(y);
+  mul7_internal((double *) CN(r),
+		(double *) CN(a),
+		(double *) CN(b),
 		c,
-		(double *) cn(y),
+		(double *) CN(y),
 		n);
 }
 
-void skew_fom_internal_avx(double F, double *delta_X, 
-			   double c1_ch, double qv, 
-			   double c2_ch, double c3_ch, 
-			   double *sim_fom, 
-			   int nb_sim) {
-  size_t idx;
-  reg F_xmm = mset(F);
-  reg one_xmm = mset(1.);
-  reg qv_xmm = mset(qv);
-  reg qv_xmm2 = mmul(qv_xmm, qv_xmm);
-  reg c1_ch_xmm = mset(c1_ch);
-  reg c2_ch_xmm = mset(c2_ch);
-  reg c3_ch_xmm = mset(c3_ch);
-  reg fact_xmm = mset(-3.);
 
-  for (idx=0; idx< nb_sim; idx += DOUBLE_INCR) {
-    reg delta_X_xmm = mloa(delta_X + idx);
-    reg delta_X2_xmm = mmul(delta_X_xmm, delta_X_xmm);
-    reg delta_X3_xmm = mmul(delta_X2_xmm, delta_X_xmm);
-    reg delta_X4_xmm = mmul(delta_X3_xmm, delta_X_xmm);
-    reg ft_xmm = msub(delta_X2_xmm, qv_xmm);
-    // first term
-    ft_xmm = mmul(c1_ch_xmm, ft_xmm);
-    // second term
-    reg st_xmm = mset(-3.);
-    st_xmm = mmul(st_xmm, delta_X_xmm);
-    st_xmm = mmul(st_xmm, qv_xmm); // -3 * X * qv
-    st_xmm = madd(delta_X3_xmm, st_xmm); // X**3 - 3 X qv
-    st_xmm = mmul(c2_ch_xmm, st_xmm);  // c2 * (X**3 - 3 X qv)
-    //third term
-    reg tt_xmm = mset(3.);
-    tt_xmm = mmul(tt_xmm, qv_xmm2);  // 3*qv*2
-    // delta_X3 overwritten
-    delta_X3_xmm = mset(-6.);
-    delta_X3_xmm = mmul(delta_X3_xmm, qv_xmm);
-    delta_X3_xmm = mmul(delta_X3_xmm, delta_X2_xmm);
-    tt_xmm = madd(tt_xmm, delta_X3_xmm);
-    tt_xmm = madd(tt_xmm, delta_X4_xmm);
-    tt_xmm = mmul(tt_xmm, c3_ch_xmm);
-    // result
-    reg res_xmm = madd(one_xmm, delta_X_xmm);
-    res_xmm = madd(res_xmm, ft_xmm);
-    res_xmm = madd(res_xmm, st_xmm);
-    res_xmm = madd(res_xmm, tt_xmm);
-    res_xmm = mmul(res_xmm, F_xmm);
-    msto(sim_fom+idx, res_xmm);
-  }
-}
+void skew_fom_internal(double F
+                      , double *delta_X
+                       , double c1_ch
+                       , double qv
+                       , double c2_ch
+                       , double c3_ch
+                       , double *sim_fom
+                       , int nb_sim ) {
 
-void skew_fom_internal_simple(double F, double *delta_X, 
-			      double c1_ch, double qv, 
-			      double c2_ch, double c3_ch, 
-			      double *sim_fom, 
-			      int nb_sim) {
-  size_t idx;
-  for (idx=0; idx< nb_sim; idx += 1) {
-    double delta_X_xmm = delta_X[idx];
+  for (size_t idx=0; idx< nb_sim; idx += 1) {
+    double delta_X_xmm  = delta_X[idx];
     double delta_X2_xmm = delta_X_xmm * delta_X_xmm;
     double delta_X3_xmm = delta_X2_xmm * delta_X_xmm;
     double delta_X4_xmm = delta_X3_xmm * delta_X_xmm;
-    // first term 
+    // first term
     double ft_xmm = c1_ch * delta_X2_xmm - qv;
     // second term
     double st_xmm = c2_ch * (delta_X3_xmm -3. * delta_X_xmm * qv);
-    //third term 
+    //third term
     double tt_xmm = c3_ch * (delta_X4_xmm -6. * qv * delta_X2_xmm + 3. * qv*qv);
-    // result
-    double res_xmm = F * (1. + delta_X_xmm + ft_xmm + st_xmm + tt_xmm);
-    sim_fom[idx] = res_xmm;
+    sim_fom[idx] =  F * (1. + delta_X_xmm + ft_xmm + st_xmm + tt_xmm);
   }
 }
 
 
-void skew_fom(double F, PO *delta_X, 
-	      double c1_ch, double qv, double c2_ch, double c3_ch, 
-	      PO *sim_fom, 
-	      int nb_sim) {
-  cp(delta_X);
-  cp(sim_fom);
-  skew_fom_internal_simple(F, (double *) cn(delta_X),
-			   c1_ch, qv, c2_ch, c3_ch, 
-			   (double *) cn(sim_fom),
-			   nb_sim);
+void skew_fom(double F
+              , PO *delta_X
+              , double c1_ch
+              , double qv
+              , double c2_ch
+              , double c3_ch
+              , PO *sim_fom
+              , int nb_sim) {
+  CP(delta_X);
+  CP(sim_fom);
+  skew_fom_internal(F
+                    , (double *) CN(delta_X)
+                    , c1_ch
+                    , qv
+                    , c2_ch
+                    , c3_ch
+                    , (double *) CN(sim_fom)
+                    , nb_sim);
 }
 
-void skew_fom_avx(double F, PO *delta_X, 
-		  double c1_ch, double qv, double c2_ch, double c3_ch, 
-		  PO *sim_fom, 
-		  int nb_sim) {
-  cp(delta_X);
-  cp(sim_fom);
-  skew_fom_internal_avx(F, (double *) cn(delta_X),
-			c1_ch, qv, c2_ch, c3_ch, 
-			(double *) cn(sim_fom),
-			nb_sim);
-}
 
-// performs np.sum(vec1 * vec2), a scalar product
+
 double num_quad_internal(double *vec1, double *vec2, size_t v_len) {
+  // performs np.sum(vec1 * vec2), a scalar product
   reg v1_xmm, v2_xmm, v3_xmm, res_xmm;
   size_t idx;
   double res[DOUBLE_INCR];
@@ -328,40 +196,26 @@ double num_quad_internal(double *vec1, double *vec2, size_t v_len) {
   for (idx=0; idx < v_len; idx += DOUBLE_INCR) {
     v1_xmm = mloa(vec1 + idx);
     v2_xmm = mloa(vec2 + idx);
-    v2_xmm = mmul(v1_xmm, v2_xmm);  // multiplied 
-    res_xmm = madd(res_xmm, v2_xmm); // added 
+    v2_xmm = mmul(v1_xmm, v2_xmm);  // multiplied
+    res_xmm = madd(res_xmm, v2_xmm); // added
   }
   msto(res, res_xmm);
   return res[0] + res[1];
 }
 
+
 double num_quad(PO *vec1, PO *vec2, int v_len) {
-  cp(vec1); cp(vec2);
-  return num_quad_internal((double *) cn(vec1),
-			   (double *) cn(vec2),
+  CP(vec1); CP(vec2);
+  return num_quad_internal((double *) CN(vec1),
+			   (double *) CN(vec2),
 			   (size_t) v_len);
 }
 
-void test_1_int(double *v1, double *v2, double *res, int len) {
-  size_t idx;
-  for (idx=0; idx<len; idx+= 1)
-    res[idx] = v1[idx] + v2[idx];
-}
-
-void test_1(PO *v1, PO *v2, PO *res, int len) {
-  cp(v1); cp(v2); cp(res);
-  return test_1_int((double *) cn(v1),
-		    (double *) cn(v2),
-		    (double *) cn(res),
-		    len);
-}
-
-
 void do_start_shut_internal(short *dc_can,
-			    short *dc_force,
-			    short *is_profitable,
-			    short *do_action,
-			    int nb) {
+			                short *dc_force,
+			                short *is_profitable,
+			                short *do_action,
+			                int   nb) {
   // implements startup/shutdown
   // dc_can_start & ((dc_force_start == 2) || (is_profit & dc_force == 1))
 
@@ -370,10 +224,12 @@ void do_start_shut_internal(short *dc_can,
   reg_int *dc_force_avx = (reg_int *) dc_force;
   reg_int *is_profitable_avx = (reg_int *) is_profitable;
   reg_int *do_action_avx = (reg_int *) do_action;
+
   for (idx=0; idx < nb/SHORT_INCR; idx += 1) {
-    reg_int can_avx = _mm256_loadu_si256(dc_can_avx + idx);
-    reg_int force_avx = _mm256_loadu_si256(dc_force_avx + idx);
+    reg_int can_avx     = _mm256_loadu_si256(dc_can_avx + idx);
+    reg_int force_avx   = _mm256_loadu_si256(dc_force_avx + idx);
     reg_int is_prof_avx = _mm256_loadu_si256(is_profitable_avx + idx);
+
     reg_int cnd_1 = _mm256_cmpeq_epi16(force_avx, _mm256_set1_epi16(2));
     reg_int cnd_2 = _mm256_and_si256(is_prof_avx,
 				     _mm256_cmpeq_epi16(force_avx, _mm256_set1_epi16(1)));
@@ -390,12 +246,12 @@ void do_start_shut_internal_simple(short *dc_can,
 				   short *is_profitable,
 				   short *do_action,
 				   int nb) {
-  // implements startup/shutdown, in a naive fashion 
+  // implements startup/shutdown, in a naive fashion
   // dc_can_start & ((dc_force_start == 2) || (is_profit & dc_force == 1))
   // this works _MUCH_ slower than _internal_ function above
-  
+
   size_t idx;
-  for (idx=0; idx < nb; idx += 1) 
+  for (idx=0; idx < nb; idx += 1)
     do_action[idx] = dc_can[idx] &
       ((dc_force[idx] == 2) || (is_profitable[idx] & dc_force[idx] == 1));
 }
@@ -403,12 +259,12 @@ void do_start_shut_internal_simple(short *dc_can,
 
 void do_start_shut(PO *dc_can, PO *dc_force, PO *is_profitable, PO *do_action, 
 		   int nb_sim) {
-  cp(dc_can); cp(dc_force);
-  cp(is_profitable); cp(do_action);
-  do_start_shut_internal((short *) cn(dc_can),
-  			 (short *) cn(dc_force),
-  			 (short *) cn(is_profitable),
-  			 (short *) cn(do_action),
+  CP(dc_can); CP(dc_force);
+  CP(is_profitable); CP(do_action);
+  do_start_shut_internal((short *) CN(dc_can),
+  			 (short *) CN(dc_force),
+  			 (short *) CN(is_profitable),
+  			 (short *) CN(do_action),
   			 nb_sim);
 }
 
@@ -424,8 +280,8 @@ void cold_start_internal(short *hours_shut,
   reg_int *res_avx  = (reg_int *) res;
   for (idx=0; idx < nSize / SHORT_INCR; idx +=1) {
     reg_int hs_avx = _mm256_load_si256(hours_shut_avx + idx);
-    reg_int cnd_1 = _mm256_cmpgt_epi16(hs_avx, cold_start_avx);
-    _mm256_store_si256(res_avx+idx, cnd_1);
+    reg_int CNd_1 = _mm256_cmpgt_epi16(hs_avx, cold_start_avx);
+    _mm256_store_si256(res_avx+idx, CNd_1);
   }
   // Missing if nSize not divisible by 16 ????
 }
@@ -435,11 +291,14 @@ void cold_start(PO *hours_shut,
 		PO *res,
 		int xud_cold_start,
 		size_t nSize) {
-  cp(hours_shut); cp(res);
-  cold_start_internal((short *) cn(hours_shut), 
-		      (short *) cn(res),
-		      (short) xud_cold_start,
-		      nSize);
+
+  CP(hours_shut);
+  CP(res);
+
+  cold_start_internal((short *) CN(hours_shut),
+		              (short *) CN(res),
+		              (short) xud_cold_start,
+		              nSize);
 }
 
 // selecting from 2 doubles according to int16
@@ -450,7 +309,7 @@ void sel_double2_internal(double *x1, double *x2,
   size_t idx;
   reg res_avx;
   for (idx=0; idx<n; idx+= 2) {
-    reg sel_1_avx = (reg) mseti(sel[idx]);  
+    reg sel_1_avx = (reg) mseti(sel[idx]);
     reg sel_2_avx = (reg) mseti(sel[idx+1]);
     reg sel_avx  = _mm256_shuffle_pd(sel_1_avx, sel_2_avx, _MM_SHUFFLE2(0,0));
     reg x1_avx = mloa(x1+idx);
@@ -516,20 +375,20 @@ void is_start_profitable(PO *startup_sp_in,
 			 PO *is_shutdown_profitable,
 			 PO *is_startup_profitable,
 			 int nSize) {
-  cp(startup_sp_in); cp(fixed_and_fuel_startup_cost);
-  cp(shutdown_gen_profit); cp(pp_arg_max); cp(is_shutdown_profitable);
-  cp(is_startup_profitable);
+  CP(startup_sp_in); CP(fixed_and_fuel_startup_cost);
+  CP(shutdown_gen_profit); CP(pp_arg_max); CP(is_shutdown_profitable);
+  CP(is_startup_profitable);
 
-  is_start_profitable_internal((double *) cn(startup_sp_in),
+  is_start_profitable_internal((double *) CN(startup_sp_in),
 			       shutdown_sp_in,
-			       (double *) cn(fixed_and_fuel_startup_cost),
+			       (double *) CN(fixed_and_fuel_startup_cost),
 			       xud_startup_horizon,
 			       xud_shutdown_horizon,
 			       max_cap,
-			       (double *) cn(shutdown_gen_profit),
-			       (double *) cn(pp_arg_max),
-			       (short *) cn(is_shutdown_profitable),
-			       (short *) cn(is_startup_profitable),
+			       (double *) CN(shutdown_gen_profit),
+			       (double *) CN(pp_arg_max),
+			       (short *) CN(is_shutdown_profitable),
+			       (short *) CN(is_startup_profitable),
 			       nSize);
 }
 
@@ -544,8 +403,7 @@ void startup_cost_internal(short *is_cold_start,
 			   double *res,
 			   int nSize) {
 
-  size_t idx;
-  for (idx=0; idx < nSize; idx += 1)
+  for (size_t idx=0; idx < nSize; idx += 1)
     res[idx] = starts[idx] ? (is_cold_start[idx] ?
 			      startup_cost_cold + fuel_prices[idx] * start_fuel_cold :
 			      startup_cost_p + fuel_prices[idx] * start_fuel) :
@@ -562,14 +420,14 @@ void startup_cost(PO *is_cold_start,
 		  double start_fuel,
 		  PO *res,
 		  int nSize) {
-  cp(is_cold_start); cp(starts); cp(fuel_prices); cp(res);
-  startup_cost_internal( (short*) cn(is_cold_start),
-			 (short *) cn(starts),
+  CP(is_cold_start); CP(starts); CP(fuel_prices); CP(res);
+  startup_cost_internal( (short*) CN(is_cold_start),
+			 (short *) CN(starts),
 			 startup_cost_cold,
 			 startup_cost_p,
-			 (double *) cn(fuel_prices),
+			 (double *) CN(fuel_prices),
 			 start_fuel_cold,
 			 start_fuel,
-			 (double *) cn(res),
+			 (double *) CN(res),
 			 nSize);
 }

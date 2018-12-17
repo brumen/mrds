@@ -7,7 +7,7 @@ def opd_1fuel(block_nb,
               pp, fp,
               params,
               startup_sp_in,
-              # state 
+              # state
               state_state_i,
               state_hours_in_state,
               state_generation,
@@ -15,7 +15,7 @@ def opd_1fuel(block_nb,
               state_hours_shut,
               state_hours_run,
               state_global_starts,
-              # constraints 
+              # constraints
               dc_can_start,
               dc_can_shut,
               dc_force_start,
