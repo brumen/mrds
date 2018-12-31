@@ -1,10 +1,5 @@
 void add4(PyObject *r, PyObject *a, PyObject *b, PyObject *c, PyObject *d, PyObject *y, int n);
-
 void mul4(PyObject *r, PyObject *a, PyObject *b, double c, PyObject *y, int n);
- n);
-void mul5(PyObject *r, PyObject *a, PyObject *b, double c, PyObject *y, int n);
-void mul6(PyObject *r, PyObject *a, PyObject *b, double c, PyObject *y, int n);
-void mul7(PyObject *r, PyObject *a, PyObject *b, double c, PyObject *y, int n);
 
 void skew_fom( double F
              , PyObject *delta_X
@@ -17,11 +12,19 @@ void skew_fom( double F
 
 double num_quad(PyObject *vec1, PyObject *vec2, int v_len);
 
+
 void do_start_shut(PyObject *dc_can
                    , PyObject *dc_force
                    , PyObject *is_profitable
                    , PyObject *do_action
                    , int nb_sim );
+
+void do_start_shut_simple(PyObject *dc_can
+                   , PyObject *dc_force
+                   , PyObject *is_profitable
+                   , PyObject *do_action
+                   , int nb_sim );
+
 
 void startup_cost(PyObject *is_cold_start,
 		  PyObject *starts,

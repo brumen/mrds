@@ -53,45 +53,15 @@
 #define CP(name) PyArrayObject *npy_## name = (PyArrayObject *) (name)  // mnemonic for change pointer
 #define CN(name) npy_## name->data  // mnemonic for change name
 
-void add4_internal( double *r,
-                  double *a,
-                  double *b,
-                  double *c,
-                  double *d,
-                  double *y,
-                  int nSize ) {
+
+void add4(PO *r, PO *a, PO *b, PO *c, PO *d, PO *y, int n) {
   // computes r - (a+b+c+d)
   // Using g++-8 the compiler opimizes this using vaddpd instructions.
 
-  for (size_t idx=0; idx<nSize; idx += 1)
-    y[idx] = r[idx] - (a[idx] + b[idx] + c[idx] + d[idx]);
-}
-
-
-void add4(PO *r, PO *a, PO *b, PO *c, PO *d, PO *y, int n) {
-
   CP(r); CP(a); CP(b); CP(c); CP(d); CP(y);
 
-  add4_internal( (double *) CN(r)
-               , (double *) CN(a)
-               , (double *) CN(b)
-               , (double *) CN(c)
-               , (double *) CN(d)
-               , (double *) CN(y)
-               , n );
-}
-
-
-void mul4_simple(double *r,
-                   double *a,
-                   double *b,
-                   double c,
-                   double *y,
-                   int nSize) {
-  // computes: r * a * b * c (c scalar, all other vectors)
-
-  for (size_t idx=0; idx<nSize; idx += 1)
-    y[idx] = r[idx] * a[idx] * b[idx] * c;
+  for (size_t idx=0; idx<n; idx += 1)
+    npy_y[idx] = npy_r[idx] - (npy_a[idx] + npy_b[idx] + npy_c[idx] + npy_d[idx]);
 }
 
 
@@ -102,43 +72,10 @@ void mul4(PO *r, PO *a, PO *b, double c, PO *y, int n) {
   CP(b);
   CP(y);
 
-  mul4_internal((double *) CN(r),
-                (double *) CN(a),
-                (double *) CN(b),
-                c,
-                (double *) CN(y),
-                n);
+  for (size_t idx=0; idx<n; idx += 1)
+    npy_y[idx] = npy_r[idx] * npy_a[idx] * npy_b[idx] * c;
+
 }
-
-
-
-
-void mul7_internal(double *r, double *a, double *b, double c, double *y, 
-		   int nSize) {
-  size_t idx;
-  reg a_xmm;
-  reg c_xmm = mset(c);
-  reg b_xmm = mset(c+1);
-  reg d_xmm = mset(c+2);
-  reg e_xmm = mset(c+3);
-  for (idx=0; idx<nSize; idx += DOUBLE_INCR) {
-    a_xmm = mloa(a + idx);
-    reg res_xmm = madd(mmul(madd(a_xmm, b_xmm),c_xmm),d_xmm);
-    msto(y+idx, res_xmm);
-  }
-}
-
-void mul7(PO *r, PO *a, PO *b, double c, PO *y,
-	  int n) {
-  CP(r); CP(a); CP(b); CP(y);
-  mul7_internal((double *) CN(r),
-		(double *) CN(a),
-		(double *) CN(b),
-		c,
-		(double *) CN(y),
-		n);
-}
-
 
 void skew_fom_internal(double F
                       , double *delta_X
@@ -211,6 +148,26 @@ double num_quad(PO *vec1, PO *vec2, int v_len) {
 			   (size_t) v_len);
 }
 
+
+double num_quad_internal_simple(double *vec1, double *vec2, size_t v_len) {
+  // performs np.sum(vec1 * vec2), a scalar product
+
+  double res = 0.;
+  for (size_t idx=0; idx < v_len; idx += 1)
+    res += vec1[idx] * vec2[idx];
+
+  return res;
+}
+
+double num_quad_simple(PO *vec1, PO *vec2, int v_len) {
+  CP(vec1); CP(vec2);
+
+  return num_quad_internal_simple((double *) CN(vec1),
+                                  (double *) CN(vec2),
+                                  (size_t) v_len);
+}
+
+
 void do_start_shut_internal(short *dc_can,
 			                short *dc_force,
 			                short *is_profitable,
@@ -250,8 +207,7 @@ void do_start_shut_internal_simple(short *dc_can,
   // dc_can_start & ((dc_force_start == 2) || (is_profit & dc_force == 1))
   // this works _MUCH_ slower than _internal_ function above
 
-  size_t idx;
-  for (idx=0; idx < nb; idx += 1)
+  for (size_t idx=0; idx < nb; idx += 1)
     do_action[idx] = dc_can[idx] &
       ((dc_force[idx] == 2) || (is_profitable[idx] & dc_force[idx] == 1));
 }
@@ -266,6 +222,17 @@ void do_start_shut(PO *dc_can, PO *dc_force, PO *is_profitable, PO *do_action,
   			 (short *) CN(is_profitable),
   			 (short *) CN(do_action),
   			 nb_sim);
+}
+
+void do_start_shut_simple(PO *dc_can, PO *dc_force, PO *is_profitable, PO *do_action,
+                   int nb_sim) {
+  CP(dc_can); CP(dc_force);
+  CP(is_profitable); CP(do_action);
+  do_start_shut_internal_simple((short *) CN(dc_can),
+                         (short *) CN(dc_force),
+                         (short *) CN(is_profitable),
+                         (short *) CN(do_action),
+                         nb_sim);
 }
 
 
