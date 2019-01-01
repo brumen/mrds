@@ -8,7 +8,6 @@ import multiprocessing
 import ctypes
 
 # my modules
-import tolling_fast
 import lattice
 from cond_prob import transition_mtx_ln_blocks_fast, transition_mtx_ln_blocks_fast_internal
 import sg # sparse grids for fast integration
@@ -25,11 +24,6 @@ def tens_fast_mt(P_m, H_m, G_m, res_m):
                      ctypes.py_object(H_m),
                      ctypes.py_object(G_m),
                      ctypes.py_object(res_m))
-
-
-# structure for tolling parameters
-class tolling_params():
-    pass
 
 
 # wrapper for the skew MRD model calibration function
@@ -51,16 +45,13 @@ class tolling_model_lattice_gas():
     #   .sigma_F ... forward vol
     #   .sigma_C ... cash vol 
     #   .SC ... fixed startup costs 
-    # debug_ind ... indicator whether debug is desired
 
     """
     def __init__(self, params, blocks, debug_ind=False, sg_level=15):
-        #self.comp_ind = params.comp_ind # computational indicator: 0 ... slow CPU, 1 ... fast CPU, 2 ... MT CPU, 3 ... CUDA 
         self.cuda = params.cuda
         self.tolling_fast = params.tolling_fast # using the fast tensor routine from tolling_fast.pyx
         self.tolling_fast_mt = params.tolling_fast_mt # using raw multi-threading 
         self.fuel_ind = params.fuel_ind # whether fuel is present
-        self.debug_ind = debug_ind
         self.keep_decisions = params.keep_decisions
         self.params = params
         self.lattice_size = params.lattice_size
@@ -89,22 +80,36 @@ class tolling_model_lattice_gas():
         self.blocks = blocks
         # construction of lattice blocks for each market, should eventually replace above
         self.lattice_blocks_by_name = {}
-        self.market_by_name = {}
+
+        # internal variables
+        self.__marketByName = None
+
+    @property
+    def _marketByName(self):
+        """
+
+        """
+
+        if self.__marketByName:
+            return self.__marketByName
+
         for dp in self.blocks.market.power:
             for m in dp:
                 market_name = m["name"]
-                if not self.lattice_blocks_by_name.has_key(market_name):
+                if market_name not in self.lattice_blocks_by_name:
                     self.lattice_blocks_by_name[market_name] = lattice.lattice_ln(m["fwd"],
                                                                                   m["sigma_F"],
                                                                                   m["sigma_C"],
                                                                                   self.lattice_size).lattice
-                if not self.market_by_name.has_key(market_name):
-                    self.market_by_name[market_name] = m
+                if market_name not in self.__marketByName:
+                    self.__marketByName[market_name] = m
 
+    @property
+    def _latticeBlocks(self):
         # lattice per blocks; done so that it uses pointers
-        self.lattice_blocks = [[self.lattice_blocks_by_name[m["name"]]
-                                for m in dp]
-                               for dp in self.blocks.market.power]
+        return [[self.lattice_blocks_by_name[m["name"]]
+                 for m in dp]
+                 for dp in self.blocks.market.power]
 
         if self.fuel_ind:  # gas lattice is only used if fuel is present
             self.lattice_gas = lattice.lattice_ln(self.blocks.market.gas["fwd"],
@@ -118,21 +123,21 @@ class tolling_model_lattice_gas():
         self.market_seq = blocks_seqs["market_seq"]  # sequence of market moves
         self.lattice_seq = blocks_seqs["lattice_seq"]
         self.P_m_seq = {}  # sequence of transition matrices, currently empty, filled in as the program progresses
-        self.zero_matrix = self.zero_pp()  # profit matrix/vector
+        self.zero_matrix = self._zeroPP()  # profit matrix/vector
 
         def list_zero_pp(nb):
-            return [self.zero_pp()] * nb
+            return [self._zeroPP()] * nb
 
         if self.cuda:
-            self.zero_matrix_d = gpa.to_gpu(self.zero_pp()).astype(np.float32)
+            self.zero_matrix_d = gpa.to_gpu(self._zeroPP()).astype(np.float32)
 
         # tmp. storage 
         if not self.cuda:
-            self.work_curr_tmp = {"max": self.zero_pp(), "min": self.zero_pp()} # work between max and min capacity
-            self.idle_curr_tmp = self.zero_pp()
+            self.work_curr_tmp = {"max": self._zeroPP(), "min": self._zeroPP()} # work between max and min capacity
+            self.idle_curr_tmp = self._zeroPP()
         else:
-            self.work_curr_tmp = gpa.to_gpu(self.zero_pp()).astype(np.float32)
-            self.idle_curr_tmp = gpa.to_gpu(self.zero_pp()).astype(np.float32)
+            self.work_curr_tmp = gpa.to_gpu(self._zeroPP()).astype(np.float32)
+            self.idle_curr_tmp = gpa.to_gpu(self._zeroPP()).astype(np.float32)
 
         # the next power plant (pp) working condition 
         self.work_pp_next = {"max": list_zero_pp(self.MUT+1),
@@ -148,9 +153,9 @@ class tolling_model_lattice_gas():
 
         if self.keep_decisions:
             for block in range(60):
-                self.work_pp_curr_ind[block]['max'] = [self.zero_pp() for n in range(self.MUT + 1)]
-                self.work_pp_curr_ind[block]["min"] = [self.zero_pp() for n in range(self.MUT + 1)]
-                self.idle_pp_curr_ind[block] = [self.zero_pp() for n in range(self.MDT + 1)]
+                self.work_pp_curr_ind[block]['max'] = [self._zeroPP() for n in range(self.MUT + 1)]
+                self.work_pp_curr_ind[block]["min"] = [self._zeroPP() for n in range(self.MUT + 1)]
+                self.idle_pp_curr_ind[block] = [self._zeroPP() for n in range(self.MDT + 1)]
         else:
             for block in range(60):
                 self.work_pp_curr_ind[block]['max'] = [0 for n in range(self.MUT + 1)]
@@ -159,83 +164,111 @@ class tolling_model_lattice_gas():
 
         for Ut in range(self.MUT + 1):
             if not self.cuda:
-                self.work_pp_next["max"].append(self.zero_pp())
-                self.work_pp_curr["max"].append(self.zero_pp())
-                self.work_pp_next["min"].append(self.zero_pp())
-                self.work_pp_curr["min"].append(self.zero_pp())
+                self.work_pp_next["max"].append(self._zeroPP())
+                self.work_pp_curr["max"].append(self._zeroPP())
+                self.work_pp_next["min"].append(self._zeroPP())
+                self.work_pp_curr["min"].append(self._zeroPP())
             else:
-                self.work_pp_next["max"].append(gpa.to_gpu(self.zero_pp()).astype(np.float32))
-                self.work_pp_curr["max"].append(gpa.to_gpu(self.zero_pp()).astype(np.float32))
-                self.work_pp_next["min"].append(gpa.to_gpu(self.zero_pp()).astype(np.float32))
-                self.work_pp_curr["min"].append(gpa.to_gpu(self.zero_pp()).astype(np.float32))
+                self.work_pp_next["max"].append(gpa.to_gpu(self._zeroPP()).astype(np.float32))
+                self.work_pp_curr["max"].append(gpa.to_gpu(self._zeroPP()).astype(np.float32))
+                self.work_pp_next["min"].append(gpa.to_gpu(self._zeroPP()).astype(np.float32))
+                self.work_pp_curr["min"].append(gpa.to_gpu(self._zeroPP()).astype(np.float32))
 
         for Dt in range(self.MDT + 1):
             if not self.cuda:
-                self.idle_pp_next.append(self.zero_pp())
-                self.idle_pp_curr.append(self.zero_pp())
+                self.idle_pp_next.append(self._zeroPP())
+                self.idle_pp_curr.append(self._zeroPP())
             else:
-                self.idle_pp_next.append(gpa.to_gpu(self.zero_pp()).astype(np.float32))
-                self.idle_pp_curr.append(gpa.to_gpu(self.zero_pp()).astype(np.float32))
+                self.idle_pp_next.append(gpa.to_gpu(self._zeroPP()).astype(np.float32))
+                self.idle_pp_curr.append(gpa.to_gpu(self._zeroPP()).astype(np.float32))
 
-    def zero_pp(self):
+    def _zeroPP(self):
         """
-        construction of the zero matrix
+        Construction of the zero matrix
+
         """
+
         if self.fuel_ind:
             return np.zeros((self.lattice_size, self.lattice_size))  # matrix
-        else:
-            return np.zeros(self.lattice_size) # vector
+
+        return np.zeros(self.lattice_size) # vector
+
+    def p_t( self
+           , v
+           , p_dash
+           , g_dash
+           , op
+           , g
+           , F_123
+           , sigma_123
+           , rho_123
+           , t
+           , delta_t ):
+        """
+        transition prob of (p_dash, g_dash | op, g)
+        v replaces p via equation (that can be given
+        """
+
+        F_1, F_2, F_3 = F_123
+        rho_12, rho_13, rho_23 = rho_123
+        sigma_P, sigma_OP, sigma_G = sigma_123
+        sigma_1, sigma_2, sigma_3 = sigma_123
+
+        sigma_cond = 1. - (rho_12**2 - 2 * rho_12 * rho_13 * rho_23 + rho_13**2) \
+            / (1. - rho_23**2)
+
+        # d1 = (np.log(p/F_1) + 0.5 * sigma_1**2 * t) / (sigma_1 * np.sqrt(t))
+        d2 = (np.log(op/F_2) + 0.5 * sigma_2**2 * t) / (sigma_2 * np.sqrt(t))
+        d3 = (np.log(g/F_3) + 0.5 * sigma_3**2 * t) / (sigma_3 * np.sqrt(t))
+
+        mu_over = (rho_12 * d2 - rho_12 * rho_23 * d3 - rho_13 * rho_23 * d2 + rho_13 * d3) \
+            / (1. - rho_23**2)
+
+        d4 = (np.log(p_dash/F_1) + 0.5 * sigma_P**2 * (t + delta_t)
+            - np.sqrt(sigma_cond) * v * sigma_P * np.sqrt(t) +
+            mu_over * sigma_P * np.sqrt(t)) / (sigma_P * np.sqrt(delta_t))
+        d5 = (np.log(g_dash/g) + 0.5 * sigma_G**2 * delta_t) / (sigma_G * np.sqrt(delta_t))
+
+        return bvnd(d4, d5, rho_13)  # rho between Peak & gas (peak is mnemonic for next one)
+
+    def p_t_integ( self
+                 , p_dash
+                 , g_dash
+                 , op
+                 , g
+                 , F_123
+                 , sigma_123
+                 , rho_123
+                 , t
+                 , delta_t
+                 , sg_level=15 ):
+
+        weights = np.array(sg.sg_w(1, sg_level)) # row vector
+        xs      = np.array(sg.sg_p(1, sg_level)).flatten() # row vector
+
+        g_v = self.p_t( xs * np.sqrt(2.)
+                      , p_dash
+                      , g_dash
+                      , op
+                      , g
+                      , F_123
+                      , sigma_123
+                      , rho_123
+                      , t
+                      , delta_t ) / np.sqrt(np.pi)  # g = lambda x: f(x * sqrt2) / (sqrt_pi)**D
+
+        return np.sum(weights * g_v)
 
     def transition_mtx_ln_blocks_all(self, step_nb):
         """
         constructs a transition matrix P_m for step step_nb
+
         """
-        def p_t(v, p_dash, g_dash, op, g,
-                F_123, sigma_123, rho_123,
-                t, delta_t):
-            """
-            transition prob of (p_dash, g_dash | op, g)
-            v replaces p via equation (that can be given
-            """
-            F_1, F_2, F_3 = F_123
-            rho_12, rho_13, rho_23 = rho_123
-            sigma_P, sigma_OP, sigma_G = sigma_123
-            sigma_1, sigma_2, sigma_3 = sigma_123
-
-            sigma_cond = 1. - (rho_12**2 - 2 * rho_12 * rho_13 * rho_23 + rho_13**2) \
-                / (1. - rho_23**2)
-
-            # d1 = (np.log(p/F_1) + 0.5 * sigma_1**2 * t) / (sigma_1 * np.sqrt(t))
-            d2 = (np.log(op/F_2) + 0.5 * sigma_2**2 * t) / (sigma_2 * np.sqrt(t))
-            d3 = (np.log(g/F_3) + 0.5 * sigma_3**2 * t) / (sigma_3 * np.sqrt(t))
-
-            mu_over = (rho_12 * d2 - rho_12 * rho_23 * d3 - rho_13 * rho_23 * d2 + rho_13 * d3) \
-                / (1. - rho_23**2)
-
-            d4 = (np.log(p_dash/F_1) + 0.5 * sigma_P**2 * (t + delta_t)
-                - np.sqrt(sigma_cond) * v * sigma_P * np.sqrt(t) +
-                mu_over * sigma_P * np.sqrt(t)) / (sigma_P * np.sqrt(delta_t))
-            d5 = (np.log(g_dash/g) + 0.5 * sigma_G**2 * delta_t) / (sigma_G * np.sqrt(delta_t))
-
-            return bvnd(d4, d5, rho_13)  # rho between Peak & gas (peak is mnemonic for next one)
-
-        def p_t_integ(p_dash, g_dash, op, g, F_123, sigma_123, rho_123, t, delta_t,
-                      sg_level=15):
-
-            weights = np.array(sg.sg_w(1, sg_level)) # row vector
-            xs = np.array(sg.sg_p(1, sg_level)).flatten() # row vector
-            sqrt2 = np.sqrt(2.)
-            sqrt_pi = np.sqrt(np.pi)
-
-            g_v = p_t((xs * sqrt2), p_dash, g_dash, op, g,
-                      F_123, sigma_123, rho_123,
-                      t, delta_t) / sqrt_pi  # g = lambda x: f(x * sqrt2) / (sqrt_pi)**D
-
-            return np.sum(weights * g_v)
 
         if step_nb == len(self.hours_seq) - 1:  # last step, no transition
             return np.zeros((self.lattice_size, self.lattice_size,
                              self.lattice_size, self.lattice_size))
+
         else:
             P_next_v = self.lattice_seq[step_nb]  # next power lattice
             G_next_v = self.lattice_gas  # next gas lattice, col. vec.
@@ -256,11 +289,12 @@ class tolling_model_lattice_gas():
                                 self.lattice_size, self.lattice_size))
 
             fwd_vals = [self.market_seq[step_nb+1]["fwd"],
-                        self.market_seq[step_nb]["fwd"],
-                        self.blocks.market.gas["fwd"]]
+                        self.market_seq[step_nb]  ["fwd"],
+                        self.blocks.market.gas    ["fwd"] ]
             sigma_vals = [self.market_seq[step_nb+1]["sigma_C"],
-                          self.market_seq[step_nb]["sigma_C"],
-                          self.blocks.market.gas["sigma_C"]]
+                          self.market_seq[step_nb]  ["sigma_C"],
+                          self.blocks.market.gas    ["sigma_C"] ]
+
             corr_vals = [0.8, 0.9, 0.95]  # correlations WRONG WRONG WRONG
 
             for (P_curr_idx, P_curr) in enumerate(P_curr_v):
@@ -268,7 +302,7 @@ class tolling_model_lattice_gas():
                     for (P_next_idx, P_next) in enumerate(P_next_v):
                         for (G_next_idx, G_next) in enumerate(G_next_v):
                             P_m[P_curr_idx, G_curr_idx, P_next_idx, G_next_idx] = \
-                            p_t_integ(P_next, G_next, P_curr, G_curr,
+                            self.p_t_integ(P_next, G_next, P_curr, G_curr,
                                       fwd_vals, sigma_vals, corr_vals,
                                       np.sum(self.t_diff_seq[:step_nb+2]),
                                       self.t_diff_seq[step_nb+2])  # WRONG WRONG WRONG
@@ -286,9 +320,7 @@ class tolling_model_lattice_gas():
             # if np.abs(P_m[F_curr_idx,-1])> 1e-2:
             #    P_m_tmp[1:] = P_m[F_curr_idx,:] / P_m[F_curr_idx,-1] # normalization - NOT SURE IF RIGHT??????????
             # P_m[F_curr_idx,:] = np.diff(P_m_tmp)
-            # if self.debug_ind:
-            # print "Finished generating matrix = ", np.sum(P_m, axis = 1)
-            #    print "Finished generating matrix = ", np.sum(P_m[-1,:])
+
             return P_m_tmp
 
     def transit_val(self, P_m, H_m, G_m):
@@ -298,7 +330,8 @@ class tolling_model_lattice_gas():
           H_m ... next value of tolling given the lattice
           G_m ... running profit 
         """
-        res_m = self.zero_pp()
+
+        res_m = self._zeroPP()
 
         if self.fuel_ind:
             power_lattice_size, gas_lattice_size = P_m.shape[0:2]
@@ -308,8 +341,7 @@ class tolling_model_lattice_gas():
                         profit_curr = G_m[P_curr_idx, G_curr_idx]
                     else:  # const. profit (such as shutdown costs)
                         profit_curr = G_m
-                    res_m[P_curr_idx, G_curr_idx] = np.sum(P_m[P_curr_idx, G_curr_idx, :, :] * H_m) + \
-                        profit_curr
+                    res_m[P_curr_idx, G_curr_idx] = np.sum(P_m[P_curr_idx, G_curr_idx, :, :] * H_m) + profit_curr
         else:
             res_m = np.dot(P_m, H_m) + G_m
 
@@ -319,6 +351,7 @@ class tolling_model_lattice_gas():
         """
         construct the hours from the blocks structure
         """
+
         days = np.array([0.])
         hours_seq = []
         market_seq = []
@@ -327,7 +360,7 @@ class tolling_model_lattice_gas():
             day_week = np.mod(day, 7)
             hours_market_for_day_week = [(hp, mp, lb) for (hp, dp, mp, lb) in
                                          zip(self.blocks.hours_partition, self.blocks.days_partition,
-                                             self.blocks.market.power, self.lattice_blocks) if day_week in dp][0]
+                                             self.blocks.market.power, self._latticeBlocks) if day_week in dp][0]
             hours_for_day_week, market_for_day_week, lattice_for_day_week = hours_market_for_day_week
             days = np.append(days, days[-1] + np.cumsum(hours_for_day_week) / (24. * 365.))
             hours_seq.extend(hours_for_day_week)
@@ -339,34 +372,37 @@ class tolling_model_lattice_gas():
         days_diff = np.zeros(len(days))  # CHANGE HERE CAHNGE CHANGE
         days_diff[1:] = np.diff(days)
 
-        return {"blocks_tdiff": days_diff, "hours_seq": hours_seq,
-                "market_seq": market_seq, "lattice_seq": lattice_seq}
+        return { 'blocks_tdiff': days_diff
+               , 'hours_seq'   : hours_seq
+               , 'market_seq'  : market_seq
+               , 'lattice_seq' : lattice_seq }
 
     def running_profit(self, block_nb):
         """
         computes the running profit in block block_nb
         """
+
         power = self.lattice_seq[block_nb]
         power_l = len(power)
-        gas = self.lattice_gas
-        gas_l = len(gas)
-        power_mtx = np.kron(power.reshape((power_l, 1)), np.ones(gas_l))
-        gas_mtx = np.kron(np.ones((power_l, 1)), gas)
+        power_mtx = np.kron(power.reshape((power_l, 1)), np.ones(len(self.lattice_gas)))
+        gas_mtx = np.kron(np.ones((power_l, 1)), self.lattice_gas)
         hr_profit = power_mtx - self.HR * gas_mtx
         profit_cap_indep = hr_profit * self.hours_seq[block_nb]
-        # profit_max_cap", profit min capacity
+
+        # profit_max_cap, profit min capacity
         return profit_cap_indep * self.maxCap, profit_cap_indep * self.minCap
 
     def step(self, Ut_curr, Dt_curr, block_nb, start_nb=10):
         """
-        Ut_curr ... current uptime of the PP
-        Dt_curr ... current downtime of the PP
-        block_nb ... which block nb in the month are we currently at
-        start_nb ... number of startups of the PP in that month NOT IMPLEMENTED YET
+        :param Ut_curr: current uptime of the PP
+        :param Dt_curr: current downtime of the PP
+        :param block_nb: which block nb in the month are we currently at
+        :param start_nb: number of startups of the PP in that month NOT IMPLEMENTED YET
         """
+
         profit_max, profit_min = self.running_profit(block_nb)
 
-        if not self.P_m_seq.has_key(block_nb):
+        if block_nb not in self.P_m_seq:
             self.P_m_seq[block_nb] = self.transition_mtx_ln_blocks_all(block_nb)
 
         Pm = self.P_m_seq[block_nb]  # current transition matrix
@@ -437,6 +473,7 @@ class tolling_model_lattice_gas():
         """
         mult-ithreading version of the step function
         """
+
         nb_cores = multiprocessing.cpu_count()
         pool = multiprocessing.Pool(processes=nb_cores)
         pool.map(step_wrap,
@@ -458,8 +495,7 @@ class tolling_model_lattice_gas():
 
     def multiple_steps(self, nb_blocks):
         for block_nb in range(nb_blocks - 1, -1, -1):  # walking over blocks
-            # if self.debug_ind:
-            print "Block ", block_nb, "of", nb_blocks
+            print ("Block ", block_nb, "of", nb_blocks)
             self.all_one_steps(block_nb)
             self.overwrite_next_w_curr()
 
@@ -498,12 +534,13 @@ class tolling_model_lattice_gas_all():
     """
     def __init__(self, params, blocks, nb_months):
         """
-        params ... same format as for tolling_model_lattice
+        params ... same format as for TollingModelLattice
         market ... market_v.Fv = vector of forward prices
                    market_v.sigma_Fv ... vec. of vols
                    market_v.sigma_Cv ... vec. of cash vols
         blocks ... structure of the blocks
         """
+
         self.params = params
         self.nb_months = nb_months
         self.blocks = blocks # list of block objects
