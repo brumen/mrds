@@ -15,10 +15,13 @@ work_dir = prod_dir
 sys.path.append(work_dir)  # basic path
 
 # cython params
-cython_include_dirs = []
+cython_include_dirs    = []
 cython_extra_link_args = []
 
 if CUDA_PRESENT:  # cuda modules
     import pycuda.autoinit
     from pycuda.compiler import SourceModule
     pycuda.compiler.DEFAULT_NVCC_FLAGS = ['--use_fast_math']
+
+# for One-period dispatch
+opd1FuelComplete = 'opd_1fuel_cu_by_block_new.c'
