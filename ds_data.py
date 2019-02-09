@@ -88,6 +88,8 @@ wti_vol_curve_vals = [np.array([0.41, -0.17, 0.04, 1.1, 0.25, 0.53, 0.0]),
                       np.array([0.41, -0.17, 0.04, 1.1, 0.25, 0.53, 0.0]),
                       np.array([0.41, -0.17, 0.04, 1.1, 0.25, 0.53, 0.0])]
 
+wti_vol_curve_dates_vals = dict(zip(wti_vol_curve_dates, wti_vol_curve_vals))
+
 # BRENT
 brent_curve_dates = [dt.date(2015, 4, 15),
                      dt.date(2015, 5, 14),

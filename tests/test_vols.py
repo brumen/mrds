@@ -5,7 +5,7 @@ import datetime
 
 from unittest import TestCase, TestLoader, TextTestRunner
 
-from vols.vols import JW7Volatility
+from vols.vols import JWSS7Volatility
 
 
 class JWVolTest(TestCase):
@@ -16,7 +16,9 @@ class JWVolTest(TestCase):
 
         """
 
-        vol1 = JW7Volatility.fromDb('WTI', datetime.date(2015, 4, 1))
+        vol1 = JWSS7Volatility.fromDb('WTI', datetime.date(2015, 4, 1))
+        vol1._transform_from_jwss7(datetime.date(2015, 1, 10))
+        vol1.implied_vol(datetime.date(2015, 1, 10), 100., 1.)
 
         self.assertTrue(True)
 

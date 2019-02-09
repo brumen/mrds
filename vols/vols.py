@@ -29,7 +29,7 @@ if config.CUDA_PRESENT:
 
 import ds
 from pricers.pricers import black_greeks
-import vols.vols_fast as vols_fast
+# import vols.vols_fast as vols_fast
 
 logger = logging.Logger(__name__)
 
@@ -102,9 +102,12 @@ class Volatility(object):
         """
         Reads the forward and vol curve from external source.
 
+        :param comName: name of the commodity one wants, e.g. 'WTI', ...
+        :param mktDate: for which market date the vol is needed
+
         """
 
-        volParams = ds.getVolCurve      (comName, mktDate)
+        volParams = ds.getVolCurve(comName, mktDate)
 
         return cls( comName
                   , mktDate
@@ -127,8 +130,7 @@ class Volatility(object):
         :returns: normalized strike of the option
         """
 
-        return log(double(K_v.reshape(1, len(K_v))) / double(S0)) / \
-               (sigma * sqrt(double(ttm_v)))
+        return log(K_v.reshape(1, len(K_v)) / S0) / (sigma * sqrt(ttm_v))
 
     @staticmethod
     def normalizedStrikeInv( delta_v: np.array
@@ -428,52 +430,34 @@ class JWSS7Volatility(Volatility):
         """
         Returns the atm forward for the fwd date fwdDate.
 
-        :param z: normalized strike
         :param fwdDate: forward date for which the ATM is constructed
         """
 
         return self._volParams['vol_curve'][self._getVolForDate(fwdDate)][0]  # first elt is atm vol.
 
-    def _transform_from_jwss7(self, fwdDate_ = None ):
+    def _transform_from_jwss7(self, fwdDate : datetime.date ):
         """
         Returns jw7 parametrization from jwss7 for particular fwd date.
-        If fwdDate_ is None, return the entire curve parametrs.
 
-        p_mat in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
-        p_mat in jw7: [S0, atm, A, B, C, P, alphaC, alphaP]
-
+        volParams in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
+        volParams in jw7  : [S0, atm, A   , B    , C       , P      , alphaC   , alphaP  ]
         """
 
-        paramMtx = self._volParams['vol_curve']
+        nthContract = self._getVolForDate(fwdDate)
+        volParams   = self._volParams['vol_curve'][nthContract]
 
-        sigma_0    = paramMtx[:, 1]
-        skew       = paramMtx[:, 2]
-        smile      = paramMtx[:, 3]
-        put_slope  = paramMtx[:, 4]
-        put_bend   = paramMtx[:, 5]
-        call_slope = paramMtx[:, 6]
-        call_bend  = paramMtx[:, 7]
-
-        if fwdDate_:
-            nthContract = self._getVolForDate(fwdDate_)
-            sigma_0    = sigma_0[nthContract]
-            skew       = skew[nthContract]
-            smile      = smile[nthContract]
-            put_slope  = put_slope[nthContract]
-            put_bend   = put_bend[nthContract]
-            call_slope = call_slope[nthContract]
-            call_bend  = call_bend[nthContract]
+        sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend = volParams
 
         B = (2. * skew + put_slope) / (put_slope + call_slope)
         A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
 
-        return {'sigma_0'  : sigma_0,
-                'B': B,
-                'A': A,
-                'C': call_slope / A,
-                'P': put_slope / A,
-                'alphaC': call_bend,
-                'alphaP': put_bend }
+        return {'sigma_0': sigma_0,
+                'B'      : B,
+                'A'      : A,
+                'C'      : call_slope / A,
+                'P'      : put_slope / A,
+                'alphaC' : call_bend,
+                'alphaP' : put_bend }
 
     def _vol_compute(self, fwdUsed : datetime.date, z : np.double ):
         """
@@ -489,7 +473,7 @@ class JWSS7Volatility(Volatility):
         return volParams['sigma_0'] * sqrt(1. + volParams['A'] * log(volParams['B'] * exp(volParams['C'] * (z / (1.0 + z * z) ** (volParams['alphaC']/2))) + \
                                                                      (1. - volParams['B']) * exp(- volParams['P'] * (z / (1.0 + z * z) ** (volParams['alphaP']/2)))))
 
-    def implied_vol(self, fwdDate_ : datetime.date, K : np.double, ttm : np.double):
+    def implied_vol(self, fwdDate_ : datetime.date or int, K : np.double, ttm : np.double):
         """
         Implied vol for the fwd
 
@@ -503,13 +487,21 @@ class JWSS7Volatility(Volatility):
         fwdUsed = fwdDate_ if isinstance(fwdDate_, int) else self._getVolForDate(fwdDate_)
         volParams = self._transform_from_jwss7(fwdDate_)
 
-        return self._vol_compute( fwdUsed, JWSS7Volatility.normalizedStrike(self._fwdParams[fwdUsed]['S0'], K, volParams['sigma_0'], ttm) )
+        _, fwdValues = self._fwdParams
+
+        return self._vol_compute( fwdUsed
+                                , JWSS7Volatility.normalizedStrike( fwdValues[fwdUsed]
+                                                                  , np.array([K])
+                                                                  , volParams['sigma_0']
+                                                                  , ttm ) )
 
     def _normStrikeInverse(self, fwd, delta_val):
         """
         solution to N(d1) = delta_val, where d1(vol)
 
         """
+
+        # vols_fast.
 
         return NLP(lambda K: vols_fast.invert_delta( K
                                                        , delta_val
@@ -529,20 +521,6 @@ class JWSS7Volatility(Volatility):
                               , iprint  = -9 )\
                   .solve('scipy_cobyla').xf[0]
 
-    def implied_vol_all_fwd_standard(self, delta_v):
-
-        vol_mat = np.empty((len(self.fwd_curve), len(delta_v)))
-        for tenor_nb, (fwd_v, ttm) in enumerate(zip(self.fwd_curve, self.ttm_opt)):
-            perc_v = norm_strike_v_inv(delta_v, self.sigma_0[tenor_nb], ttm)
-            z = norm_strike_v(fwd_v, fwd_v * perc_v, self.sigma_0[tenor_nb], ttm)
-            vol_mat[tenor_nb, :] = self._vol_compute(z,
-                                                     self.alphaC[tenor_nb],
-                                                     self.alphaP[tenor_nb],
-                                                     self.sigma_0[tenor_nb],
-                                                     self.A[tenor_nb], self.B[tenor_nb],
-                                                     self.C[tenor_nb], self.P[tenor_nb])
-        return vol_mat
-
     def local_vol(self, fwd, S, T, ttm):
         """
         Local volatility of the JWSS7 parametrization.
@@ -551,14 +529,23 @@ class JWSS7Volatility(Volatility):
         :param ttm: option time to maturity
         """
 
-        S_0     = self.S0[fwd]
-        sigma_0 = self.sigma_0[fwd]
-        A       = self.A[fwd]
-        B       = self.B[fwd]
-        C       = self.C[fwd]
-        P       = self.P[fwd]
-        alphaC  = self.alphaC[fwd]
-        alphaP  = self.alphaP[fwd]
+        jw7Params = self._transform_from_jwss7(fwdDate, )
+
+        return {'sigma_0'  : sigma_0,
+                'B': B,
+                'A': A,
+                'C': call_slope / A,
+                'P': put_slope / A,
+                'alphaC': call_bend,
+                'alphaP': put_bend }
+
+        sigma_0 = jw7Params['sigma_0']
+        A       = jw7Params['A']
+        B       = jw7Params['B']
+        C       = jw7Params['C']
+        P       = jw7Params['P']
+        alphaC  = jw7Params['alphaC']
+        alphaP  = jw7Params['alphaP']
 
         z = self.normalizedStrike(S_0, S, sigma_0, ttm)  # TODO: CHECK HERE!!
         sigma = self.implied_vol(S, T)

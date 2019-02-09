@@ -40,7 +40,7 @@ fwd_codes = {'f': 1,
              'z': 12 }
 
 # mapping of commodity names to vol parametrization
-vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals)
+vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals, ds_data.wti_vol_curve_dates_vals)
            , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates, ds_data.brent_vol_vals)
            , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals)
            , 'ATSI_7X8'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)
@@ -331,9 +331,13 @@ def getVolCurve( comName : str
 
     """
 
-    volType, volDates, volCurve = vol_hash[comName]
+    volType, volDates, volCurve, volCurveWithDates = vol_hash[comName]
 
-    return {'vol_name': comName, 'vol_type': volType, 'vol_dates': volDates, 'vol_curve': volCurve}
+    return { 'vol_name'            : comName
+           , 'vol_type'            : volType
+           , 'vol_dates'           : volDates
+           , 'vol_curve'           : volCurve
+           , 'vol_curve_with_dates': volCurveWithDates }
 
 
 def get_fwd_vol_curve_numeric_tenor( curveName : str
