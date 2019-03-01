@@ -50,11 +50,6 @@ import logging
 logger = logging.Logger(__name__)
 
 
-# F skew implementation
-if CUDA_PRESENT:
-    F_skew_el = open(work_dir + 'cuda/skew_tsf.c', 'r').read()
-    F_skew_mod = SourceModule(F_skew_el)
-    F_skew_fct = F_skew_mod.get_function('F_skew_tsf')
 
 
 class ComSkewError(Exception):
@@ -74,7 +69,7 @@ def opt_fct_skew_wrap(arg, **kwarg):
     return ComSkew.opt_fct_skew(*arg, **kwarg)
 
 
-class ComSkew(object):
+class ComSkew:
 
     @staticmethod
     def __oneZeroZeroMatrix(n :int, k :int) -> np.array:
@@ -176,27 +171,82 @@ class ComSkew(object):
 
         return self.__volObjectList[fwdCurve]
 
+        , 'corr_init': np.array([[1., 0.5], [0.5, 1.]])
+        , 'corr_lb': np.array([[1., -0.99], [-0.99, 1.]])
+        , 'corr_ub': np.array([[1., 0.99], [0.99, 1.]])} ):
+
+    @property
+    def sigmaPropertyMap(self):
+        """
+        Map between sigma keywords and sigma properties.
+
+        """
+
+        return { 'init': self.__sigmaInit
+               , 'lb'  : self.__sigmaLB
+               , 'ub'  : self.__sigmaUB }
+
+    @property
+    def kappaPropertyMap(self):
+        """
+        Map between kappa keywords and kappa properties, used only internally in the class.
+
+        """
+
+        return { 'kappa_init': self.__kappaInit
+               , 'kappa_lb'  : self.__kappaLB
+               , 'kappa_ub'  : self.__kappaUB }
+
+    def sigmaDefault(self, sigmaType='init'):
+        '''
+        Defines the default value of the sigma parameters.
+
+        :param sigmaType: either 'init', 'lb', 'ub'
+        '''
+
+
+        sigmaDefault = { 'init': np.array([0.188, 0.101])
+                       , 'lb'  : np.array([0.05, 0.01])
+                       , 'ub'  : np.array([4., 1.]) }
+
+        if self.sigmaPropertyMap[sigmaType]:
+            return self.sigmaPropertyMap[sigmaType]
+
+        self.sigmaPropertyMap[sigmaType] = sigmaDefault[sigmaType]
+        return self.sigmaPropertyMap[sigmaType]
+
+    def kappaDefault(self, kappaType='kappa_init'):
+        '''
+        Defines the default value of the sigma parameters.
+
+        :param kappaType: either 'kappa_init', 'kappa_lb', 'kappa_ub'
+        '''
+
+
+        kappaDefault = { 'kappa_init': np.array([0.1, 0.5])
+                       , 'kappa_lb'  : np.array([0.05, 0.01])
+                       , 'kappa_ub'  : np.array([12., 1.]) }
+
+        if self.kappaPropertyMap[kappaType]:
+            return self.kappaPropertyMap[kappaType]
+
+        self.kappaPropertyMap[kappaType] = kappaDefault[kappaType]
+        return self.kappaPropertyMap[kappaType]
+
+
+    def setSigmaDefault(self, sigmaType, sigmaNewValue):
+        self.sigmaPropertyMap[sigmaType] = sigmaNewValue
+
+    def setKappaDefault(self, kappaType, kappaNewValue):
+        self.kappaPropertyMap[kappaType] = kappaNewValue
+
+
     def __init__( self
                 , mktDate: datetime.date
                 , comFwdCurves : list[str]  # forward curve names to be read
                 , fwdList      : list[int]  # forwards to be calibrated
                 , model_skew_ln_ind = 'skew'
-                , comVolCurves      = None
-                , subset_idx        = -1
-                , solver_init       = None
-                , max_iter          = None
-                , verbose           = 'none'
-                , debug_mode        = False
-                , black_vol_inverse_tol = 1e-4
-                , modelParamsInit   = { 'sigma_init': np.array([0.188, 0.101])
-                                      , 'sigma_lb'  : np.array([0.05, 0.01])
-                                      , 'sigma_ub'  : np.array([4., 1.])
-                                      , 'kappa_init': np.array([0.1, 0.5])
-                                      , 'kappa_lb'  : np.array([0.05, 0.01])
-                                      , 'kappa_ub'  : np.array([12., 1.])
-                                      , 'corr_init' : np.array([[1., 0.5], [0.5, 1.]])
-                                      , 'corr_lb'   : np.array([[1., -0.99], [-0.99, 1.]])
-                                      , 'corr_ub'   : np.array([[1., 0.99], [0.99, 1.]]) } ):
+                , comVolCurves      = None ):
 
         """
         Initialization of the skew model.
@@ -210,19 +260,8 @@ class ComSkew(object):
         self._mktDate      = mktDate
         self._comFwdCurves = comFwdCurves  # list of commodity curves, ['WTI', 'BRENT']
         self._comVolCurves = comVolCurves  if comVolCurves else comFwdCurves # list of vol curves, if None, it's the same as comFwdCurves
-        nb_assets = len(comFwdCurves)
-        self._tenors_lsit = fwdList
-
-        self.solver = 'scipy_cobyla' if solver_init is None else self.solver = solver_init
-
-        # maximum iterations for the NLP algorithm
-        self.max_iter = 50 if max_iter is None else max_iter
-        self.verbose = verbose
-        self.iprint = -1 if verbose == 'none' else self.iprint = 100
-
-        # debug mode
-        # prints more data if selected, default = False
-        self.debug_mode = debug_mode
+        nb_assets          = len(comFwdCurves)
+        self._tenors_lsit  = fwdList
 
         # read the fwd/vol curves:
         self.forward_curve_list       = {}
@@ -236,6 +275,14 @@ class ComSkew(object):
         self.option_tenors_dt_list    = {}
         self.__volObjectList            = {}
 
+        # initial parameters
+        self.__sigmaInit = None
+        self.__sigmaLB   = None
+        self.__sigmaUB   = None
+        self.__kappaInit = None
+        self.__kappaLB   = None
+        self.__kappaUB   = None
+
         # skew parameters dictionary, one np.array of three elements for each forward curve and each tenor
         self._CVecList        = {}
         self.__betaTList       = {}
@@ -246,50 +293,28 @@ class ComSkew(object):
         self.__kappaVecListLB = {}
         self.__kappaVecListUB = {}
 
+        # mapping of numbers to commodities and vice versa
+        self.__comsToNumbers = {com   : com_nb for (com_nb, com) in enumerate(self._comFwdCurves)}
+        self.__nbsToComms    = {com_nb: com    for (com_nb, com) in enumerate(self._comFwdCurves)}
+
         # initial value of the calibrated params 
-
         for fwdCurve in comFwdCurves:  # iterate through curves
-
-            self.vol_surface_name_list[fwdCurve] = ds.vol_hash[fwdCurve]
-
-            fwd_vol_matched = ds.read_data_matched_tenors( self._mktDate
-                                                         , fwdCurve
-                                                         , fwdCurve )
-
-            self.forward_tenors_list[fwdCurve]      = fwd_vol_matched['fwd_tenors'     ]
-            self.forward_curve_list[fwdCurve]       = fwd_vol_matched['fwd_curve'      ]
-            self.forward_tenors_code_list[fwdCurve] = fwd_vol_matched['fwd_tenors_code']
-            self.forward_tenors_dt_list[fwdCurve]   = fwd_vol_matched['fwd_tenors_dt'  ]
-
-            # vol curve data
-            self.option_tenors_list[fwdCurve]      = fwd_vol_matched['option_tenors']
-            self.option_tenors_code_list[fwdCurve] = fwd_vol_matched['option_tenors_code']
-            self.option_tenors_dt_list[fwdCurve]   = fwd_vol_matched['option_tenors_dt']
-
-            self.__volObjectList[fwdCurve] = getVolObject(self._mktDate, fwdCurve)
 
             # potential calibration parameters
             self._CVecList[fwdCurve] = ComSkew.__oneZeroZeroMatrix(len(self.forward_curve_list[fwdCurve]), 3)
 
             # initial value of the sigmaInit
-            self.__sigmaVecList[fwdCurve]   = modelParamsInit['sigma_init']
-            self.__sigmaVecListLB[fwdCurve] = modelParamsInit['sigma_lb']
-            self.__sigmaVecListUB[fwdCurve] = modelParamsInit['sigma_ub']
-            self.__kappaVecList[fwdCurve]   = modelParamsInit['kappa_init']
-            self.__kappaVecListLB[fwdCurve] = modelParamsInit['kappa_lb']
-            self.__kappaVecListUB[fwdCurve] = modelParamsInit['kappa_ub']
+            self.__sigmaVecList[fwdCurve]   = self.sigmaDefault('init')
+            self.__sigmaVecListLB[fwdCurve] = self.sigmaDefault('lb')
+            self.__sigmaVecListUB[fwdCurve] = self.sigmaDefault('ub')
+            self.__kappaVecList[fwdCurve]   = self.kappaDefault['kappa_init']
+            self.__kappaVecListLB[fwdCurve] = self.kappaDefault['kappa_lb']
+            self.__kappaVecListUB[fwdCurve] = self.kappaDefault['kappa_ub']
 
             self.__betaTList[fwdCurve] = np.ones(len(self.forward_tenors_list[fwdCurve]) )
 
-        # mapping of numbers to commodities and vice versa
-        self.__comsToNumbers = {com   : com_nb for (com_nb, com) in enumerate(self._comFwdCurves)}
-        self.__nbsToComms    = {com_nb: com    for (com_nb, com) in enumerate(self._comFwdCurves)}
 
         self.model_skew_ln_ind = model_skew_ln_ind
-
-        self.subset_idx = subset_idx  # subset of indexes that one should take
-        self.black_vol_inverse_tol = black_vol_inverse_tol  # tolerance when searching for black inverse vol
-
 
         # indicator functions - whether the values are updated
         # indicator function for the sigma, kappa calibration
@@ -321,6 +346,60 @@ class ComSkew(object):
         # discount function
         self.__discount_function = None
 
+        self.__blackVolInverseTol = 1e-4  # default value of the black vol inverse parameter
+
+        # stored functions to be used by cuda if necessary
+        self.__FskewFctCuda = {}  # empty dict, no skew functions stored.
+
+    @property
+    def blackVolInverseTol(self):
+        return self.__blackVolInverseTol
+
+    @blackVolInverseTol.setter
+    def blackVolInverseTol(self, newInverseTol):
+        self.__blackVolInverseTol = newInverseTol
+
+    @classmethod
+    def fromDb( cls
+              , mktDate: datetime.date
+              , comFwdCurves ):
+        """
+        Constructs the class by reading everything from database.
+
+        """
+
+        skewObj = cls( mktDate
+                     , comFwdCurves
+                     , fwdList      : list[int]  # forwards to be calibrated
+                     , comVolCurves      = None )
+
+        # initial value of the calibrated params
+        for fwdCurve in comFwdCurves:  # iterate through curves
+
+            # potential calibration parameters
+
+            skewObj.vol_surface_name_list[fwdCurve] = ds.vol_hash[fwdCurve]
+
+            fwd_vol_matched = ds.read_data_matched_tenors( mktDate
+                                                         , fwdCurve
+                                                         , fwdCurve )
+
+            skewObj.forward_tenors_list[fwdCurve]      = fwd_vol_matched['fwd_tenors'     ]
+            skewObj.forward_curve_list[fwdCurve]       = fwd_vol_matched['fwd_curve'      ]
+            skewObj.forward_tenors_code_list[fwdCurve] = fwd_vol_matched['fwd_tenors_code']
+            skewObj.forward_tenors_dt_list[fwdCurve]   = fwd_vol_matched['fwd_tenors_dt'  ]
+
+            # vol curve data
+            skewObj.option_tenors_list[fwdCurve]      = fwd_vol_matched['option_tenors']
+            skewObj.option_tenors_code_list[fwdCurve] = fwd_vol_matched['option_tenors_code']
+            skewObj.option_tenors_dt_list[fwdCurve]   = fwd_vol_matched['option_tenors_dt']
+
+            skewObj.__volObjectList[fwdCurve] = getVolObject(fwdCurve, mktDate)
+            skewObj.__betaTList    [fwdCurve] = np.ones(len(skewObj.forward_tenors_list[fwdCurve]) )
+            skewObj._CVecList      [fwdCurve] = ComSkew.__oneZeroZeroMatrix(len(skewObj.forward_curve_list[fwdCurve]), 3)
+
+        return skewObj
+
     @property
     def mktDate(self) -> datetime.date:
         return self._mktDate
@@ -336,6 +415,23 @@ class ComSkew(object):
         for asset_ch in range(self.nb_assets):
             self.update_one_asset(newMarketDate, asset_ch)
 
+    def _FskewFctCuda(self, floatType='float', intType = 'int'):
+        """
+        Stores and returns the skew function for cuda. It includes hashing.
+
+        """
+
+        if floatType in self.__FskewFctCuda:
+            return self.__FskewFctCuda[floatType]
+
+        with open(work_dir + 'cuda/skew_tsf.c', 'r') as skewTsfFile:
+            skewTsfFileCode = skewTsfFile.read()\
+                                         .replace('INT_TYPE'  , intType)\
+                                         .replace('FLOAT_TYPE', floatType)
+            self.__FskewFctCuda[floatType] = SourceModule(skewTsfFileCode).get_function('F_skew_tsf')
+
+        return self.__FskewFctCuda[floatType]
+
     def nbFactorsForAsset(self, asset):
         """
         Number of factors per asset, placeholder perhaps for some other function .
@@ -344,6 +440,7 @@ class ComSkew(object):
 
         return 2
 
+    # TODO: NEXT THREE FUNCTIONS ARE NOT DEFINED!!!
     def __factorCorrMat(self, asset1, asset2):
         """
         Factor correlation matrix between asset1 and asset2.
@@ -486,7 +583,6 @@ class ComSkew(object):
         self.forward_curve_corr = 1 # WRONG WRONG WRONG WHAT DOES THAT MEAN 
         # !!!! inital value of C is such that it produces nearly flat implied vol (1, 0,0)
         self._CVecList[asset_nb] = ComSkew.__oneZeroZeroMatrix(self.forward_curve_len(asset_nb), 3)
-        self.delta_vec_list[asset_nb] = np.arange(0.2, 0.9, 0.1)
         if self.vol_surface_name_list[asset_nb] == 'JWSS7':
             self.vol_obj_list[asset_nb] = vols.vols.jw7_params(self.mktDate ,
                                                                self.comCurveNames(asset_nb),
@@ -494,7 +590,14 @@ class ComSkew(object):
                                                                nb_fwds_taken = self.forward_curve_len[asset_nb])
 
             vo_curr = self.vol_obj_list[asset_nb]
-            self.vol_surface_list[asset_nb] = vo_curr.implied_vol_all_fwd_standard(self.delta_vec_list[asset_nb])
+            self.vol_surface_list[asset_nb] = vo_curr.implied_vol_all_fwd_standard(self.delta_vec_list(asset_nb))
+
+    def delta_vec_list(self, asset):
+        """
+        Delta vector used for calibration.
+        """
+
+        return np.arange(0.2, 0.9, 0.1)
 
     @property
     def _discount_function(self):
@@ -670,7 +773,10 @@ class ComSkew(object):
                            self.__factorCorrMat(asset_nb, asset_nb),
                            fwd_idx, t)
 
-    def black_vol_calibration(self, asset_nb):
+    def black_vol_calibration( self
+                             , asset_nb
+                             , iprint = -1
+                             , solver = 'scipy_cobyla' ):
         """
         Calibrates kappa and sigma and rho parameters.
 
@@ -702,8 +808,8 @@ class ComSkew(object):
                        , ub = np.concatenate([self.__kappaVecListUB[asset_nb],
                                               self.__sigmaVecListUB[asset_nb],
                                               np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ])
-                       , iprint = self.iprint )\
-                       .solve(self.solver)
+                       , iprint = iprint )\
+                       .solve(solver)
         
         self.__kappaVecList[asset_nb] = optim_res.xf[0:nbf]
         self.__sigmaVecList[asset_nb] = optim_res.xf[nbf:(2*nbf)]
@@ -878,7 +984,10 @@ class ComSkew(object):
                (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1.) / \
                (kv1[factor_nb_1] + kv2[factor_nb_2]) / (bv1 * bv2)
 
-    def black_corr_intra_curves_calib(self, curve_1, curve_2):
+    def black_corr_intra_curves_calib( self
+                                     , curve_1
+                                     , curve_2
+                                     , solver = 'scipy_cobyla'):
         """
         calibrates the intra-curve correlations
         """
@@ -903,8 +1012,10 @@ class ComSkew(object):
                                                                                   curve_1, curve_2, corr_len_real),
                        self.__factorCorrMat(curve_1, curve_2).ravel(),
                        lb = self.__factorCorrMatLB(curve_1, curve_2).ravel(),
-                       ub = self.__factorCorrMatUB(curve_1, curve_2).ravel())
-        optim_res = optim_pr.solve(self.solver)  # solving done
+                       ub = self.__factorCorrMatUB(curve_1, curve_2).ravel())\
+                      .solve(solver)
+        # TODO: HERE IMPROVE!!!
+
         self.__factorCorrMatList[curve_1][curve_2] = self.__factorCorrMatList[curve_2][curve_1] = \
             np.array(optim_res.xf).reshape((curve_1_nb_fact, curve_2_nb_fact))  # assigning the matrix
 
@@ -965,7 +1076,7 @@ class ComSkew(object):
 
         integrated_vol = self.volCurve(asset_nb).atmVol()[tenor_nb] * np.sqrt(self.option_tenors_list[asset_nb][tenor_nb])
 
-        return np.exp((scipy.stats.norm.ppf(self.delta_vec_list[asset_nb]) - 0.5 * integrated_vol ) * integrated_vol) * \
+        return np.exp((scipy.stats.norm.ppf(self.delta_vec_list(asset_nb)) - 0.5 * integrated_vol ) * integrated_vol) * \
                self.forward_curve_list[asset_nb][tenor_nb]
 
     def __integr_analy(self, real_roots_tsf, nb_real_roots, Asigma, A0, A1, A2, A3, A4, V):
@@ -976,44 +1087,47 @@ class ComSkew(object):
 
         if nb_real_roots == 0:  # integrate polynomial function over whole of real axis
             if A4 > 0 or (A4 == 0 and A2 > 0) or (A4 == 0 and A2 == 0 and A0 > 0):
-                res = Asigma[0] + Asigma[2] + 3. * Asigma[4]
-            else:
-                res = 0.
+                return Asigma[0] + Asigma[2] + 3. * Asigma[4]
+
+            return 0.
 
         if nb_real_roots == 1:
             if A3 > 0:
-                res = np.sum(self.__trunc_normal_below__(real_roots_tsf[0]) * Asigma)
-            else:
-                res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma)
+                return np.sum(self.__trunc_normal_below__(real_roots_tsf[0]) * Asigma)
+
+            return np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma)
 
         if nb_real_roots in [2, 3]:  # integrate over 2 intervals
             if A4 > 0:
-                res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                      np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+                return np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
+                       np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+
             if A4 < 0.:
-                res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+                return np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+
             if A4 == 0. and A3 != 0.:
                 if A3 > 0.:
-                    res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-                        np.sum(self.__trunc_normal_below__(real_roots_tsf[2]) * Asigma)
+                    return  np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
+                            np.sum(self.__trunc_normal_below__(real_roots_tsf[2]) * Asigma)
                 else:  # A3 < 0
-                    res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
+                    return  np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
                         np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
             if A4 == 0. and A3 == 0.:
                 if A2 < 0.:
-                    res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
-                else:
-                    res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                        np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+                    return np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+
+                return np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
+                       np.sum(self.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+
         elif nb_real_roots == 4:  # integrate over 3 intervals
             if A4 > 0:
-                res = np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma ) + \
-                      np.sum(self.__trunc_normal_below__(real_roots_tsf[3]) * Asigma ) + \
-                      np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
-            else:  # A4 < 0
-                res = np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-                      np.sum(self.__trunc_normal_interval__(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
-        return res
+                return np.sum(self.__trunc_normal_above__(real_roots_tsf[0]) * Asigma ) + \
+                       np.sum(self.__trunc_normal_below__(real_roots_tsf[3]) * Asigma ) + \
+                       np.sum(self.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
+            # A4 < 0
+            return np.sum(self.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
+                   np.sum(self.__trunc_normal_interval__(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
+
 
     def __integr_num(self, A_V, call_put_ind, strike):
         """
@@ -1053,7 +1167,8 @@ class ComSkew(object):
                            , C_vec
                            , opt_mat_idx
                            , strike
-                           , call_put_ind):
+                           , call_put_ind
+                           , debug_mode = False ):
         """
         value of european call option in skew model with strike
         call_put_ind ... 1 for call, -1 for put
@@ -1065,7 +1180,7 @@ class ComSkew(object):
                                                        , call_put_ind
                                                        , strike)
 
-        if self.debug_mode:
+        if debug_mode:
             poly_roots = np.sort(np.poly1d([A4, A3, A2, A1, A0]).roots)
         else:
             if A4 == 0. and A3 == 0. and A2 == 0.:
@@ -1085,9 +1200,9 @@ class ComSkew(object):
         Asigma = np.array([A0, A1, A2, A3, A4]) * np.array([1., V, V**2, V**3, V**4])  # A multiplied by sigmas
         real_roots_tsf = real_roots / V  # equivalent of s in the document
         disc_fact = self.DF(self.option_tenors_list[asset_nb][opt_mat_idx])
-        if self.debug_mode:  # debug, selects the numeric approach
+        if debug_mode:  # debug, selects the numeric approach
             return disc_fact * self.__integr_num(Asigma, call_put_ind, strike)
-        else:  # prod. mode
+        else:  # production mode
             return disc_fact * self.__integr_analy(real_roots_tsf, nb_real_roots, Asigma, A0, A1, A2, A3, A4, V)
 
     def model_vol_surface(self, asset_nb, C_vec, fwd_idx):
@@ -1108,7 +1223,7 @@ class ComSkew(object):
                                                     , self.option_tenors_list[asset_nb][fwd_idx]
                                                     , self.DF(self.option_tenors_list[asset_nb][fwd_idx])
                                                     , cp
-                                                    , self.black_vol_inverse_tol)
+                                                    , self.self.blackVolInverseTol)
                          for opt_price, strike, cp in zip( [self.polynomial_european(asset_nb, C_vec, fwd_idx, strike, cp)
                                                             for strike, cp in zip(strikes, cp_ind)]
                                                          , strikes
@@ -1205,7 +1320,11 @@ class ComSkew(object):
                                                                 , dataPlot_canvas ) ).grid(row=1, column=1, columnspan=3)
         root.mainloop()
 
-    def opt_fct_skew(self, asset_nb, index_curr_tenor):
+    def opt_fct_skew( self
+                    , asset_nb
+                    , index_curr_tenor
+                    , iprint = -1
+                    , solver = 'scipy_cobyla' ):
         """
         Optimization function to minimize over the range 0: nb_tenors
 
@@ -1217,8 +1336,8 @@ class ComSkew(object):
         return NLP( lambda C_vec: scipy.linalg.norm(self.model_vol_surface(asset_nb, C_vec, index_curr_tenor) -
                                                     self.vol_surface_list[asset_nb][index_curr_tenor, :] )
                   , self._CVecList[asset_nb][index_curr_tenor, :]
-                  , iprint=self.iprint)\
-                  .solve(self.solver).xf
+                  , iprint = iprint)\
+                  .solve(solver).xf
 
     def calibrate_skew_params( self
                              , asset_nb
@@ -1360,7 +1479,7 @@ class ComSkew(object):
         fact_sum[1:(len(cums)+1)] = cums
         
         # lengths of forward curves to be simulated (can simulate a subset as well)
-        fwd_c_len = {asset: len(self._comFwdCurves[asset])
+        fwd_c_len = {asset: self.forwardCurveLen(asset)
                      for asset in self.comCurveNames} if tenor_list is None else \
                     {tenor_for_asset: len(tenor_for_asset) for tenor_for_asset in tenor_list}  # TODO: FIX HERE
 
