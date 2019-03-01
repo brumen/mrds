@@ -1,6 +1,10 @@
 # utility functions for the mrds model
 
-import os, csv, pickle, numpy as np
+import functools
+import os
+import csv
+import pickle
+import numpy as np
 
 from mrds   import ComSkew
 from config import work_dir
@@ -258,15 +262,14 @@ def mrds_calib_db( com_fwd
     return mm
 
 
-def mrds_calib_multiple( com_l
-                       , date_
+def mrds_calib_multiple(com_l
+                       , mktDate
                        , nb_fwd_l
                        , mm_hash             = mm_hash_multiple
                        , model_ind           = 'skew'
                        , adj_fwd_tenors_days = None
                        , adj_vol_tenors_days = None
-                       , multi_thread_ind    = True
-                       , cuda_ind            = False):
+                       , multi_thread_ind    = True ):
     """
     Calibrates the multiple models
 
@@ -277,22 +280,21 @@ def mrds_calib_multiple( com_l
     com_str = reduce(lambda x, y: x+'___'+y, com_l)
     nb_fwd_str = reduce(lambda x, y: str(x)+'___'+str(y), nb_fwd_l)
 
-    mm_calibrated = find_mm(com_l[0], date_, nb_fwd_l[0], mm_hash) if nb_comm == 1 else find_mm(tuple(com_l), date_, tuple(nb_fwd_l), mm_hash)
+    mm_calibrated = find_mm(com_l[0], mktDate, nb_fwd_l[0], mm_hash) if nb_comm == 1 else find_mm(tuple(com_l), mktDate, tuple(nb_fwd_l), mm_hash)
 
     mm_file = work_dir + 'mobj/mm_' + str(com_str) + '_' + \
-        str(date_) + '_' + str(nb_fwd_str) + '.obj'
+              str(mktDate) + '_' + str(nb_fwd_str) + '.obj'
     if mm_calibrated:
         mm = pickle.load(open(mm_file))
     else:
-        mm = mrds_calib_db_multiple(com_l, com_l, date_, nb_fwd_l,
+        mm = mrds_calib_db_multiple(com_l, com_l, mktDate, nb_fwd_l,
                                     model_ind=model_ind,
                                     adj_fwd_tenors_days=adj_fwd_tenors_days,
                                     adj_vol_tenors_days=adj_vol_tenors_days,
-                                    mt=multi_thread_ind,
-                                    cuda_ind=cuda_ind)
+                                    mt=multi_thread_ind )
         pickle.dump(mm, open(mm_file, 'wb'))
         mm_hash_new = update_mm_hash('multiple', mm_hash,
-                                     [tuple(com_l), date_, tuple(nb_fwd_l)])
+                                     [tuple(com_l), mktDate, tuple(nb_fwd_l)])
         write_mm_hash('multiple', mm_hash_new)
 
     return mm
