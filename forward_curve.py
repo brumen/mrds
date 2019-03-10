@@ -42,7 +42,7 @@ class FwdCurve:
         self.__fwdCurve = None
         self.__fwdTenorsNumeric = None
 
-    def __relativeDate(self, fwdDate):
+    def __relativeDate(self, fwdDate : datetime.date) -> float:
         return (fwdDate - self._mktDate).days / self._dcf
 
     @property
@@ -70,14 +70,18 @@ class FwdCurve:
         self.__fwdCurve = scipy.interpolate.splrep(self._fwdTenorsNumeric, self._fwdValues)
         return self.__fwdCurve
 
-    def fwdValue(self, fwdDate : datetime.date) -> float:
+    def fwdValue(self, fwdDate) -> float:
         """
         Gets the forward value for the forward date.
 
         """
 
+        if isinstance(fwdDate, list):  # TODO: list is problematic, as it can be list[float] or list[datetime.date]
+            return scipy.interpolate.splev( [self.__relativeDate(fwdDates) for fwdDates in fwdDate]
+                                          , self._fwdCurve)
+
         if isinstance(fwdDate, datetime.date):
-            return scipy.interpolate.splev(self.__relativeDate(fwdDate), self._fwdCurve)  # TODO: FINISH HERE..
+            return scipy.interpolate.splev(self.__relativeDate(fwdDate), self._fwdCurve)
 
         if isinstance(fwdDate, float):
             return scipy.interpolate.splev(fwdDate, self._fwdCurve)

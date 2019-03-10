@@ -1,6 +1,5 @@
 # utility functions for the mrds model
 
-import functools
 import os
 import csv
 import pickle
@@ -10,13 +9,14 @@ from mrds   import ComSkew
 from config import work_dir
 
 import logging
+
 logger = logging.Logger(__name__)
 
 # calibration files
 mm_calib_file_actual       = 'mobj/mm_calib.txt'
 mm_calib_multi_file_actual = 'mobj/mm_calib_multiple.txt'
-single_asset_mm_calib = work_dir + mm_calib_file_actual
-multi_asset_mm_calib = work_dir + mm_calib_multi_file_actual
+single_asset_mm_calib      = work_dir + mm_calib_file_actual
+multi_asset_mm_calib       = work_dir + mm_calib_multi_file_actual
 
 
 def read_mm_hash(multi_single_ind):
@@ -241,11 +241,7 @@ def mrds_calib_db( com_fwd
                  , model_ind = 'skew'
                  , cuda_ind  = False ):
 
-    mm = ComSkew( 1
-                 , date_
-                 , multi_thread_ind  = mt
-                 , model_skew_ln_ind = model_ind
-                 , cuda_ind          = cuda_ind)
+    mm = ComSkew( 1, date_ )
 
     mm.read_curve_vol_data_db(date_, 0, com_fwd, com_vol, sub_idx_rows=np.arange(nb_fwd))
     mm.read_discount_curve_db(date_)

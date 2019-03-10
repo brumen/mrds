@@ -19,6 +19,21 @@ class ComMaths:
     """
 
     @staticmethod
+    def __oneZeroZeroMatrix(n :int, k :int) -> np.array:
+        """
+        Returns matrix (n,k) where the first elt in every row is 1, and all other parameters are 0.
+        Useful for construction of the skew parameters C[0] = 1, C[1] = 0, C[2] = 0...
+
+        :param n: nb of rows of the returned matrix
+        :param k: nb of columns of the returned matrix.
+        """
+
+        tmp = np.zeros((n,k))
+        tmp[:, 0] = 1.
+
+        return tmp
+
+    @staticmethod
     def __trunc_normal_above__(a: float) -> np.array:
         """
         Computes the truncated E[ N^{0,1,2,3,4} * 1(N <a) ] where N std. normal in succession.
