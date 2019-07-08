@@ -88,6 +88,20 @@ class FwdCurve:
 
         raise FwdCurveException('Forward value {0} not recognized'.format(str(fwdDate)))
 
+    def get_1nb( self, fwdDate  : datetime.date ):
+        """
+        Finds the 1st nearby contract to fwdDate.
+
+        :param fwdDate: forward date to which the 1st nearby contract is searched.
+        """
+
+        if fwdDate > self._fwdTenors[-1]:
+            raise FwdCurveException('Fwd date searched {0} larger than the curve last date {1}'.format(fwdDate, self._fwdTenors[-1]))
+
+        largerDates = sum([ fwdTenor <= fwdDate for fwdTenor in self._fwdTenors])
+
+        return self._fwdTenors[largerDates], self._fwdValues[largerDates]
+
     @classmethod
     def fromDB(cls, mktDate : datetime.date, fwdCurveName : str):
         """

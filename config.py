@@ -7,7 +7,9 @@ output, _ = Popen( ['prime-select', 'query']
                  , stdin  = PIPE
                  , stdout = PIPE
                  , stderr = PIPE).communicate()
-CUDA_PRESENT = True if output == b'nvidia\n' else False
+
+# CUDA_PRESENT = True if output == b'nvidia\n' else False
+CUDA_PRESENT = False
 
 # adding various paths
 prod_dir = '/home/brumen/work/mrds/'
