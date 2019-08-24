@@ -2,9 +2,6 @@
 #   skew model for forward curves
 #
 
-from config import work_dir, CUDA_PRESENT
-
-import datetime as dt
 import datetime
 import numpy as np
 import scipy
@@ -23,18 +20,8 @@ from typing import List, Dict
 
 from mrds_maths import ComMaths
 
-# cuda (this can be imported even if cuda is not present)
-if CUDA_PRESENT:
-    import pycuda.curandom
-    import pycuda.gpuarray as gpa
-    import pycuda.cumath
-    from pycuda.cumath import exp as cuExp, sqrt as cuSqrt
-    from pycuda.compiler import SourceModule
-    import curand  # TODO: THIS IS WRONG
-
 import matplotlib as mpl
 mpl.use('TkAgg')
-
 
 # mrds local imports
 import ds
@@ -47,10 +34,6 @@ from forward_curve import FwdCurve
 from vols.vols     import Volatility
 
 import quartic.quartic_cy as quartic_cy
-
-if CUDA_PRESENT:
-    from cuda import cuda_ops
-    from cuda.cuda_ops import matmul
 
 import opd.opd_avx as opd_avx
 
@@ -78,9 +61,7 @@ def opt_fct_skew_wrap(arg, **kwarg):
 
 
 class ComSkew(ComMaths):
-    """
-    Base class of the commodity skew market model.
-
+    """ Base class of the commodity skew market model.
     """
 
     NLP_SOLVER           = 'scipy_cobyla'
@@ -330,23 +311,6 @@ class ComSkew(ComMaths):
 
         self._calcDate = newCalcDate
 
-    def _FskewFctCuda(self, floatType='float', intType = 'int'):
-        """
-        Stores and returns the skew function for cuda. It includes hashing.
-
-        """
-
-        if floatType in self.__FskewFctCuda:
-            return self.__FskewFctCuda[floatType]
-
-        with open(work_dir + 'cuda/skew_tsf.c', 'r') as skewTsfFile:
-            skewTsfFileCode = skewTsfFile.read()\
-                                         .replace('INT_TYPE'  , intType)\
-                                         .replace('FLOAT_TYPE', floatType)
-            self.__FskewFctCuda[floatType] = SourceModule(skewTsfFileCode).get_function('F_skew_tsf')
-
-        return self.__FskewFctCuda[floatType]
-
     def nbFactorsForAsset(self, asset):
         """
         Number of factors per asset, placeholder perhaps for some other function .
@@ -399,10 +363,10 @@ class ComSkew(ComMaths):
 
         if type(st_init) == np.ndarray:
             self._simulation_times = st_init
-            self._simulation_times_dt = [self.mktDate + dt.timedelta(int(np.round(stf * 365.)))
+            self._simulation_times_dt = [self.mktDate + datetime.timedelta(int(np.round(stf * 365.)))
                                         for stf in st_init]
 
-        elif (type(st_init) == list) and (type(st_init[0]) == dt.datetime):
+        elif (type(st_init) == list) and (type(st_init[0]) == datetime.datetime):
             self._simulation_times = np.array([(st - self.mktDate).days / 365.
                                               for st in st_init])
             self._simulation_times_dt = self._simulation_times
@@ -414,7 +378,7 @@ class ComSkew(ComMaths):
 
         elif (type(st_init) == list) and (type(st_init[0]) == float):
             self._simulation_times = np.array(st_init)
-            self._simulation_times_dt = [self.mktDate + dt.timedelta(int(np.round(stf * 365.)))
+            self._simulation_times_dt = [self.mktDate + datetime.timedelta(int(np.round(stf * 365.)))
                                         for stf in self._simulation_times]
 
         self.nb_time_steps = len(st_init)
@@ -453,7 +417,7 @@ class ComSkew(ComMaths):
         :param fwdTime: time to discount to:
         :type fwdTime: float
                  string ... '20141114'
-                 datetime ... dt.datetime(...
+                 datetime ... datetime.datetime(...
         """
 
         if (type(fwdTime) is np.double) or (type(fwdTime) is float):
@@ -463,7 +427,7 @@ class ComSkew(ComMaths):
             t_dt = ds.convert_str_datetime(fwdTime)
             time_diff = (t_dt - self.mktDate).days / 365.
 
-        elif type(fwdTime) is dt.datetime:
+        elif type(fwdTime) is datetime.datetime:
             time_diff = (fwdTime - self.mktDate).days / 365.
 
         return scipy.interpolate.splev(time_diff, self._discount_function)
@@ -640,8 +604,7 @@ class ComSkew(ComMaths):
                           , t )
 
     def optionTenorForFwdTenor(self, asset: str, fwdTenor : datetime.date ) -> datetime.date :
-        """
-        Returns the option tenor for a forward tenor.
+        """ Returns the option tenor for a forward tenor.
 
         :param asset: asset we are requesting.
         :param fwdTenor: a forward tenor for which the option tenor we are requesting.
@@ -717,8 +680,7 @@ class ComSkew(ComMaths):
 
     @lru_cache(maxsize=LRU_CACHE_SIZE_CALIB)
     def __factorCorrMatList(self, asset : str):
-        """
-        Factor correlation matrix
+        """ Factor correlation matrix
 
         """
 
@@ -1208,35 +1170,26 @@ class ComSkew(ComMaths):
             return self._V_cross_factor(asset_nb, i, j, fwd_idx, fwd_idx, t_prev, t_next)
 
     @staticmethod
-    def __simulate_std_normal(self
-                             , nb_factors
-                             , corr_mtx
-                             , nb_simulations
-                             , cuda_ind = False ):
+    def __simulate_std_normal( nb_factors     : int
+                             , corr_mtx       : np.array
+                             , nb_simulations : int ):
+        """ Simulates the standard normal random variables with specified correlation
+
+        :param corr_mtx: correlation matrix, a nb_factors x nb_factors matrix.
+        :param nb_simulations: number of simulations from the factors.
         """
-        Simulates the standard normal random variables with specified correlation
 
-        """
+        return np.random.multivariate_normal( np.zeros(nb_factors)
+                                            , corr_mtx
+                                            , size = nb_simulations )
 
-        if not cuda_ind:
-            return np.random.multivariate_normal( np.zeros(nb_factors)
-                                                , corr_mtx
-                                                , size = nb_simulations )
-        else:
-            simulated_rn_init = gpa.empty((nb_factors, nb_simulations), dtype = np.float32)
-            curand.gen_eff_dev_rns(simulated_rn_init.size, simulated_rn_init.ptr, curand.create_gen_simple())
-
-            return matmul( gpa.to_gpu(np.linalg.cholesky(corr_mtx).astype(np.float32))
-                         , simulated_rn_init)
-
-    def simulate_curves( self
-                       , nb_simulations  : int
-                       , simulationTimes : List[datetime.date]
-                       , tenor_list      : List[datetime.date]
-                       , set_seed      = None ) -> np.array :
-        """
-        Simulate all curves for desired simulation times on either cpu or cuda.
-        Simulation times have to be given.
+    def simulate_curves(self
+                        , nb_simulations   : int
+                        , simulation_times : List[datetime.date]
+                        , tenor_list       : List[datetime.date]
+                        , set_seed         = None) -> np.array :
+        """ Simulate all curves for desired simulation times on either cpu or cuda.
+            Simulation times have to be given.
 
         Generates a 3-dimensional array
         0-th dimension: asset_nb
@@ -1245,11 +1198,9 @@ class ComSkew(ComMaths):
         3-rd dimension: repeats of the curve
 
         :param nb_simulations: self. explanatory
-        :param simulationTimes: simulation times for the forwards.
+        :param simulation_times: simulation times for the forwards.
         :param tenor_list: list of tenors which to simulate
-        :type tenor_list: list[int]
         :param set_seed: seed, if needed, can be left to None
-        :type set_seed: int
         :returns: a matrix of simulated paths
         """
 
@@ -1259,12 +1210,9 @@ class ComSkew(ComMaths):
         fwd_c_col = {}
 
         for comCurve in self.comCurveNames:
-            sim_curves_shape = (len(simulationTimes), len(tenor_list), nb_simulations)
-
-            simulated_curves[comCurve] = np.empty(sim_curves_shape) if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
-
+            sim_curves_shape = (len(simulation_times), len(tenor_list), nb_simulations)
+            simulated_curves[comCurve] = np.empty(sim_curves_shape)  #  if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
             fwd_c_col[comCurve] = self._comFwdCurves[comCurve].getFwdValues(tenor_list)
-
             simulated_curves[comCurve][0, :, :] = fwd_c_col
 
 
@@ -1324,9 +1272,8 @@ class ComSkew(ComMaths):
                                     , self.simulated_curves[asset_nb][t_i, tenor_idx, :]
                                     , nb_simulations )
 
-    def simulate_1nb(self, nb_simulations, set_seed=None, cuda_ind = False):
-        """
-        Simulate the 1NB (rolling) contract
+    def simulate_1nb(self, nb_simulations, set_seed=None):
+        """ Simulate the 1NB (rolling) contract.
 
         generates a 3-dimensional array:
           0-th dimension: asset_nb
@@ -1340,7 +1287,7 @@ class ComSkew(ComMaths):
             logger.debug('Last simulation time is larger than the largest forward tenor.')
             self.simulated_curves = None
         else:
-            self.simulate_curves(nb_simulations, set_seed, cuda_ind = cuda_ind)
+            self.simulate_curves(nb_simulations, set_seed)
 
             self.simulated_curves = [np.array([])] * self.nb_assets  # removing the prev. sim. curves
 
@@ -1349,21 +1296,6 @@ class ComSkew(ComMaths):
                 for t_i in range(self.nb_time_steps):
                     current_nb = np.sum(self.forward_tenors_list[asset_nb] <= self.simulation_times[t_i])
                     self.simulated_curves[asset_nb][t_i, :] = self.simulated_curves[asset_nb][t_i, current_nb,:]
-
-
-    def simulate_curves_fom( self
-                           , asset_nb
-                           , nb_simulations
-                           , tenors_list = None
-                           , set_seed    = None
-                           , cuda_ind    = False ):
-
-        simulate_fct = self.simulate_curves_fom_cuda if cuda_ind else self.simulate_curves_fom_cpu
-
-        return simulate_fct( asset_nb
-                           , nb_simulations
-                           , tenors_list = tenors_list
-                           , set_seed    = set_seed )
 
     @lru_cache(maxsize=LRU_CACHE_SIZE_CALIB)  # TODO: THIS IS NOT RIGHT HERE!!!
     def __factorPositions(self, asset_nb : int) -> slice:
@@ -1378,25 +1310,22 @@ class ComSkew(ComMaths):
 
         return slice(fact_sum[asset_nb], fact_sum[asset_nb+1])
 
-    def simulate_curves_fom_cpu( self
-                               , asset : str
-                               , nb_simulations : int
-                               , simTimes
-                               , fwdTenorsList ):
-        """
-        Simulate first of month (fom) curves.
+    def simulate_curves_fom(self
+                            , asset          : str
+                            , nb_simulations : int
+                            , sim_times
+                            , tenors_list):
+        """ Simulate first of month (fom) curves.
 
         generates a list of 2 dim arrays:
            1-st dim: tenor
            2-nd dim: simulation
 
-
-        tenors_list: list of tenors for asset asset_nb that should be simulated
         """
 
         np.random.seed()
 
-        fwd_c_len = len(fwdTenorsList)
+        fwd_c_len = len(tenors_list)
         sim_times = self.option_tenors_list[asset][tenors_list]
 
         sim_fom = np.empty((fwd_c_len, nb_simulations))
@@ -1404,15 +1333,15 @@ class ComSkew(ComMaths):
         # looping over tenors
         #    t_i ... idx of sim_time (also tenor)
         #    fact_sum ... factors of the individual assets
-        for tenorIdx, tenorDate in enumerate(fwdTenorsList):
-            tenor_nb = t_nb
-            t_curr = simTimes[t_i]
+        for tenor_idx, tenor_date in enumerate(tenors_list):
+            tenor_nb = tenor_date
+            t_curr = sim_times[tenor_idx]
             F_curr = self.forward_curve_list[asset][tenor_nb]
             nb_factors = np.sum(self.nbFactorsForAsset)  # total nb. of factors
             simulated_rn = np.random.multivariate_normal(np.zeros(nb_factors), self.__completeCorrMat,
                                                          size=nb_simulations)
             nb_factors_asset = self.nbFactorsForAsset[asset]
-            new_cov_mat = np.array([[self._var_covar_mtx(self, asset, tenor_nb, i, j, t_i, sim_times)
+            new_cov_mat = np.array([[self._var_covar_mtx(self, asset, tenor_nb, i, j, tenor_idx, sim_times)
                                     for j in range(nb_factors_asset)]
                                     for i in range(nb_factors_asset)])
 
@@ -1428,7 +1357,7 @@ class ComSkew(ComMaths):
                          for factor_2 in range(nb_factors_asset)])
 
             if self.model_skew_ln_ind is 'ln_ln':
-                sim_fom[t_i, :] = F_curr * np.exp(delta_X - 0.5 * qv)
+                sim_fom[tenor_idx, :] = F_curr * np.exp(delta_X - 0.5 * qv)
             else:
                 c0, c1, c2 = self._CVecList[asset][tenor_nb, :]
                 # sim_fom[t_i, :] = F_curr * \
@@ -1441,101 +1370,8 @@ class ComSkew(ComMaths):
                                 , qv
                                 , c1/6.
                                 , c2/24.
-                                , sim_fom[t_i, :]
+                                , sim_fom[tenor_idx, :]
                                 , nb_simulations )
-
-        return sim_fom
-
-    def __genRandomNbsCuda(self
-                           , nb_simulations
-                           , rng
-                           , std_dev
-                           , rn_type = np.float32):
-        """
-        Computes the random numbers distributed using standard normal.
-
-        """
-
-        nb_factors, _ = std_dev.shape
-        simulated_rn  = gpa.empty((nb_factors, nb_simulations), dtype=rn_type)
-
-        cuda_ops.matmul( gpa.to_gpu(np.linalg.cholesky(std_dev).astype(rn_type))
-                       , rng.gen_normal((nb_factors, nb_simulations), rn_type)
-                       , simulated_rn )
-
-        return simulated_rn
-
-    def simulate_curves_fom_cuda( self
-                                , asset_nb       : str
-                                , nb_simulations : int
-                                , simTimes
-                                , tenors_list = None
-                                , rn_type     = np.float32 ):
-        """
-        Simulate first of month curves.
-
-        generates a list of 3 dim arrays:
-           1-st dim: tenor
-           2-nd dim: simulation
-
-        """
-
-        np.random.seed(set_seed)  # TODO: HERE
-        sim_times = self.option_tenors_list[asset_nb]
-        sim_fom = gpa.empty((self.forward_curve_len[asset_nb], nb_simulations), dtype=rn_type)
-
-        # TODO: THIS BELOW MIGHT BE REVERSED
-        rng = pycuda.curandom.Sobol64RandomNumberGenerator() if rn_type == np.float32 else pycuda.curandom.Sobol32RandomNumberGenerator()
-
-        # looping over tenors
-        #    t_i ... idx of sim_time (also tenor)
-        #    fact_sum ... factors of the individual assets
-        for t_i, t_curr in enumerate(sim_times):
-
-            tenor_nb = t_i
-            F_curr = self.forward_curve_list[asset_nb][tenor_nb].astype(rn_type)
-            nb_factors_asset = self.nbFactorsForAsset[asset_nb]
-
-            new_cov_mat = np.array([[self._var_covar_mtx_simple(asset_nb, tenor_nb, i, j, t_i, sim_times)
-                                    for j in range(nb_factors_asset)]
-                                        for i in range(nb_factors_asset)])
-            new_chol = np.linalg.cholesky(new_cov_mat)
-            old_cov_mat = self.__completeCorrMat[self.__factorPositions(asset_nb),self.__factorPositions(asset_nb)]
-            sims_Z = self.__genRandomNbsCuda( nb_simulations
-                                            , rng
-                                            , self.__completeCorrMat)\
-                                            .transpose()\
-                                            [:, self.__factorPositions(asset_nb)]\
-                                            .transpose()
-            # sims_Z_unit = np.dot(np.linalg.inv(old_chol), sims_Z)
-            sims_Z_unit = cuda_ops.matmul( gpa.to_gpu(np.linalg.inv(np.linalg.cholesky(old_cov_mat))).astype(rn_type)
-                                         , sims_Z )
-
-            # TODO:  THIS IS SLOW - IMPROVE
-            delta_X = cuda_ops.colsum_cuda_last(cuda_ops.matmul(gpa.to_gpu(new_chol).astype(rn_type), sims_Z_unit))
-            qv = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2, tenor_nb, tenor_nb, 0., t_curr)
-                          for factor_1 in range(nb_factors_asset)]
-                         for factor_2 in range(nb_factors_asset)]).astype(rn_type)
-
-            if self.model_skew_ln_ind is 'ln_ln':
-                sim_fom[t_i, :] = F_curr * np.exp(delta_X - 0.5 * qv)
-            else:
-                cVecCurr = self._CVecList[asset_nb][tenor_nb, :]
-                # new_sim = F_curr * \
-                #    (1. + delta_X + c1 * (delta_X**2 - qv) / 2. +
-                #     c2 * (delta_X**3 - delta_X * 3*qv) / 6. +
-                #     c3 * (delta_X**4 - delta_X**2 * 6*qv + s1) / 24.)
-                # sim_fom[t_i, :] = new_sim
-                F_skew_fct( F_curr
-                          , cVecCurr[0].astype(rn_type)
-                          , cVecCurr[1].astype(rn_type)
-                          , cVecCurr[2].astype(rn_type)
-                          , qv
-                          , delta_X
-                          , sim_fom[t_i, :]
-                          , np.int32(nb_simulations)
-                          , block = (1, 1, 1)
-                          , grid  = (nb_simulations, 1))
 
         return sim_fom
 
@@ -1543,10 +1379,9 @@ class ComSkew(ComMaths):
                    , asset    : str
                    , C_vec    : np.array
                    , fwdDate  : datetime.date ) -> np.array :
-        """
-        Given the C parameters, returns the parameters for the option value computation using the polynomial approach.
+        """ Given the C parameters, returns the parameters for the option value computation using the polynomial approach.
 
-        :param asset_nb: number of the asset
+        :param asset: number of the asset
         :param C_vec: vector of calibrated skew parameters.
         :returns: a vector of A0, A1, A2, A3, A4, V
         """
@@ -1563,117 +1398,3 @@ class ComSkew(ComMaths):
                         , (cc2 / 6.) * f0t
                         , (cc3 / 24.) * f0t
                         , v])
-
-
-class ComSkewCuda(ComSkew):
-    """
-    Commodity skew model for CUDA.
-
-    """
-
-    def simulate_curves( self
-                       , nb_simulations  : int
-                       , simulationTimes : List[datetime.date]
-                       , tenor_list      : List[datetime.date]
-                       , set_seed      = None
-                       , cuda_ind      = False
-                       , cudaFloatType = np.float32 ) -> np.array :
-        """
-        Simulate all curves for desired simulation times on either cpu or cuda.
-        Simulation times have to be given.
-
-        Generates a 3-dimensional array
-        0-th dimension: asset_nb
-        1-st dimension: simulation times
-        2-nd dimension: curve
-        3-rd dimension: repeats of the curve
-
-        :param nb_simulations: self. explanatory
-        :param simulationTimes: simulation times for the forwards.
-        :param tenor_list: list of tenors which to simulate
-        :type tenor_list: list[int]
-        :param set_seed: seed, if needed, can be left to None
-        :type set_seed: int
-        :param cuda_ind: indicator whether to use cuda or not.
-        :returns: a matrix of simulated paths
-        """
-
-        np.random.seed(set_seed)
-
-        simulated_curves = {}
-        fwd_c_col = {}
-
-        for comCurve in self.comCurveNames:
-            sim_curves_shape = (len(simulationTimes), len(tenor_list), nb_simulations)
-
-            simulated_curves[comCurve] = gpa.zeros(sim_curves_shape, dtype=cudaFloatType)
-
-            fwd_c_col[comCurve] = self._comFwdCurves[comCurve].getFwdValues(tenor_list).astype(cudaFloatType)
-
-            cuda_ops.vtpm_cols(fwd_c_col, simulated_curves[comCurve][0, :, :], tm_ind='p')
-
-
-        X      = [ gpa.zeros((len(fwd_c_col[comCurve]), nb_simulations), dtype=cudaFloatType)
-                   for comCurve in self.comCurveNames ]
-        X_prev = [ gpa.empty((len(fwd_c_col[comCurve]), nb_simulations), dtype=cudaFloatType)
-                  for comCurve in self.comCurveNames ]
-
-        nb_factors = np.sum(self.nbFactorsForAsset)
-
-        # looping over time steps
-        #   simulates ln process, basis for skew as well
-        #   t_i ... idx of sim_time
-        #   fact_sum ... factors of the individual assets
-        for t_i in range(self.nb_time_steps):
-            simulated_rn = ComSkew.__simulate_std_normal( nb_factors
-                                                        , self.__completeCorrMat
-                                                        , nb_simulations
-                                                        , cuda_ind = True )
-
-            for asset_nb in range(self.nb_assets):
-                nb_factors_asset = self.nbFactorsForAsset(asset_nb)
-                old_cov_mat = self.__completeCorrMat[self.__factorPositions(asset_nb), self.__factorPositions(asset_nb)]
-                tenor_used = tenor_list[asset_nb]
-                old_chol_inv = np.linalg.inv(np.linalg.cholesky(old_cov_mat))
-
-                sims_Z_unit = cuda_ops.matmul(gpa.to_gpu( old_chol_inv.astype(np.float32))
-                                                        , simulated_rn[self.__factorPositions(asset_nb), :])
-
-                for tenor_idx, tenor_nb in enumerate(tenor_used):
-                    # prepare cov mtx
-                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset_nb, tenor_nb, i, j, t_i, self.simulation_times)
-                                                             for j in range(nb_factors_asset)]
-                                                            for i in range(nb_factors_asset)]))
-
-                    delta_X = cuda_ops.colsum_cuda_last(cuda_ops.matmul( gpa.to_gpu(cov_chol.astype(cudaFloatType))
-                                                                 , sims_Z_unit))
-
-                    # quadratic variation of delta_X, also q_v = V_u
-                    qv = np.sum([[self._V_cross_factor( asset_nb
-                                                      , factor_1
-                                                      , factor_2
-                                                      , tenor_nb
-                                                      , tenor_nb
-                                                      , 0. if t_i == 0 else self.simulation_times[t_i - 1]
-                                                      , self.simulation_times[t_i])
-                                  for factor_1 in range(nb_factors_asset)]
-                                 for factor_2 in range(nb_factors_asset)])
-
-                    X_prev[asset_nb][tenor_idx, :] = X[asset_nb][tenor_idx, :]
-                    X[asset_nb][tenor_idx, :] = X_prev[asset_nb][tenor_idx, :] + delta_X
-
-                    # F_res = F_u * (1. + X_u + 0.5 * c1 * (X_u**2 - V_u) +
-                    #                c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
-                    #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
-                    # self.simulated_curves[asset_nb][t_i, tenor_idx, :] = F_res
-                    c1, c2, c3 = self._CVecList[asset_nb][tenor_nb, :]
-                    F_skew_fct( cudaFloatType(self._comFwdCurves[asset_nb][tenor_nb])
-                              , cudaFloatType(c1)
-                              , cudaFloatType(c2)
-                              , cudaFloatType(c3)
-                              , cudaFloatType(qv)
-                              , X[asset_nb][tenor_idx, :]  # delta_X
-                              , self.simulated_curves[asset_nb][t_i, tenor_idx, :]
-                              , np.int32(nb_simulations)
-                              , block = (1, 1, 1)
-                              , grid  = (nb_simulations, 1))
