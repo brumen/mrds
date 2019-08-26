@@ -9,17 +9,13 @@ from typing import List
 
 import ds
 
-from ds import read_data_matched_tenors
-
 
 class FwdCurveException(Exception):
     pass
 
 
 class FwdCurve:
-    """
-    Forward curve object
-
+    """ Forward curve object
     """
 
     def __init__( self

@@ -16,26 +16,24 @@ LARGE_NUMBER = 1000000.  # large number to prohibit travel between certain direc
 logger = logging.getLogger(__name__)
 
 
-class Freight(object):
-    """
-    Freight class:
-      N ... initial distribution of the tanker fleet
+class Freight:
+    """ Freight class.
     """
 
-    def __init__( self
-                , mktDate          : datetime.date
-                , fwdCurveFct  # function
-                , volCurveFct  # function
-                , corrMatrix       : dict
-                , travelMatrix     : dict
-                , costMatrix       : dict
-                , initialLocations : dict
-                , timeGrid
-                , dcf = 365.25):
+    def __init__(self
+                 , mkt_date          : datetime.date
+                 , fwdCurveFct  # function
+                 , volCurveFct  # function
+                 , corrMatrix       : dict
+                 , travelMatrix     : dict
+                 , costMatrix       : dict
+                 , initialLocations : dict
+                 , timeGrid
+                 , dcf = 365.25):
         """
-        :param mktDate: market date
+        :param mkt_date: market date
         :param locations: locations between which freight can be transported, list[str]
-        :param fwdCurveFct: fucntion of (location, mktDate, future date), returns forward rate for that point.
+        :param fwdCurveFct: fucntion of (location, mkt_date, future date), returns forward rate for that point.
         :param initialLocations: dictionary of how many ships are in a particular location.
                                  {location: nb_ships }
         :param corrMatrix: correlation between individual locations, dictionary where keys are
@@ -48,7 +46,7 @@ class Freight(object):
         :param dcf: day count factor, used for discounting and option evaluation.
         """
 
-        self.mktDate      = mktDate
+        self.mkt_date     = mkt_date
         self.fwdCurveFct  = fwdCurveFct
         self.volCurveFct  = volCurveFct
         self._corrMatrix  = corrMatrix
@@ -86,7 +84,7 @@ class Freight(object):
         :returns: array of forwards or vols for that timeList and location (returns vector)
         """
 
-        return (self.fwdCurveFct if fwdVolInd == 'fwd' else self.volCurveFct)(self.mktDate, location, futureDate)
+        return (self.fwdCurveFct if fwdVolInd == 'fwd' else self.volCurveFct)(self.mkt_date, location, futureDate)
 
     @property
     def lowerBound(self):
@@ -111,14 +109,14 @@ class Freight(object):
         Spread option value between city1, city2 and times t1, t2, t1<t2.
         """
 
-        return spread_option_kirk( self.fwdVolCurves(city1, t1)
-                                 , self.fwdVolCurves(city2, t2)
-                                 , self._costMatrix[(city1, city2) if (city1, city2) in self._costMatrix else (city2, city1)] if city1 != city2 else 0.
-                                 , self.fwdVolCurves(city1, t1, fwdVolInd='vol')
-                                 , self.fwdVolCurves(city2, t2, fwdVolInd='vol')
-                                 , self._corrMatrix[(city1, city2) if (city1, city2) in self._corrMatrix else (city2, city1)]
-                                 , (t2 - t1).days / self._dcf
-                                 , DF(self.mktDate, t2))
+        return spread_option_kirk(self.fwdVolCurves(city1, t1)
+                                  , self.fwdVolCurves(city2, t2)
+                                  , self._costMatrix[(city1, city2) if (city1, city2) in self._costMatrix else (city2, city1)] if city1 != city2 else 0.
+                                  , self.fwdVolCurves(city1, t1, fwdVolInd='vol')
+                                  , self.fwdVolCurves(city2, t2, fwdVolInd='vol')
+                                  , self._corrMatrix[(city1, city2) if (city1, city2) in self._corrMatrix else (city2, city1)]
+                                  , (t2 - t1).days / self._dcf
+                                  , DF(self.mkt_date, t2))
 
     def _X(self, i : int, j : int, t : int, u :int) -> int:
         """
