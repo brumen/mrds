@@ -12,10 +12,8 @@ import scipy.optimize
 import scipy.interpolate  # spline package
 
 
-class ComMaths:
-    """
-    Mathematical functions of the Commodity skew.
-
+class ComMathsMixin:
+    """ Mathematical functions of the Commodity skew.
     """
 
     @staticmethod
@@ -68,7 +66,7 @@ class ComMaths:
         :returns truncated std. normal.
         """
 
-        return - ComMaths.__trunc_normal_above__(a) + np.array([1.0, 0.0, 1.0, 0.0, 3.0])
+        return - ComMathsMixin.__trunc_normal_above__(a) + np.array([1.0, 0.0, 1.0, 0.0, 3.0])
 
     @staticmethod
     def __trunc_normal_interval__(a: float, b: float) -> np.array:
@@ -79,4 +77,4 @@ class ComMaths:
         :param b: end of the interval
         """
 
-        return ComMaths.__trunc_normal_above__(b) - ComMaths.__trunc_normal_above__(a)
+        return ComMathsMixin.__trunc_normal_above__(b) - ComMathsMixin.__trunc_normal_above__(a)
