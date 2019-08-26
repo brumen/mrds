@@ -164,7 +164,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         for fwdCurveName, fwdCurveObj in self._com_fwd_curves:  # iterate through curves
 
             # potential calibration parameters
-            self._CVecList[fwdCurveName] = ComSkew.__oneZeroZeroMatrix(len(self._com_fwd_curves[fwdCurveName]), 3)
+            self._CVecList[fwdCurveName] = ComSkew._oneZeroZeroMatrix(len(self._com_fwd_curves[fwdCurveName]), 3)
 
             # initial value of the sigmaInit
             # TODO: USE THE INIT VERSION OF SIGMA
@@ -877,40 +877,40 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         if nb_real_roots == 1:
             if A3 > 0:
-                return np.sum(ComSkew.__trunc_normal_below__(real_roots_tsf[0]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_below(real_roots_tsf[0]) * Asigma)
 
-            return np.sum(ComSkew.__trunc_normal_above__(real_roots_tsf[0]) * Asigma)
+            return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma)
 
         if nb_real_roots in [2, 3]:  # integrate over 2 intervals
             if A4 > 0:
-                return np.sum(ComSkew.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                       np.sum(ComSkew.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
+                       np.sum(ComSkew._trunc_normal_below(real_roots_tsf[1]) * Asigma)
 
             if A4 < 0.:
-                return np.sum(ComSkew.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
 
             if A4 == 0. and A3 != 0.:
                 if A3 > 0.:
-                    return  np.sum(ComSkew.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-                            np.sum(ComSkew.__trunc_normal_below__(real_roots_tsf[2]) * Asigma)
+                    return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
+                           np.sum(ComSkew._trunc_normal_below(real_roots_tsf[2]) * Asigma)
                 else:  # A3 < 0
-                    return  np.sum(ComSkew.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                        np.sum(ComSkew.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
+                    return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
+                           np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
             if A4 == 0. and A3 == 0.:
                 if A2 < 0.:
-                    return np.sum(ComSkew.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+                    return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
 
-                return np.sum(ComSkew.__trunc_normal_above__(real_roots_tsf[0]) * Asigma) + \
-                       np.sum(ComSkew.__trunc_normal_below__(real_roots_tsf[1]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
+                       np.sum(ComSkew._trunc_normal_below(real_roots_tsf[1]) * Asigma)
 
         # elif nb_real_roots == 4:  # integrate over 3 intervals
         if A4 > 0:
-            return np.sum(ComSkew.__trunc_normal_above__(real_roots_tsf[0]) * Asigma ) + \
-                   np.sum(ComSkew.__trunc_normal_below__(real_roots_tsf[3]) * Asigma ) + \
-                   np.sum(ComSkew.__trunc_normal_interval__(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
+            return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
+                   np.sum(ComSkew._trunc_normal_below(real_roots_tsf[3]) * Asigma) + \
+                   np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
         # A4 < 0
-        return np.sum(ComSkew.__trunc_normal_interval__(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-               np.sum(ComSkew.__trunc_normal_interval__(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
+        return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
+               np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
 
     def __integr_num(self, A_V, call_put_ind, strike):
         """

@@ -1,8 +1,8 @@
 # Defaults of the ComSkew
-
 import numpy as np
 
 
+# TODO: THIS CLASS NEEDS TO BE REFACTORED.
 class ComSkewDefaultsMixin:
     """ Defaults mixin class for Mrds model.
     """

@@ -17,7 +17,7 @@ class ComMathsMixin:
     """
 
     @staticmethod
-    def __oneZeroZeroMatrix(n :int, k :int) -> np.array:
+    def _oneZeroZeroMatrix(n :int, k :int) -> np.array:
         """
         Returns matrix (n,k) where the first elt in every row is 1, and all other parameters are 0.
         Useful for construction of the skew parameters C[0] = 1, C[1] = 0, C[2] = 0...
@@ -32,7 +32,7 @@ class ComMathsMixin:
         return tmp
 
     @staticmethod
-    def __trunc_normal_above__(a: float) -> np.array:
+    def _trunc_normal_above(a: float) -> np.array:
         """
         Computes the truncated E[ N^{0,1,2,3,4} * 1(N <a) ] where N std. normal in succession.
 
@@ -46,6 +46,7 @@ class ComMathsMixin:
         if a > 1e10:
             return np.array([1., 0., 1., 0., 3.])
 
+        # TODO: THESE TWO LINES CAN BE MADE BETTER.
         # most common case
         sqrt_2 = np.sqrt(2.)
         sqrt_2pi = np.sqrt(2. * np.pi)
@@ -58,7 +59,7 @@ class ComMathsMixin:
                                      1. + scipy.special.erf(a / sqrt_2))])
 
     @staticmethod
-    def __trunc_normal_below__(a: float) -> np.array:
+    def _trunc_normal_below(a: float) -> np.array:
         """
         computes the truncated E[ N^{0,1,2,3,4} * 1(N >a) ] where N std. normal.
 
@@ -66,10 +67,10 @@ class ComMathsMixin:
         :returns truncated std. normal.
         """
 
-        return - ComMathsMixin.__trunc_normal_above__(a) + np.array([1.0, 0.0, 1.0, 0.0, 3.0])
+        return - ComMathsMixin._trunc_normal_above(a) + np.array([1.0, 0.0, 1.0, 0.0, 3.0])
 
     @staticmethod
-    def __trunc_normal_interval__(a: float, b: float) -> np.array:
+    def _trunc_normal_interval(a: float, b: float) -> np.array:
         """
         Truncated standard normal for the interval [a,b]
 
@@ -77,4 +78,4 @@ class ComMathsMixin:
         :param b: end of the interval
         """
 
-        return ComMathsMixin.__trunc_normal_above__(b) - ComMathsMixin.__trunc_normal_above__(a)
+        return ComMathsMixin._trunc_normal_above(b) - ComMathsMixin._trunc_normal_above(a)
