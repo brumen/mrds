@@ -494,7 +494,7 @@ def code_to_date(code_):
 def DF_single(mktDate : datetime.date, fwdDate : datetime.date, dcf = 365.25
               , discountCurve = None) -> float :
     """
-    Discount factor for a single forward date fwdDate.
+    Discount factor for a single forward date fwd_date.
 
     :param mktDate: market date of the yield curve.
     :param fwdDate: forward date.

@@ -250,7 +250,7 @@ def mrds_calib_db( com_fwd
 
     if mm.vol_surface_name_list[0] == 'ATM':
         mm.model_skew_ln_ind = 'ln_ln'
-    mm.black_vol_calibration(0)
+    mm.__kappa_sigma_rho(0)
     if model_ind is 'skew':
         mm.calibrate_skew_params(0)
     mm.generate_large_corr_mat()
@@ -337,7 +337,7 @@ def mrds_calib_db_multiple( com_fwd_l
                                   adj_vol_tenors_days=adj_vol_tenors)
         mm.read_model_config_db(com_nb)
         mm.set_other_params(com_nb)
-        mm.black_vol_calibration(com_nb)
+        mm.__kappa_sigma_rho(com_nb)
         if model_ind is 'skew':
             mm.calibrate_skew_params(com_nb)
     mm.generate_large_corr_mat()

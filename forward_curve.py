@@ -18,28 +18,35 @@ class FwdCurve:
     """ Forward curve object
     """
 
-    def __init__( self
-                , mktDate   : datetime.date
-                , fwdName   : str
-                , fwdTenors : List[datetime.date]
-                , fwdValues : List[float]
-                , dcf = 365.25 ):
+    def __init__(self
+                 , mkt_date   : datetime.date
+                 , fwd_name   : str
+                 , fwd_tenors : List[datetime.date]
+                 , fwd_values : List[float]
+                 , dcf = 365.25):
+        """ Forward curve class
+
+        :param mkt_date: market date
+        :param fwd_name: forward name of the curve
+        :param fwd_tenors: tenors on the curve
+        :param fwd_values: values for the respective tenors
+        :param dcf: day-count factor.
         """
 
-
-        """
-
-        self._mktDate   = mktDate
-        self._fwdName   = fwdName
-        self._fwdTenors = fwdTenors
-        self._fwdValues = fwdValues
+        self._mkt_date   = mkt_date
+        self.fwd_name   = fwd_name
+        self.fwd_tenors = fwd_tenors
+        self.fwd_values = fwd_values
         self._dcf       = dcf
 
         self.__fwdCurve = None
         self.__fwdTenorsNumeric = None
 
-    def __relativeDate(self, fwdDate : datetime.date) -> float:
-        return (fwdDate - self._mktDate).days / self._dcf
+    def __relative_date(self, fwd_date : datetime.date) -> float:
+        """
+
+        """
+        return (fwd_date - self._mkt_date).days / self._dcf
 
     @property
     def _fwdTenorsNumeric(self, dcf=365.25):
@@ -51,7 +58,7 @@ class FwdCurve:
         if self.__fwdTenorsNumeric:
             return self.__fwdTenorsNumeric
 
-        self.__fwdTenorsNumeric = [self.__relativeDate(fwdDate) for fwdDate in self._fwdTenors]
+        self.__fwdTenorsNumeric = [self.__relative_date(fwdDate) for fwdDate in self.fwd_tenors]
         return self.__fwdTenorsNumeric
 
     def _fwdCurve(self):
@@ -63,7 +70,7 @@ class FwdCurve:
         if self.__fwdCurve:
             return self.__fwdCurve
 
-        self.__fwdCurve = scipy.interpolate.splrep(self._fwdTenorsNumeric, self._fwdValues)
+        self.__fwdCurve = scipy.interpolate.splrep(self._fwdTenorsNumeric, self.fwd_values)
         return self.__fwdCurve
 
     def fwdValue(self, fwdDate) -> float:
@@ -73,11 +80,11 @@ class FwdCurve:
         """
 
         if isinstance(fwdDate, list):  # TODO: list is problematic, as it can be list[float] or list[datetime.date]
-            return scipy.interpolate.splev( [self.__relativeDate(fwdDates) for fwdDates in fwdDate]
+            return scipy.interpolate.splev( [self.__relative_date(fwdDates) for fwdDates in fwdDate]
                                           , self._fwdCurve)
 
         if isinstance(fwdDate, datetime.date):
-            return scipy.interpolate.splev(self.__relativeDate(fwdDate), self._fwdCurve)
+            return scipy.interpolate.splev(self.__relative_date(fwdDate), self._fwdCurve)
 
         if isinstance(fwdDate, float):
             return scipy.interpolate.splev(fwdDate, self._fwdCurve)
@@ -86,20 +93,20 @@ class FwdCurve:
 
     def get_1nb( self, fwdDate  : datetime.date ):
         """
-        Finds the 1st nearby contract to fwdDate.
+        Finds the 1st nearby contract to fwd_date.
 
         :param fwdDate: forward date to which the 1st nearby contract is searched.
         """
 
-        if fwdDate > self._fwdTenors[-1]:
-            raise FwdCurveException('Fwd date searched {0} larger than the curve last date {1}'.format(fwdDate, self._fwdTenors[-1]))
+        if fwdDate > self.fwd_tenors[-1]:
+            raise FwdCurveException('Fwd date searched {0} larger than the curve last date {1}'.format(fwdDate, self.fwd_tenors[-1]))
 
-        largerDates = sum([ fwdTenor <= fwdDate for fwdTenor in self._fwdTenors])
+        largerDates = sum([fwdTenor <= fwdDate for fwdTenor in self.fwd_tenors])
 
-        return self._fwdTenors[largerDates], self._fwdValues[largerDates]
+        return self.fwd_tenors[largerDates], self.fwd_values[largerDates]
 
     @classmethod
-    def fromDB(cls, mktDate : datetime.date, fwdCurveName : str):
+    def from_db(cls, mktDate : datetime.date, fwdCurveName : str):
         """
         Reads the forward curves from the database.
 

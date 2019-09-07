@@ -27,9 +27,9 @@ class ComSkewDisplay(ComSkew):
                              , canvas
                              , li1
                              , li2):
-        deltaLabels = self.deltas_to_strikes(asset, fwd)
+        deltaLabels = self.__deltas_to_strikes(asset, fwd)
         li1.set_xdata(deltaLabels)
-        li1.set_ydata(self.model_vol_surface(asset, c, fwd))
+        li1.set_ydata(self.__model_vol_surface(asset, c, fwd))
         li2.set_xdata(deltaLabels)
         li2.set_ydata(self.volCurve(asset)[fwd])  # TODO: FIX THIS PART HERE
 
@@ -43,7 +43,7 @@ class ComSkewDisplay(ComSkew):
 
         canvas = tk.Tk()  # main canvas
         # plot market vols as initial
-        delta_x = self.deltas_to_strikes(asset, fwd)
+        delta_x = self.__deltas_to_strikes(asset, fwd)
         mv_y = self.vol_surface_list[asset][fwd]
         f = Figure(figsize=(5, 4), dpi=100)
         a = f.add_subplot(111)
@@ -92,7 +92,7 @@ class ComSkewDisplay(ComSkew):
         # plot market vols as initial
         f = Figure(figsize=(5, 4), dpi=100)
         a = f.add_subplot(111)
-        a.plot(self.deltas_to_strikes(asset, fwd), self.vol_surface_list[asset][fwd])
+        a.plot(self.__deltas_to_strikes(asset, fwd), self.vol_surface_list[asset][fwd])
 
         # plot the graph
         dataPlot_canvas = FigureCanvasTkAgg(f, master=root)

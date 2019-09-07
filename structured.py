@@ -549,7 +549,7 @@ def local_floor_pos_rep (mm, params):
     p_clsp = []
     p_und = []
     for asset_nb in xrange (mm.nb_assets):
-        # print mm.simulated_curves[asset_nb][:,fwd,:]/mm.simulated_curves[asset_nb][0,fwd,:]
+        # print mm.simulated_curves[asset][:,fwd,:]/mm.simulated_curves[asset][0,fwd,:]
         p_avg.append ( mm.simulated_curves[asset_nb][-1,fwd,:]/mm.simulated_curves[asset_nb][0,fwd,:] )
         p_clsp.append ( A * ( p_avg[asset_nb] > K ) )
         p_mm.append ( F * (p_avg[asset_nb] < F) + p_avg[asset_nb] * (F < p_avg[asset_nb] ) * (p_avg[asset_nb] < C) +
@@ -643,7 +643,7 @@ def basket_lc (mm, params):
     p_clsp = []
     p_und = []
     for asset_nb in xrange (mm.nb_assets):
-        # print mm.simulated_curves[asset_nb][:,fwd,:]/mm.simulated_curves[asset_nb][0,fwd,:]
+        # print mm.simulated_curves[asset][:,fwd,:]/mm.simulated_curves[asset][0,fwd,:]
         p_avg.append ( mm.simulated_curves[asset_nb][-1,fwd,:]/mm.simulated_curves[asset_nb][0,fwd,:] )
         p_clsp.append ( A * ( p_avg[asset_nb] > K ) )
         p_mm.append ( F * (p_avg[asset_nb] < F) + p_avg[asset_nb] * (F < p_avg[asset_nb] ) * (p_avg[asset_nb] < C) +
