@@ -3,7 +3,8 @@ import numpy as np
 
 from scipy.interpolate import splrep, splev
 
-from ds import get_forward_curve, d2s, fwd_codes
+from ds import get_forward_curve, fwd_codes
+from convert_date import d2s
 
 
 def read_discount_curve(mkt_date: datetime.date, dcf=365.25):
