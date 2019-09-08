@@ -26,6 +26,8 @@ mpl.use('TkAgg')
 
 # mrds local imports
 import ds
+from discount     import read_discount_curve
+from convert_date import convert_str_datetime
 import vols.vols
 from vols.vols import getVolObject
 import near_corr
@@ -64,6 +66,49 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     NLP_SOLVER           = 'scipy_cobyla'
     _LRU_CACHE_SIZE_CALIB = 5  # lru for number of factors.
+
+    def __init__( self
+                , mkt_date      : datetime.date
+                , fwd_curves    : List[FwdCurve]
+                , volCurves  # : List[Volatility]
+                , calcDate     = None):
+
+        """ Initialization of the skew model.
+
+        :param mkt_date: market date
+        :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
+                     forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
+        :param comVolCurves: commodity vol curves, in case they are different than forward curves.
+        """
+
+        self._mktDate          = mkt_date
+        self.__mkt_date_change = True  # indicator whether the market date has changed and everything needs to be recalculated.
+        self._calcDate         = calcDate if calcDate else mkt_date
+        self._com_fwd_curves   = fwd_curves
+        self._com_vol_curves   = volCurves
+        nb_assets              = len(self._com_fwd_curves)
+
+        # initial value of the calibrated params
+        self.__C_vec = {fwd_curve.fwd_name: ComSkew._oneZeroZeroMatrix(len(fwd_curve.fwd_tenors), 3)
+                         for fwd_curve in fwd_curves }
+
+        # indicator functions - whether the values are updated
+        # indicator function for the sigma, kappa calibration
+        self.sigma_kappa_calib_indicator_list = np.repeat(False, nb_assets)
+        self.skew_calib_indicator_list        = np.repeat(False, nb_assets)
+        self.days_nb_const_ind    = False  # monthly dat numbers are constr.
+        self.simulate_spot_rn_ind = False  # indic. for random number for spot sim.
+        self._cash_corr = np.eye(self.nb_assets)
+
+        self.__blackVolInverseTol = 1e-4  # default value of the black vol inverse parameter
+
+        # hashed values
+        self.__com_curve_names = None
+        self.__discount_function = None  # has for discount function
+        self.__factor_corr_mtx = dict()  # to keep track of the factor correlation matrices.
+        self.__market_corr_mtx = dict()  # track of the market correlation matrix
+        self.__complete_corr_mtx            = None  # complete correlation matrix hash
+        self.__regenerate_complete_corr_mtx = True  # indicator whether to regenerate the complete corr. mtx.
 
     def __default_factor_corr_mat_fct( self
                                      , asset_1 : str
@@ -106,68 +151,36 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return lb_ub_fact * np.ones((self.nb_factors_for_asset[asset_1], self.nb_factors_for_asset[asset_2]))
 
     @property
-    def nb_assets(self):
+    def nb_assets(self) -> int:
+        """ Number of assets in the model, basically the length of the fwd curve.
+        """
         return len(self._com_fwd_curves)
 
     @property
-    def fwd_curves(self):
+    def fwd_curves(self) -> List[FwdCurve]:
         """ Curve names for the commodity curves in the model.
         """
 
         return self._com_fwd_curves
 
     @property
-    def vol_curves(self):
-        return self._com_vol_curves
+    def fwd_curve_names(self):
+        """ Memoizes the forward curve names.
+        """
+        if self.__com_curve_names:
+            return self.__com_curve_names
 
+        self.__com_curve_names = [fwd_curve.fwd_name for fwd_curve in self.fwd_curves]
+        return self.__com_curve_names
+
+    @property
+    def vol_curves(self) -> List[Volatility]:
+        return self._com_vol_curves
 
 # TODO: INCLUDE THIS HERE
 #        , 'corr_init': np.array([[1., 0.5], [0.5, 1.]])
 #        , 'corr_lb': np.array([[1., -0.99], [-0.99, 1.]])
 #        , 'corr_ub': np.array([[1., 0.99], [0.99, 1.]])} ):
-
-
-    def __init__( self
-                , mkt_date      : datetime.date
-                , fwd_curves    : Dict[FwdCurve]
-                , volCurves  # : List[Volatility]
-                , calcDate     = None):
-
-        """ Initialization of the skew model.
-
-        :param mkt_date: market date
-        :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
-                     forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
-        :param comVolCurves: commodity vol curves, in case they are different than forward curves.
-        """
-
-        self._mktDate       = mkt_date
-        self.__mkt_date_change= True  # indicator whether the market date has changed and everything needs to be recalculated.
-        self._calcDate      = calcDate if calcDate else mkt_date
-        self._com_fwd_curves  = fwd_curves
-        self._com_vol_curves  = volCurves
-        nb_assets           = len(self._com_fwd_curves)
-
-        # initial value of the calibrated params
-        self.__C_vec = {fwd_curve_name: ComSkew._oneZeroZeroMatrix(len(self.fwd_curves[fwd_curve_name]), 3)
-                         for fwd_curve_name, _ in fwd_curves }
-
-        # indicator functions - whether the values are updated
-        # indicator function for the sigma, kappa calibration
-        self.sigma_kappa_calib_indicator_list = np.repeat(False, nb_assets)
-        self.skew_calib_indicator_list        = np.repeat(False, nb_assets)
-        self.days_nb_const_ind    = False  # monthly dat numbers are constr.
-        self.simulate_spot_rn_ind = False  # indic. for random number for spot sim.
-        self._cash_corr = np.eye(self.nb_assets)
-
-        self.__blackVolInverseTol = 1e-4  # default value of the black vol inverse parameter
-
-        # hashed values
-        self.__factor_corr_mtx = dict()  # to keep track of the factor correlation matrices.
-        self.__market_corr_mtx = dict()  # track of the market correlation matrix
-        self.__complete_corr_mtx            = None  # complete correlation matrix hash
-        self.__regenerate_complete_corr_mtx = True  # indicator whether to regenerate the complete corr. mtx.
-
 
     def _factor_corr_mat(self, asset_1, asset_2, new_corr_mtx = None):
         """ Returns the factor correlation between assets 1 & 2. If new_corr_mtx is provided,
@@ -254,17 +267,22 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """ Number of factors per asset, placeholder perhaps for some other function.
         """
 
+        if asset not in self.fwd_curve_names:
+            raise ComSkewError('Requested curve {0} not in list of curves: {1}'.format(asset, self.fwd_curve_names))
+
         return 2
 
     def simulation_times( self
-                        , sim_times : [np.ndarray, List[datetime.date], List[str], List[float] ] ):
-        """ Update simulation times for the model.
+                        , sim_times : [np.ndarray, List[datetime.date], List[str], List[float] ]
+                        , dcf = 365.25 ):
+        """ Returns the simulation times from the list of sim_times.
 
         :param sim_times: new simulation times in one of the accepted formats
+        :param dcf: day-count-factor
         """
 
         if type(sim_times) == np.ndarray:
-            return sim_times, [self.mkt_date + datetime.timedelta(int(np.round(stf * 365.)))
+            return sim_times, [self.mkt_date + datetime.timedelta(int(np.round(stf * dcf)))
                                for stf in sim_times]
 
         if (type(sim_times) == list) and (type(sim_times[0]) == datetime.datetime):
@@ -272,34 +290,37 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             return sim_times_normalized, sim_times_normalized
 
         if (type(sim_times) == list) and (type(sim_times[0]) == str):
-            return np.array([(ds.convert_str_datetime(date_) - self.mkt_date).days / 365.
-                                               for date_ in sim_times]), \
+            return np.array([ (convert_str_datetime(date_) - self.mkt_date).days / 365.
+                              for date_ in sim_times]), \
                     sim_times
 
         if (type(sim_times) == list) and (type(sim_times[0]) == float):
             sim_times_normalized = np.array(sim_times)
             return sim_times_normalized, [self.mkt_date + datetime.timedelta(int(np.round(stf * 365.))) for stf in sim_times_normalized]
 
-    def updateMarketDateOneAsset(self, newMarketDate : datetime.date) -> None:
-        """
-        Updates the date to the new market date, and updates the curves and vols accordingly.
+    def update_market_date(self, new_market_date : datetime.date) -> None:
+        """ Updates the date to the new market date, and updates the curves and vols accordingly.
 
-        :param newMarketDate: new date that one wants to set.
+        :param new_market_date: new date that one wants to set.
         """
 
         for comCurves in self._com_fwd_curves:
-            comCurves._mkt_date = newMarketDate  # TODO: _mkt_date SHOULD BE DIFFERENT IN THE FwdCurve class
+            comCurves.mkt_date = new_market_date
 
         for volCurve in self._com_vol_curves:
-            volCurve.mkt_date = newMarketDate
+            volCurve.mkt_date = new_market_date
 
-    @lru_cache(maxsize=1)
     @property
     def _discount_function(self):
         """ Returns the discount function for the market date.
         """
 
-        return ds.read_discount_curve(self.mkt_date)
+        if self.__discount_function:
+            return self.__discount_function
+
+        self.__discount_function = read_discount_curve(self.mkt_date)
+
+        return self.__discount_function
 
     def DF( self
           , fwd_time : [str, np.double, float]
@@ -314,11 +335,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             time_diff = fwd_time
 
         elif isinstance(fwd_time, str):
-            t_dt = ds.convert_str_datetime(fwd_time)
+            t_dt = convert_str_datetime(fwd_time)
             time_diff = self.__difference_to_market_date(t_dt, dcf=dcf)
 
         elif isinstance(fwd_time, datetime.datetime):
             time_diff = self.__difference_to_market_date(fwd_time, dcf=dcf)
+
+        else:
+            raise ComSkewError('fwd_time given in function DF is not of form [str, double, float]')
 
         return scipy.interpolate.splev(time_diff, self._discount_function)
 
@@ -1182,7 +1206,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def simulate_1nb( self, nb_simulations : int
                     , simulation_times = None
-                    , set_seed         = None ) -> Dict[str]:
+                    , set_seed         = None ) -> Dict[str, np.ndarray]:
         """ Simulate the 1NB (rolling) contract.
 
         # TODO: FIX THIS HERE!!
@@ -1211,7 +1235,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return new_simulated_curves
 
-    @lru_cache(maxsize=ComSkew._LRU_CACHE_SIZE_CALIB)  # TODO: THIS IS NOT RIGHT HERE!!!
+    @lru_cache(maxsize=20)  # TODO: THIS IS NOT RIGHT HERE!!!
     def __factor_positions(self, asset_nb : int) -> slice:
         """
         Returns factor positions in a matrix for asset
@@ -1228,7 +1252,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                             , asset          : str
                             , nb_simulations : int
                             , sim_times      : List[datetime.date]
-                            , tenors_list
+                            , tenors_list = None
                             , seed = None ):
         """ Simulate first of month (fom) curves.
 
@@ -1245,7 +1269,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         np.random.seed(seed=seed)
 
         fwd_c_len = len(tenors_list)
-        sim_times = self.option_tenors_list[asset][tenors_list]
+        # sim_times = self.option_tenors_list[asset][tenors_list]
+        sim_times = self.vol_curves[asset].vol_tenors if not tenors_list else self.vol_curves[asset].vol_tenors[tenors_list]
         complete_corr_mtx = self._complete_corr_mtx()
 
         sim_fom = np.empty((fwd_c_len, nb_simulations))
@@ -1311,7 +1336,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # integrated volatility
         v = self.black_vol_current(asset, fwd_date) * \
             np.sqrt(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, fwd_date)))
-        f0t = self.fwd_curves[asset].fwdValue(fwd_date)
+        f0t = self.fwd_curves[asset].fwd_value(fwd_date)
 
         return ( (1. - cc1 * v**2 / 2. + cc3 * v**4 / 8.) * f0t
                , (1. - cc2 * v**2 / 2.) * f0t

@@ -179,7 +179,9 @@ def get_fwd_vol_curve_numeric_tenor( curveName : str
             fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
 
     else:
-        fwd_vol_tenors_raw, fwd_vol_values_raw = get_vol_curve(curveName, mktDate)
+        vol_curve_data = get_vol_curve(curveName, mktDate)
+        fwd_vol_tenors_raw = vol_curve_data['vol_dates']
+        fwd_vol_values_raw = vol_curve_data['vol_curve']
         if adj_tenors_days is not None:
             fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_tenors_days), val)
                                    for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
@@ -238,19 +240,22 @@ def read_data_matched_tenors(mktDate : datetime.date
                      if item1 == item2]
 
     def select_elts(arr, idx, fwd_opt_ind='fwd'):
+        """ Selects the elements from array arr given the indices in idx
+
+        """
         if fwd_opt_ind is 'fwd':
             return [arr[elt_fwd] for (elt_fwd, elt_opt) in idx]
-        else:
-            return [arr[elt_opt] for (elt_fwd, elt_opt) in idx]
 
-    fwd_tenors_matched = select_elts(fwd_tenors, match_idx, 'fwd')
-    fwd_tenors_code_matched = select_elts(fwd_tenors_code, match_idx, 'fwd')
-    fwd_tenors_dt_matched = select_elts(fwd_tenors_dt, match_idx, 'fwd')
-    fwd_curve_matched = select_elts(fwd_curve_name, match_idx, 'fwd')
-    option_tenors_dt_matched = select_elts(option_tenors_dt, match_idx, 'opt')
-    option_tenors_matched = select_elts(option_tenors, match_idx, 'opt')
+        return [arr[elt_opt] for (elt_fwd, elt_opt) in idx]
+
+    fwd_tenors_matched         = select_elts(fwd_tenors        , match_idx, 'fwd')
+    fwd_tenors_code_matched    = select_elts(fwd_tenors_code   , match_idx, 'fwd')
+    fwd_tenors_dt_matched      = select_elts(fwd_tenors_dt     , match_idx, 'fwd')
+    fwd_curve_matched          = select_elts(fwd_curve         , match_idx, 'fwd')
+    option_tenors_dt_matched   = select_elts(option_tenors_dt  , match_idx, 'opt')
+    option_tenors_matched      = select_elts(option_tenors     , match_idx, 'opt')
     option_tenors_code_matched = select_elts(option_tenors_code, match_idx, 'opt')
-    vol_surface_params_matched = select_elts(vol_params, match_idx, 'opt')
+    vol_surface_params_matched = select_elts(vol_params        , match_idx, 'opt')
 
     # sorting
     def sorting_fct(sort_order, to_be_sorted):
