@@ -3,7 +3,7 @@
 #
 
 import datetime
-import scipy.interpolate
+from scipy.interpolate import splev, splrep
 
 from typing import List, Tuple
 
@@ -72,7 +72,7 @@ class FwdCurve:
         if self.__fwd_curve:
             return self.__fwd_curve
 
-        self.__fwd_curve = scipy.interpolate.splrep(self._fwdTenorsNumeric, self.fwd_values)
+        self.__fwd_curve = splrep(self._fwdTenorsNumeric, self.fwd_values)
         return self.__fwd_curve
 
     def fwd_value(self, fwd_date) -> float:
@@ -81,14 +81,14 @@ class FwdCurve:
         """
 
         if isinstance(fwd_date, list):  # TODO: list is problematic, as it can be list[float] or list[datetime.date]
-            return scipy.interpolate.splev([self.__relative_date(fwd_dates) for fwd_dates in fwd_date]
+            return splev([self.__relative_date(fwd_dates) for fwd_dates in fwd_date]
                                            , self._fwd_curve)
 
         if isinstance(fwd_date, datetime.date):
-            return scipy.interpolate.splev(self.__relative_date(fwd_date), self._fwd_curve)
+            return splev(self.__relative_date(fwd_date), self._fwd_curve)
 
         if isinstance(fwd_date, float):
-            return scipy.interpolate.splev(fwd_date, self._fwd_curve)
+            return splev(fwd_date, self._fwd_curve)
 
         raise FwdCurveException('Forward value {0} not recognized'.format(str(fwd_date)))
 

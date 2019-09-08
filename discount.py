@@ -14,13 +14,13 @@ def read_discount_curve(mkt_date: datetime.date, dcf=365.25):
     :returns:
     """
 
-    disc_tenors, discountYields = get_forward_curve('DISCOUNT', mkt_date)
+    disc_tenors, discount_yields = get_forward_curve('DISCOUNT', mkt_date)
     diffs = [tenor - mkt_date for tenor in disc_tenors]
     disc_tenors_numeric = np.array([float(elt.days) for elt in diffs]) / dcf
-    discountYields = np.array([float(x) for x in discountYields])
+    discount_yields = np.array([float(x) for x in discount_yields])
 
     return splrep( disc_tenors_numeric
-                 , np.exp(-disc_tenors_numeric * discountYields))  # interpolation function
+                 , np.exp(-disc_tenors_numeric * discount_yields))  # interpolation function
 
 
 def code_to_date(code_ : str) -> str:

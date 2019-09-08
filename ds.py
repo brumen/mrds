@@ -1,7 +1,6 @@
 # ONLY MARKET DATE POSSIBLE: 20150401, i.e. 2015, 04, 01; Apr 4, 2015
 import datetime
 import numpy as np
-import scipy.interpolate
 import matplotlib.pyplot as plt
 import calendar as cal
 
@@ -462,62 +461,3 @@ def read_data_matched_tenors(mktDate : datetime.date
             'option_tenors_code': np.array(option_tenors_code_final),
             'option_tenors_dt'  : option_tenors_dt_final,
             'vol_surface_params': np.array(vol_surface_params_final)}
-
-
-def read_discount_curve(mktDate : datetime.date, dcf = 365.25):
-    """
-    Returns the discount curve on date date_
-
-    :param mktDate: market date
-
-    """
-
-    disc_tenors, discountYields = get_forward_curve('DISCOUNT', mktDate)
-    diffs = [tenor - mktDate for tenor in disc_tenors]
-    disc_tenors_numeric = np.array([float(elt.days) for elt in diffs])/dcf
-    discountYields = np.array([float(x) for x in discountYields])
-
-    return scipy.interpolate.splrep( disc_tenors_numeric
-                                   , np.exp(-disc_tenors_numeric * discountYields) )  # interpolation function
-
-
-def code_to_date(code_):
-    """
-    converts fwd code into date (z15 in 20151201)
-    """
-
-    month_str = d2s(fwd_codes[code_[0]])
-    year_str = '20' + code_[1:3]
-    return year_str + month_str + '01'
-
-
-def DF_single(mktDate : datetime.date, fwdDate : datetime.date, dcf = 365.25
-              , discountCurve = None) -> float :
-    """
-    Discount factor for a single forward date fwd_date.
-
-    :param mktDate: market date of the yield curve.
-    :param fwdDate: forward date.
-    :param dcf: date count convention
-    :param discountCurve: discount curve, if provided.
-    """
-
-    return scipy.interpolate.splev( (fwdDate - mktDate).days / dcf
-                                  , discountCurve if discountCurve else read_discount_curve(mktDate) )
-
-
-def DF(mktDate : datetime.date , fwdDate ):
-    """
-    Discount factor from date date_ till date_fut.
-
-    :param mktDate: market date for discount factor
-    :param fwdDate: forward date to which the discount is constructed.
-    :returns: discount between two dates
-    """
-
-    if type(fwdDate) is list:
-        return [DF_single(mktDate, date_f) for date_f in fwdDate]
-
-    return DF_single(mktDate, fwdDate)
-
-    
