@@ -3,8 +3,8 @@ import numpy as np
 
 from scipy.interpolate import splrep, splev
 
-from ds import get_forward_curve, fwd_codes
-from convert_date import d2s
+from ds import get_forward_curve  # , fwd_codes
+# from convert_date import d2s
 
 
 def read_discount_curve(mkt_date: datetime.date, dcf=365.25):
@@ -24,13 +24,13 @@ def read_discount_curve(mkt_date: datetime.date, dcf=365.25):
                  , np.exp(-disc_tenors_numeric * discount_yields))  # interpolation function
 
 
-def code_to_date(code_ : str) -> str:
-    """ Converts fwd code (z15) into date 20151201.
-
-    :param code_: forward code.
-    """
-
-    return ('20' + code_[1:3]) + d2s(fwd_codes[code_[0]]) + '01'
+# def code_to_date(code_ : str) -> str:
+#     """ Converts fwd code (z15) into date 20151201.
+#
+#     :param code_: forward code.
+#     """
+#
+#     return ('20' + code_[1:3]) + d2s(fwd_codes[code_[0]]) + '01'
 
 
 def DF_single( mktDate: datetime.date
