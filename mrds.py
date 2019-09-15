@@ -3,45 +3,28 @@
 #
 
 import datetime
+import logging
 import numpy as np
 import scipy
-import scipy.optimize
-import scipy.integrate
-import scipy.special
+from scipy.optimize import brute
 import scipy.stats
-import scipy.optimize
 import scipy.interpolate  # spline package
 from openopt import NLP
 import multiprocessing as mp
 
 from functools import lru_cache
+from typing    import List, Dict
 
-from typing import List, Dict
-
+# mrds imports
 from mrds_maths    import ComMathsMixin
 from mrds_defaults import ComSkewDefaultsMixin
-
-import matplotlib as mpl
-mpl.use('TkAgg')
-
-# mrds local imports
-import ds
-from discount     import read_discount_curve
-from convert_date import convert_str_datetime
-import vols.vols
-from vols.vols import getVolObject
-import near_corr
-import correlations as corrs
-
+from correlations  import corr_hyp_sec_mat
+from near_corr     import near_corr_simple
+from vols.vols     import getVolObject, Volatility, black_vol_inverse
+from discount      import read_discount_curve
 from forward_curve import FwdCurve
-from vols.vols     import Volatility
-
-import quartic.quartic_cy as quartic_cy
-
-import opd.opd_avx as opd_avx
-
-import logging
-
+from quartic.quartic_cy import QuadRoots, CubicRoots, QuarticRoots
+from opd.opd_avx   import skew_fom
 
 logger = logging.Logger(__name__)
 
@@ -122,7 +105,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         if asset_1 == asset_2:
-            return corrs.corr_hyp_sec_mat(same_asset_corr, range(self.nb_factors_for_asset(asset_1)))
+            return corr_hyp_sec_mat(same_asset_corr, range(self.nb_factors_for_asset(asset_1)))
 
         # asset_1 != asset_2
         return diff_asset_corr * np.ones((self.nb_factors_for_asset(asset_1),
@@ -164,13 +147,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return self._com_fwd_curves
 
     @property
-    def fwd_curve_names(self):
+    def fwd_curve_names(self) -> Dict[str, FwdCurve]:
         """ Memoizes the forward curve names.
         """
         if self.__com_curve_names:
             return self.__com_curve_names
 
-        self.__com_curve_names = [fwd_curve.fwd_name for fwd_curve in self.fwd_curves]
+        self.__com_curve_names = {fwd_curve.fwd_name: fwd_curve for fwd_curve in self.fwd_curves}
         return self.__com_curve_names
 
     @property
@@ -182,12 +165,16 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 #        , 'corr_lb': np.array([[1., -0.99], [-0.99, 1.]])
 #        , 'corr_ub': np.array([[1., 0.99], [0.99, 1.]])} ):
 
-    def _factor_corr_mat(self, asset_1, asset_2, new_corr_mtx = None):
+    def _set_factor_corr_mat(self, asset_1, asset_2, new_corr_mtx = None, lb_ub_ind=None):
         """ Returns the factor correlation between assets 1 & 2. If new_corr_mtx is provided,
             set that as the correlation matrix between them.
+
+        :param asset_1: first asset to get the correlation
+        :param asset_2: second asset for the correlation
+        :param new_corr_mtx: new matrix if you want it to be set up.
         """
 
-        mtx_to_insert = new_corr_mtx if new_corr_mtx else self.__default_factor_corr_mat_fct(asset_1, asset_2)
+        mtx_to_insert = new_corr_mtx if new_corr_mtx else (self.__default_factor_corr_mat_fct(asset_1, asset_2) if not lb_ub_ind else self.__default_factor_corr_mat_fct_lb_ub(asset_1, asset_2, lb_ub_ind=lb_ub_ind))
 
         if asset_1 not in self.__factor_corr_mtx:
             self.__factor_corr_mtx[asset_1] = {asset_2: mtx_to_insert}
@@ -196,6 +183,20 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             self.__factor_corr_mtx[asset_1][asset_2] = mtx_to_insert
 
         return self.__factor_corr_mtx[asset_1][asset_2]
+
+    def _factor_corr_mat(self, asset_1, asset_2, lb_ub_ind=None):
+        """ Gets the factor correlation matrix between assets 1 and 2.
+
+        :param asset_1: first asset, e.g. 'WTI'
+        :param asset_2: second asset, e.g. 'BRENT'
+        :param lb_ub_ind: lower bound/upper bound indicator
+
+        """
+
+        if not lb_ub_ind:
+            return self.__factor_corr_mtx['mid'][asset_1][asset_2]
+
+        return self.__factor_corr_mtx[lb_ub_ind][asset_1][asset_2]
 
     def _market_corr(self, asset_1, asset_2, mkt_corr_mtx = None):  # TODO: THIS NEEDS TO BE CHANGED HERE
         """ Returns the market correlation, if mkt_corr_mtx is not provided.
@@ -268,7 +269,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         if asset not in self.fwd_curve_names:
-            raise ComSkewError('Requested curve {0} not in list of curves: {1}'.format(asset, self.fwd_curve_names))
+            raise ComSkewError('Requested curve {0} not in list of curves: {1}'.format(asset, self.fwd_curve_names.keys()))
 
         return 2
 
@@ -288,11 +289,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if (type(sim_times) == list) and (type(sim_times[0]) == datetime.datetime):
             sim_times_normalized = np.array([(st - self.mkt_date).days / 365. for st in sim_times])
             return sim_times_normalized, sim_times_normalized
-
-        if (type(sim_times) == list) and (type(sim_times[0]) == str):
-            return np.array([ (convert_str_datetime(date_) - self.mkt_date).days / 365.
-                              for date_ in sim_times]), \
-                    sim_times
 
         if (type(sim_times) == list) and (type(sim_times[0]) == float):
             sim_times_normalized = np.array(sim_times)
@@ -334,10 +330,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if (type(fwd_time) is np.double) or (type(fwd_time) is float):
             time_diff = fwd_time
 
-        elif isinstance(fwd_time, str):
-            t_dt = convert_str_datetime(fwd_time)
-            time_diff = self.__difference_to_market_date(t_dt, dcf=dcf)
-
         elif isinstance(fwd_time, datetime.datetime):
             time_diff = self.__difference_to_market_date(fwd_time, dcf=dcf)
 
@@ -363,7 +355,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return utm
 
-    def _construct_corr_asset (self, asset_nb, theta_vector):
+    def _construct_corr_asset(self, asset_nb, theta_vector):
         return self.__class__._construct_corr(self.nb_factors_for_asset(asset_nb), theta_vector)
 
     def __difference_to_market_date(self, fwd_date : datetime.date, dcf=365.25) -> float:
@@ -546,8 +538,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         # extracting the upper triangular part of the correlation matrix 
         fcm_init = self._factor_corr_mat(asset, asset)
-        fcm_lb   = self.__factorCorrMatLB(asset, asset)
-        fcm_ub   = self.__factorCorrMatUB(asset, asset)
+        fcm_lb   = self._factor_corr_mat(asset, asset, lb_ub_ind='lb')
+        fcm_ub   = self._factor_corr_mat(asset, asset, lb_ub_ind='ub')
 
         # optimization run
         return NLP( lambda kappa_sigma_rho_vec: self.__model_black_vol(kappa_sigma_rho_vec[0:nbf],
@@ -606,9 +598,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param tenors: list of tenors for which the beta is calibrated ( normally in form: List[datetime.date])
         """
 
-        tenors_used = tenors if tenors else self.vol_curves[asset].tenors
+        tenors_used = tenors if tenors else self.vol_curves_names[asset].tenors
 
-        return self.vol_curves[asset].atmVol(tenors_used) / \
+        return self.vol_curves_names[asset].atmVol(tenors_used) / \
                np.array([ self.black_vol( asset
                                         , self._kappa_vec(asset)
                                         , self._sigma_vec(asset)
@@ -668,7 +660,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         corr = self._factor_corr_mat(asset_nb, asset_nb)  # correlation matrix
         kv = self._kappa_vec(asset_nb)
         sv = self._sigma_vec(asset_nb)
-        ft = self.fwd_curves[asset_nb].fwd_values  # forward vector TODO: CHECK IF THIS IS CORRECT
+        ft = self.fwd_curve_names[asset_nb].fwd_values  # forward vector
         nbf = self.nb_factors_for_asset(asset_nb)
 
         a = np.array([corr[ind_1, ind_2] * sv[factor_nb_1] * sv[factor_nb_2] *
@@ -694,10 +686,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :type emp_corr_matrix: 2-dim np.array
         """
 
-        return scipy.optimize.brute(np.sum(np.sum(([self.black_corr_within_curve(asset_nb, ind_1, ind_2)
-                                                     for ind_1 in range(self.forward_curve_len[asset_nb])
-                                                         for ind_2 in range(self.forward_curve_len[asset_nb])]
-                                                   - emp_corr_matrix)** 2))
+        return brute(np.sum(np.sum(([self.black_corr_within_curve(asset_nb, ind_1, ind_2)
+                                     for ind_1 in range(self.forward_curve_len[asset_nb])
+                                         for ind_2 in range(self.forward_curve_len[asset_nb])]
+                                             - emp_corr_matrix)** 2))
                                    , 1)
 
     def black_corr_intra_curves( self
@@ -770,7 +762,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                      , curve_1 : str
                                      , curve_2 : str
                                      , solver = 'scipy_cobyla'):
-        """ Calibrates the intra-curve correlations.
+        """ Calibrates the correlations between different curves.
 
         :param curve_1: curve 1 to for correlation calibration.
         :param curve_2: curve 2 for calibration.
@@ -789,24 +781,22 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             scipy.linalg.norm(black_corr_intra_curve_vector(model_corr_mtx, curve_1, curve_2, corr_len) -
                               self._market_corr[curve_1][curve_2])
 
-        # !!!!! CHECK CHECK CHECK 
-        # RELATIONSHIP BETWEEN size_1 and size_2 
         corr_len_real = len(self._market_corr[curve_1][curve_2])
-        # !!!! WRONG WRONG - 2,2 SHOULD BE REMOVED IN MULTIPLE PLACES BELOW <- THIS HAS BEEN CORRECTED, CHECK IF IT WORKS
-        curve_1_nb_fact = self.nb_factors_for_asset[curve_1]  # this used to be 2
-        curve_2_nb_fact = self.nb_factors_for_asset[curve_2]  # this used to be 2
+        curve_1_nb_fact = self.nb_factors_for_asset[curve_1]
+        curve_2_nb_fact = self.nb_factors_for_asset[curve_2]
         optim_pr = NSP(lambda corr_mtx_ravel: black_corr_intra_curve_vector_optim(corr_mtx_ravel.reshape ((curve_1_nb_fact,curve_2_nb_fact)),
                                                                                   curve_1, curve_2, corr_len_real),
                        self._factor_corr_mat(curve_1, curve_2).ravel(),
-                       lb = self.__factorCorrMatLB(curve_1, curve_2).ravel(),
-                       ub = self.__factorCorrMatUB(curve_1, curve_2).ravel())\
+                       lb = self._factor_corr_mat(curve_1, curve_2, lb_ub_ind='lb').ravel(),
+                       ub = self._factor_corr_mat(curve_1, curve_2, lb_ub_ind='ub').ravel())\
                       .solve(solver)
-        # TODO: HERE IMPROVE!!!
 
-        self.__factorCorrMatList[curve_1][curve_2] = self.__factorCorrMatList[curve_2][curve_1] = \
-            np.array(optim_res.xf).reshape((curve_1_nb_fact, curve_2_nb_fact))  # assigning the matrix
+        correlation_matrix = np.array(optim_pr.xf).reshape((curve_1_nb_fact, curve_2_nb_fact))
 
-        return np.array(optim_res.xf).reshape((2, 2))  # TODO: WHAT IS THIS 2 HERE??
+        self.__factorCorrMatList[curve_1][curve_2] = correlation_matrix
+        self.__factorCorrMatList[curve_2][curve_1] = correlation_matrix
+
+        return self.__factorCorrMatList[curve_1][curve_2]
 
     def __deltas_to_strikes(self
                             , asset : str
@@ -824,7 +814,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                          np.sqrt(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, tenorDate)))
 
         return np.exp((scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol ) * integrated_vol) * \
-               self._com_fwd_curves[asset].getFwdValue(tenorDate)
+               self.fwd_curves[asset].getFwdValue(tenorDate)
 
     @staticmethod
     def __integr_analy( real_roots_tsf
@@ -893,13 +883,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         """
 
+        from scipy.integrate import quad
+
         A0, A1, A2, A3, A4, V = ComSkew.__unpack_params(A_V, call_put_ind, strike)
 
-        return scipy.integrate.quad(lambda x: np.max([A0 + A1 * V * x + A2 * V**2 * x**2 +
-                                                      A3 * V**3 * x**3 + A4 * V**4 * x**4, 0.]) / \
-                                              np.sqrt(2. * np.pi) * np.exp(- x**2 / 2.)
-                                   , -np.inf
-                                   , np.inf)[0]
+        return quad(lambda x: np.max([A0 + A1 * V * x + A2 * V**2 * x**2 +
+                                      A3 * V**3 * x**3 + A4 * V**4 * x**4, 0.]) / \
+                                      np.sqrt(2. * np.pi) * np.exp(- x**2 / 2.)
+                   , -np.inf
+                   , np.inf)[0]
 
     @staticmethod
     def __unpack_params(A_V, call_put_ind, strike):
@@ -951,13 +943,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             if A4 == 0. and A3 == 0. and A2 == 0.:
                 poly_roots = [-A0 / A1]
             elif A4 == 0. and A3 == 0.:
-                poly_roots = np.sort(quartic_cy.QuadRoots(np.array([A2, A1, A0])))
+                poly_roots = np.sort(QuadRoots(np.array([A2, A1, A0])))
             elif A4 == 0.:
-                poly_roots = np.sort(quartic_cy.CubicRoots(np.array([A3, A2, A1, A0])))
+                poly_roots = np.sort(CubicRoots(np.array([A3, A2, A1, A0])))
             elif np.abs(A4) < 1e-6:
                 poly_roots = np.sort(np.poly1d([A4, A3, A2, A1, A0]).roots)
             else:
-                poly_roots = np.sort(quartic_cy.QuarticRoots(np.array([A4, A3, A2, A1, A0])))
+                poly_roots = np.sort(QuarticRoots(np.array([A4, A3, A2, A1, A0])))
 
         real_roots = poly_roots[poly_roots == poly_roots.real].real  # real roots only
         Asigma = np.array([A0, A1, A2, A3, A4]) * np.array([1., V, V**2, V**3, V**4])  # A multiplied by sigmas
@@ -987,7 +979,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         strikes = self.__deltas_to_strikes(asset, fwdDate)  # TODO: fix this part
         cp_ind = np.array([1 if (strike >= self._com_fwd_curves[asset].getFwdValue(fwdDate)) else -1 for strike in strikes])
 
-        return np.array([vols.vols.black_vol_inverse( self._com_fwd_curves[asset].getFwdValue(fwdDate)
+        return np.array([black_vol_inverse( self._com_fwd_curves[asset].getFwdValue(fwdDate)
                                                     , strike
                                                     , opt_price
                                                     , self.__option_tenor_for_fwd_tenor(asset, fwdDate)
@@ -1064,10 +1056,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # sets the large correlation building blocks
         for asset_1 in self.fwd_curves:
             for asset_2 in self.fwd_curves:
-                self.__complete_corr_mtx[self.__factor_positions(asset_1), self.__factor_positions(asset_2)] = self.__factor_corr_mtx(asset_1, asset_2)
+                self.__complete_corr_mtx[self.__factor_positions(asset_1), self.__factor_positions(asset_2)] = self._ # self.__factor_corr_mtx(asset_1, asset_2)
 
         # find the closest matrix that is positive semidefinite
-        self.__complete_corr_mtx = near_corr.near_corr_simple(self.__complete_corr_mtx, nb_steps)
+        self.__complete_corr_mtx = near_corr_simple(self.__complete_corr_mtx, nb_steps)
         while not (np.linalg.eig(self.__complete_corr_mtx)[0] > 0.).all():
             d1, v1 = np.linalg.eig(self.__complete_corr_mtx)
             d1p = np.diag(np.maximum(d1, 1.e-16))
@@ -1139,7 +1131,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         for com_curve in self.fwd_curves:
             sim_curves_shape = (len(simulation_times), len(tenor_list), nb_simulations)
             simulated_curves[com_curve] = np.empty(sim_curves_shape)  #  if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
-            fwd_c_col[com_curve] = self._com_fwd_curves[com_curve].getFwdValues(tenor_list)
+            fwd_c_col[com_curve] = self.fwd_curves[com_curve].fwd_value(tenor_list)
             simulated_curves[com_curve][0, :, :] = fwd_c_col
 
 
@@ -1193,14 +1185,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
                     # self.simulated_curves[asset][t_i, tenor_idx, :] = F_res
                     c1, c2, c3 =  self.__C_vec[asset][tenor_nb, :]
-                    opd_avx.skew_fom( self._com_fwd_curves[asset][tenor_nb]
-                                    , X[asset][tenor_idx, :]  # delta_X
-                                    , 0.5 * c1
-                                    , qv  # V_u, quadratic variation
-                                    , c2/6.
-                                    , c3/24.
-                                    , simulated_curves[asset][t_i, tenor_idx, :]
-                                    , nb_simulations )
+                    skew_fom( self._com_fwd_curves[asset][tenor_nb]
+                            , X[asset][tenor_idx, :]  # delta_X
+                            , 0.5 * c1
+                            , qv  # V_u, quadratic variation
+                            , c2/6.
+                            , c3/24.
+                            , simulated_curves[asset][t_i, tenor_idx, :]
+                            , nb_simulations )
 
         return simulated_curves
 
@@ -1253,7 +1245,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                             , nb_simulations : int
                             , sim_times      : List[datetime.date]
                             , tenors_list = None
-                            , seed = None ):
+                            , seed = None
+                            , model = 'skew'):
         """ Simulate first of month (fom) curves.
 
         generates a list of 2 dim arrays:
@@ -1264,20 +1257,17 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param nb_simulations: nb. of simulations
         :param sim_times: simulation times
         :param tenors_list: list of tenors to simulate TODO: LOTS TO DISCUSS HERE!!!
+        :param model: which model: 'ln' or 'skew', default 'skew'
         """
 
         np.random.seed(seed=seed)
-
-        fwd_c_len = len(tenors_list)
-        # sim_times = self.option_tenors_list[asset][tenors_list]
         sim_times = self.vol_curves[asset].vol_tenors if not tenors_list else self.vol_curves[asset].vol_tenors[tenors_list]
         complete_corr_mtx = self._complete_corr_mtx()
-
-        sim_fom = np.empty((fwd_c_len, nb_simulations))
 
         # looping over tenors
         #    t_i ... idx of sim_time (also tenor)
         #    fact_sum ... factors of the individual assets
+        sim_fom = np.empty((len(tenors_list), nb_simulations))  # nb_tenors x nb_simulations
         for tenor_idx, tenor_date in enumerate(tenors_list):
             tenor_nb = tenor_date
             t_curr = sim_times[tenor_idx]
@@ -1302,22 +1292,22 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                           for factor_1 in range(nb_factors_asset)]
                          for factor_2 in range(nb_factors_asset)])
 
-            if self.model_skew_ln_ind is 'ln_ln':
+            if model == 'ln':
                 sim_fom[tenor_idx, :] = F_curr * np.exp(delta_X - 0.5 * qv)
-            else:
+            else:  # skew model
                 c0, c1, c2 = self.__C_vec[asset][tenor_nb, :]
                 # sim_fom[t_i, :] = F_curr * \
                 #                    (1. + delta_X + 0.5 * c1 * (delta_X**2 - qv) +
                 #                    c2 * (delta_X**3 - 3. * delta_X * qv) / 6. +
                 #                    c3 * (delta_X**4 - 6. * qv * delta_X**2 + 3. * qv**2) / 24.)
-                opd_avx.skew_fom( F_curr
-                                , delta_X
-                                , 0.5 * c0
-                                , qv
-                                , c1/6.
-                                , c2/24.
-                                , sim_fom[tenor_idx, :]
-                                , nb_simulations )
+                skew_fom( F_curr
+                        , delta_X
+                        , 0.5 * c0
+                        , qv
+                        , c1/6.
+                        , c2/24.
+                        , sim_fom[tenor_idx, :]
+                        , nb_simulations )
 
         return sim_fom
 

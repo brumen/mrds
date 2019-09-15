@@ -642,5 +642,3 @@ for year in range(2015, 2027):  # appx 10 years
 
 # discount_curve_vals = [0.003] * 12 + [0.01] * 13
 discount_curve_vals = [0.003] * len(discount_curve_dates)
-
-
