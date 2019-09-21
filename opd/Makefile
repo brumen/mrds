@@ -44,6 +44,12 @@ opd_avx: opd_avx.i opd_avx.c
 	$(CPP) -shared  cxx/opd_avx.o cxx/opd_avx_wrap.o -o _opd_avx.so
 
 opd_avx_test:
+	$(SWIG) -python -o cxx/opd_avx_wrap.c -I. -Wall opd_avx.i
+	$(CPP) $(AVX2) $(PYTHON_INCLUDE) -fPIC -c opd_avx_test.c -o cxx/opd_avx_test.o
+	$(CPP) $(AVX2) $(PYTHON_INCLUDE) -fPIC -S opd_avx.c -o cxx/opd_avx.s
+	$(CPP) $(AVX2) $(PYTHON_INCLUDE) -fPIC -E opd_avx.c -o cxx/opd_avx.pre
+	$(CPP) $(AVX2) $(PYTHON_INCLUDE) -I. -fPIC -c cxx/opd_avx_wrap.c -o cxx/opd_avx_wrap.o
+	$(CPP) -shared  cxx/opd_avx.o cxx/opd_avx_wrap.o -o _opd_avx.so
 
 
 # debugging version of the above
