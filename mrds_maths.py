@@ -16,6 +16,10 @@ class ComMathsMixin:
     """ Mathematical functions of the Commodity skew.
     """
 
+    # where to cut off the distribution function.
+    _SMALL_CUTOFF = -1e10
+    _LARGE_CUTOFF = 1e10
+
     @staticmethod
     def _oneZeroZeroMatrix(n :int, k :int) -> np.array:
         """
@@ -33,17 +37,16 @@ class ComMathsMixin:
 
     @staticmethod
     def _trunc_normal_above(a: float) -> np.array:
-        """
-        Computes the truncated E[ N^{0,1,2,3,4} * 1(N <a) ] where N std. normal in succession.
+        """ Computes the truncated E[ N^{0,1,2,3,4} * 1(N <a) ] where N std. normal in succession.
 
         :param a: parameter for the truncation.
-        :returns: truncated std. normal variable.
+        :returns: distribution of the truncated std. normal evaluated at a.
         """
 
-        if a < -1e10:
+        if a < ComMathsMixin._SMALL_CUTOFF:
             return np.array([0., 0., 0., 0., 0.])
 
-        if a > 1e10:
+        if a > ComMathsMixin._LARGE_CUTOFF:
             return np.array([1., 0., 1., 0., 3.])
 
         # TODO: THESE TWO LINES CAN BE MADE BETTER.
@@ -52,7 +55,7 @@ class ComMathsMixin:
         sqrt_2pi = np.sqrt(2. * np.pi)
 
         return np.array([scipy.stats.norm.cdf(a)
-                            , - np.exp(- a ** 2 / 2.0) / sqrt_2pi
+                            , - np.exp(- a ** 2 / 2.) / sqrt_2pi
                             , 0.5 + 0.5 * scipy.special.erf(a / sqrt_2) - np.exp(-a ** 2 / 2.) * a / sqrt_2pi
                             , - (a ** 2 + 2.) * np.exp(- a ** 2 / 2.) / sqrt_2pi
                             , - a * (a ** 2 + 3.) * np.exp(- a ** 2 / 2.) / sqrt_2pi + 1.5 * (
@@ -67,7 +70,7 @@ class ComMathsMixin:
         :returns truncated std. normal.
         """
 
-        return - ComMathsMixin._trunc_normal_above(a) + np.array([1.0, 0.0, 1.0, 0.0, 3.0])
+        return - ComMathsMixin._trunc_normal_above(a) + np.array([1., 0., 1., 0., 3.])
 
     @staticmethod
     def _trunc_normal_interval(a: float, b: float) -> np.array:
