@@ -31,11 +31,11 @@ class mrds_tests(unittest.TestCase):
         self.assertTrue(True)
         
     def test_trunc_normal_above(self):
-        print "Testing the __trunc_normal_above__"
+        print "Testing the _trunc_normal_above"
         a = arange (-3, 3, 0.1)
         assertion = True
         for a in arange (-3,3,0.1):
-            mo_res = self.mo.__trunc_normal_above__(a)
+            mo_res = self.mo._trunc_normal_above(a)
             num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0], \
                               scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0], \
                               scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0], \
@@ -47,11 +47,11 @@ class mrds_tests(unittest.TestCase):
 
 
     def test_trunc_normal_below(self):
-        print "Testing the __trunc_normal_below__"
+        print "Testing the _trunc_normal_below"
         a = arange (-3, 3, 0.1)
         assertion = True
         for a in arange (-3,3,0.1):
-            mo_res = self.mo.__trunc_normal_below__(a)
+            mo_res = self.mo._trunc_normal_below(a)
             num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0], \
                               scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0], \
                               scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0], \
@@ -63,11 +63,11 @@ class mrds_tests(unittest.TestCase):
 
 
     def test_trunc_normal_interval(self):
-        print "Testing the __trunc_normal_interval__"
+        print "Testing the _trunc_normal_interval"
         a = arange (-3, 3, 0.1)
         assertion = True
         for a in arange (-3,3,0.1):
-            mo_res = self.mo.__trunc_normal_interval__(a, a+1.)
+            mo_res = self.mo._trunc_normal_interval(a, a + 1.)
             num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0], \
                               scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0], \
                               scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0], \

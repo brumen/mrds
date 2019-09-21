@@ -1,7 +1,9 @@
 # test cases for the base mrds module.
 
+import datetime
 import numpy as np
 
+from mrds import ComSkew
 from mrds_utils import mrds_calib, mrds_calib_multiple
 from unittest   import TestCase
 
@@ -9,6 +11,11 @@ from unittest   import TestCase
 
 
 class TestMrds(TestCase):
+
+    def test_from_db(self):
+        m1 = ComSkew.from_db(datetime.date(2015, 4, 1), ['WTI'])
+
+        self.assertTrue(True)
 
     def test_simulate_curves_cpu(self):
         """
