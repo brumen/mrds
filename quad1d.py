@@ -1,71 +1,58 @@
 import config 
 import numpy as np
 from numpy import sqrt, arange, diag, prod, pi, array, maximum, kron
-import scipy.linalg # for extracting linear algebra
+from scipy.linalg import eig
 import math
 if config.CUDA_PRESENT:
     from pycuda import gpuarray as gpa
-# import cublas
+
+from functools import lru_cache
 
 
-# abbreviation:
-#   gh ... Gauss-Hermite
-#   p ... points (abscissas)
-#   w ... weights
-def gh_pw (n):
+@lru_cache(maxsize=100)
+def gh_pw(n : int):
+    """ Pre-computes the Gauss-Hermite quadrature
+
+    abbreviation:
+       gh ... Gauss-Hermite
+       p ... points (abscissas)
+       w ... weights
+
+    :param n: level of gauss-hermite integration
+    :returns:   # abscissas, weights
     """
-    pre-computes the Gauss-Hermite quadrature
-    """
+
+    if n == 0:
+        return [array([0]), array([0])]
+
+    if n == 1:
+        return [array([0]), array([1.77245385])]
+
     # eigenvalues of A_n
-    def gh_matrix (n): 
-        vec_gh = sqrt(arange(1, n)/2.0)
-        mat_gh = diag(vec_gh, 1) + diag(vec_gh, -1)
-        eigenvals = scipy.linalg.eig(mat_gh)[0].real  # eigenvalues (real) <- abscissas of GH
-        return eigenvals
-    
-    char_poly = lambda x, n: prod(gh_matrix(n) - x) * (-2.0)**n  # characteristic polynomial
-    p = gh_matrix(n)  # points
-    w = (2.0**(n+1) * math.factorial(n) * sqrt(pi)) / \
-        (array(map(lambda x: char_poly(x, n+1), p)))**2
+    vec_gh = sqrt(arange(1, n)/2.)
+    mat_gh = diag(vec_gh, 1) + diag(vec_gh, -1)
+    gh_matrix_n = eig(mat_gh)[0].real  # eigenvalues (real) <- abscissas of GH
 
-    return [p, w]  # abscissas, weights
+    char_poly = lambda x, n: prod(gh_matrix_n - x) * (-2.0)**n  # characteristic polynomial
+    weights = (2.0**(n+1) * math.factorial(n) * sqrt(pi)) / \
+        (array(map(lambda x: char_poly(x, n+1), gh_matrix_n)))**2
 
-# improved version from before, remembers the precomputed grids
-gh_hints = {0: [array([0]), array([0])],
-            1: [array([0]), array([1.77245385])]}
-
-
-def gh_pw_hints(n):
-
-    if gh_hints.has_key(n):
-        return gh_hints[n]
-    else:  # compute the grid
-        # eigenvalues of A_n
-        def gh_matrix(n):
-            vec_gh = sqrt(arange(1, n)/2.0)
-            mat_gh = diag(vec_gh, 1) + diag(vec_gh, -1)
-            eigenvals = scipy.linalg.eig(mat_gh)[0].real  # eigenvalues (real) <- abscissas of GH
-            return eigenvals
-        
-        char_poly = lambda x, n: prod(gh_matrix(n) - x) * (-2.0)**n  # characteristic polynomial
-        p = gh_matrix(n)
-        w = (2.0**(n+1) * math.factorial(n) * sqrt(pi)) / \
-                  (array(map(lambda x: char_poly(x, n+1), p)))**2
-        gh_hints[n] = [p, w]  # adding the value
-        return [p, w]  # abscissas, weights
+    return (gh_matrix_n, weights)
 
 
 def gh_quad(f, n):
     """
     1 dimensional hermite quadrature 1/sqrt(2pi) * int_R e^{-x^2/2} f(x) dx
     inputs:
-      n ... order of integration
-      f ... function to integrate
+
+    :param n: order of integration
+    :param f: function to integrate
     """
+
     sqrt2 = sqrt(2.)
-    g = lambda x: f(x * sqrt2)
-    pw = gh_pw_hints(n)  # points and weights
-    return np.sum(pw[1] * map(g, pw[0])) / sqrt(pi)
+    points, weights = gh_pw(n)  # points and weights
+
+    return np.sum(weights * map(lambda x: f(x * sqrt2), points)) / sqrt(pi)
 
 
 def gh_quad_2d(f, n12):
