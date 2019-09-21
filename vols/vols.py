@@ -8,6 +8,9 @@ import datetime
 import numpy as np
 from numpy import double, log, exp, sqrt
 
+from functools import lru_cache
+from typing import List
+
 import scipy
 import scipy.stats
 from scipy.stats import norm
@@ -79,13 +82,12 @@ class Volatility(object):
         self._fwdParams = fwdParams
         self._volParams = volParams
 
-    def _volDatesColumn(self):
-        """
-        Column where volatility dates are implemented.
+    def _vol_dates(self) -> List[datetime.date]:
+        """ Volatility dates.
 
         """
 
-        raise NotImplementedError('_volDatesColumn is not implemented.')
+        raise NotImplementedError('_vol_dates is not implemented.')
 
     def _getVolForDate(self, date_ : datetime.date ):
         """
@@ -95,10 +97,10 @@ class Volatility(object):
         """
 
         return sum([fwdDateInCurve < date_
-                    for fwdDateInCurve in self._volParams[self._volDatesColumn]])
+                    for fwdDateInCurve in self._volParams[self._vol_dates]])
 
     @classmethod
-    def fromDb(cls, comName : str, mktDate : datetime.date ):
+    def from_db(cls, comName : str, mktDate : datetime.date):
         """
         Reads the forward and vol curve from external source.
 
@@ -107,7 +109,7 @@ class Volatility(object):
 
         """
 
-        volParams = ds.getVolCurve(comName, mktDate)
+        volParams = ds.get_vol_curve(comName, mktDate)
 
         return cls( comName
                   , mktDate
@@ -133,11 +135,10 @@ class Volatility(object):
         return log(K_v.reshape(1, len(K_v)) / S0) / (sigma * sqrt(ttm_v))
 
     @staticmethod
-    def normalizedStrikeInv( delta_v: np.array
-                           , sigma: np.double
-                           , ttm: np.double) -> np.array:
-        """
-        Inverse of the normalized strike.
+    def normalized_strike_inv(delta_v: np.array
+                              , sigma: np.double
+                              , ttm: np.double) -> np.array:
+        """ Inverse of the normalized strike.
 
         :param delta_v: vector of delta
         :param sigma: volatility of stock/forward
@@ -146,7 +147,7 @@ class Volatility(object):
 
         return exp(scipy.stats.norm.ppf(delta_v) * sigma * sqrt(double(ttm)) - 0.5 * sigma ** 2 * ttm)
 
-    def impliedVol(self, S0, K, ttm):
+    def implied_vol(self, S0, K, ttm):
         """
         Implied vol needs to be implemented in the subclass.
         Implied volatility for S0, K, ttm.
@@ -155,14 +156,13 @@ class Volatility(object):
         :type ttm: double
         """
 
-        raise VolatilityException('Method impliedVol not implemented in Volatility class.')
+        raise VolatilityException('Method implied_vol not implemented in Volatility class.')
 
-    def delta( self
-             , K : np.double
-             , ttm : np.double ):
-        """
-        Computes the delta of the volatility.
+    def delta(self, K : float, ttm : float) -> float:
+        """  Computes the delta of the volatility.
 
+        :param K: strike at which the delta is requested.
+        :param ttm: time to maturity.
         """
 
         raise VolatilityException('Method delta not implemented in Volatility class.')
@@ -182,7 +182,7 @@ class Volatility(object):
         return black_greeks( S0
                            , strike
                            , -np.log(ds.DF(self.mktDate, expiry)) / ttm
-                           , self.impliedVol(S0, strike, ttm )
+                           , self.implied_vol(S0, strike, ttm)
                            , ttm)
 
     def callFutureK( self
@@ -199,14 +199,14 @@ class Volatility(object):
         pr_0 = black_greeks( S0
                            , K
                            , -log(disc_fact) / double(T)
-                           , self.impliedVol(S0, K, ttm)
+                           , self.implied_vol(S0, K, ttm)
                            , T
                            , 0)
 
         pr_delta = black_greeks( S0
                                , K + delta_K
                                , -log(disc_fact) / double(T)
-                               , self.impliedVol(S0, K + delta_K, ttm)
+                               , self.implied_vol(S0, K + delta_K, ttm)
                                , T
                                , 0 )
         return (pr_delta - pr_0) / delta_K
@@ -221,13 +221,24 @@ class Volatility(object):
     def skewed_cdf_analy(self, K, quantile):
         return (self.skewed_distribution(K, ttm) - quantile)**2
 
-    def inversion_skewed_cdf(self, quantile, ttm):
+    def inversion_skewed_cdf( self
+                            , quantile
+                            , ttm
+                            , lb      = 0.01
+                            , ub      = np.inf
+                            , maxIter = 150
+                            , iprint  = -9 ):
         """
-        find K : skewed_cdf_analy(K, quantile) = 0
+        Finds K such that: skewed_cdf_analy(K, quantile) = 0
+
         """
-        optim_pr = NLP(lambda K: self.skewed_cdf_analy(K, quantile), S0, lb=0.01, ub=inf,
-                       maxIter=self.max_iter, iprint=self.iprint)
-        return optim_pr.solve(self.solver).xf[0]
+
+        return NLP( lambda K: self.skewed_cdf_analy(K, quantile)
+                  , S0
+                  , lb      = lb
+                  , ub      = ub
+                  , maxIter = maxIter
+                  , iprint  = iprint ).solve(self.solver).xf[0]
 
     def local_vol_generic(self, K, T, dT, dK):
         """
@@ -258,7 +269,7 @@ class Volatility(object):
 
         for ttm_ind, ttm in enumerate(ttm_grid):
             for K_ind, K in enumerate(K_grid):
-                self.impl_surf[ttm_ind, K_ind] = self.impliedVol(fwd, K, ttm)
+                self.impl_surf[ttm_ind, K_ind] = self.implied_vol(fwd, K, ttm)
 
         return self.impl_surf
 
@@ -271,6 +282,9 @@ class Volatility(object):
         for ttm_ind, ttm in enumerate(ttm_grid):
             for K_ind, K in enumerate(K_grid):
                 self.lv_surf[ttm_ind, K_ind] = self.local_vol(K, ttm, dT, dK)
+
+
+class VolatilityDrawMixin:
 
     def draw_surface( self
                     , model
@@ -399,16 +413,16 @@ class ATMFVolatility(Volatility):
         return 'ATMF'
 
     @property
-    def _volDatesColumn(self):
+    def _vol_dates(self):
         return 'volDates'
 
     def atmVol( self, fwdDate_ : datetime.date):
         """
-        Returns the ATM volatility for the forward date fwdDate
+        Returns the ATM volatility for the forward date fwd_date
 
         """
 
-        return self._volParams[self._volDatesColumn][self._getVolForDate(fwdDate_)]
+        return self._volParams[self._vol_dates][self._getVolForDate(fwdDate_)]
 
 
 class JWSS7Volatility(Volatility):
@@ -422,19 +436,20 @@ class JWSS7Volatility(Volatility):
         return 'JWSS7'
 
     @property
-    def _volDatesColumn(self):
+    def _vol_dates(self):
         return 'vol_dates'
 
     def atmVol( self
               , fwdDate : datetime.date ) -> np.double :
         """
-        Returns the atm forward for the fwd date fwdDate.
+        Returns the atm forward for the fwd date fwd_date.
 
         :param fwdDate: forward date for which the ATM is constructed
         """
 
         return self._volParams['vol_curve'][self._getVolForDate(fwdDate)][0]  # first elt is atm vol.
 
+    @lru_cache(maxsize=None)
     def _transform_from_jwss7(self, fwdDate : datetime.date ):
         """
         Returns jw7 parametrization from jwss7 for particular fwd date.
@@ -452,8 +467,8 @@ class JWSS7Volatility(Volatility):
         A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
 
         return {'sigma_0': sigma_0,
-                'B'      : B,
                 'A'      : A,
+                'B'      : B,
                 'C'      : call_slope / A,
                 'P'      : put_slope / A,
                 'alphaC' : call_bend,
@@ -495,50 +510,15 @@ class JWSS7Volatility(Volatility):
                                                                   , volParams['sigma_0']
                                                                   , ttm ) )
 
-    def _normStrikeInverse(self, fwd, delta_val):
-        """
-        solution to N(d1) = delta_val, where d1(vol)
-
-        """
-
-        # vols_fast.
-
-        return NLP(lambda K: vols_fast.invert_delta( K
-                                                       , delta_val
-                                                       , self.ttm_opt[fwd],
-                                                         self.fwd_curve[fwd],
-                                                         self.alphaC[fwd],
-                                                         self.alphaP[fwd],
-                                                         self.sigma_0[fwd],
-                                                         self.A[fwd]
-                                                       , self.B[fwd]
-                                                       , self.C[fwd]
-                                                       , self.P[fwd] )
-                              , self.fwd_curve[fwd]
-                              , lb      = 0.001
-                              , ub      = np.inf
-                              , maxIter = 150
-                              , iprint  = -9 )\
-                  .solve('scipy_cobyla').xf[0]
-
-    def local_vol(self, fwd, S, T, ttm):
+    def localVol(self, fwdDate : datetime.date, S, T, ttm):
         """
         Local volatility of the JWSS7 parametrization.
 
-        :param fwd: forward index that we are computing the local vol of
+        :param fwdDate: forward index that we are computing the local vol of
         :param ttm: option time to maturity
         """
 
-        jw7Params = self._transform_from_jwss7(fwdDate, )
-
-        return {'sigma_0'  : sigma_0,
-                'B': B,
-                'A': A,
-                'C': call_slope / A,
-                'P': put_slope / A,
-                'alphaC': call_bend,
-                'alphaP': put_bend }
-
+        jw7Params = self._transform_from_jwss7(fwdDate)
         sigma_0 = jw7Params['sigma_0']
         A       = jw7Params['A']
         B       = jw7Params['B']
@@ -565,20 +545,20 @@ class JWSS7Volatility(Volatility):
                ( log ( S / K ) - sigma * sigma * ttm / 2.0 ) * sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        denomin = (self.sigma_0 * sqrt(ttm) * K * Xz * sqrt(1.0 + A * log(Xz)))
+        denomin = (sigma_0 * sqrt(ttm) * K * Xz * sqrt(1.0 + A * log(Xz)))
         BCexpr = (B * C * exp(C * z) - P * (1.0 - B) * exp(- P * z))
 
         sigmaKK = A / (2.0 * sqrt(ttm)) * (- A / (2.0 * denomin * K * Xz * (1.0 + A * log(Xz))) *
                                            BCexpr * BCexpr - BCexpr * BCexpr / (denomin * K * Xz) +
                                            (B * C ** 2 * exp(C * z) + P ** 2 * (1.0 - B) * exp(- P * z)) /
                                            (denomin * K) - BCexpr *
-                                           self.sigma_0 *
+                                           sigma_0 *
                                            sqrt(ttm) / (denomin * K)
                                            )
 
         # derivative of z wrt t
-        zt = log(K / S) / self.sigma_0 * (-0.5 * ttm**(- 1.5))
-        sigmat = self.sigma_0 ** 2 / (2.0 * sigma) * A / Xz  * \
+        zt = log(K / S) / sigma_0 * (-0.5 * ttm**(- 1.5))
+        sigmat = sigma_0 ** 2 / (2.0 * sigma) * A / Xz  * \
             ( B * C * exp ( C * z) - P * (1 - B) * exp ( - P * z ) ) * \
             zt  # derivative of sigma wrt t
 
@@ -591,33 +571,32 @@ class JWSS7Volatility(Volatility):
         if (up_part / down_part < 0.0):
             logger.info("Caution: Imaginary local vol., using ATM vol.")
             return sigma_0
-        else:
-            return sqrt(up_part / down_part)
 
-        # return (up_part / down_part < 0.0) * self.sigma_0 + (up_part /
-        # down_part >= 0.0) * sqrt (up_part/down_part)
+        return sqrt(up_part / down_part)
 
-    def callFutureT(self, fwd, S0, K, ttm):
+    def callFutureT(self, fwdDate, S0, K, ttm):
         """
         Derivative of Black's call (with expirty time  T) on a futures contract 
            with maturity ttm (cond: T < ttm)
 
-        :param fwd: forward index that we are drawing the vol of
+        :param fwdDate: forward index that we are drawing the vol of
         :param S0:
         :param K: strike value
         :param ttm: time to maturity
         """
 
-        S0      = self.S0[fwd]
-        sigma_0 = self.sigma_0[fwd]
-        A       = self.A[fwd]
-        B       = self.B[fwd]
-        C       = self.C[fwd]
-        P       = self.P[fwd]
+        jw7Params = self._transform_from_jwss7(fwdDate)
+        sigma_0 = jw7Params['sigma_0']
+        A       = jw7Params['A']
+        B       = jw7Params['B']
+        C       = jw7Params['C']
+        P       = jw7Params['P']
+        alphaC  = jw7Params['alphaC']
+        alphaP  = jw7Params['alphaP']
 
-        z = norm_strike(S0, K, sigma_0, ttm)
-        sigma = self.implied_vol(fwd, K, ttm)
-        S0_local = S0  # CHECK IF THIS IS REALLY NECESSARY
+        z = JWSS7Volatility.normalizedStrike(S0, K, sigma_0, ttm)
+        sigma = self.implied_vol(S0, K, ttm)
+        S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
 
         Xz = B * exp(C * z) + (1.0 - B) * exp(- P * z)
 
@@ -648,16 +627,25 @@ class JWSS7Volatility(Volatility):
 
         """
 
-        z = norm_strike(S0, K, sigma_0, maturity)
-        sigma = self.implied_vol(fwd, K, ttm)  # CHECK IF THIS IS RIGHT
+        jw7Params = self._transform_from_jwss7(fwdDate)
+        sigma_0 = jw7Params['sigma_0']
+        A       = jw7Params['A']
+        B       = jw7Params['B']
+        C       = jw7Params['C']
+        P       = jw7Params['P']
+        alphaC  = jw7Params['alphaC']
+        alphaP  = jw7Params['alphaP']
 
+        z = JWSS7Volatility.normalizedStrike(S0, K, sigma_0, ttm)
+        sigma = self.implied_vol(S0, K, ttm)
+        S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
         d1 = (log(S0_local / K) + sigma * sigma * ttm / 2.0) / \
             (sigma * sqrt(ttm))
         d2 = d1 - sigma * sqrt(ttm)
 
         Xz = B * exp(C * z) + (1.0 - B) * exp(- P * z)
 
-        sigmaK = A / (2.0 * Xz * K * sqrt (maturity) ) / sqrt ( 1.0 + A * log (Xz) ) * \
+        sigmaK = A / (2.0 * Xz * K * sqrt (ttm) ) / sqrt ( 1.0 + A * log (Xz) ) * \
             (B * C * exp(C * z) - P * (1.0 - B) * exp(- P * z))
 
         d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
@@ -672,17 +660,22 @@ class JWSS7Volatility(Volatility):
                 scipy.stats.norm.cdf(d2) - K * scipy.stats.norm.pdf(d2) * d2K)
 
     # second derivative wrt K of the undiscounted call
-    def call_future_KK(self, fwd, S0, K, ttm):
+    def call_future_KK(self, fwdDate, S0, K, ttm):
 
-        # derivative of the pdf of standard normal
-        def normpdfD(x):
-            return scipy.stats.norm.pdf(x) * (-x)
 
-        S00_local, sigma_0, A, B, C, P, alphaC, alphaP = self.get_params(fwd).transpose()
+        jw7Params = self._transform_from_jwss7(fwdDate)
+        sigma_0 = jw7Params['sigma_0']
+        A       = jw7Params['A']
+        B       = jw7Params['B']
+        C       = jw7Params['C']
+        P       = jw7Params['P']
+        alphaC  = jw7Params['alphaC']
+        alphaP  = jw7Params['alphaP']
         S0_local = S0
 
-        z = norm_strike(S0, K, sigma_0, ttm)
-        sigma = self.implied_vol(fwd, K, ttm)  # implied_vol (S0, K, ttm)
+        z = JWSS7Volatility.normalizedStrike(S0, K, sigma_0, ttm)
+        sigma = self.implied_vol(S0, K, ttm)
+        S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
 
         d1 = (log(S0 / K) + sigma * sigma * ttm / 2.0) / (sigma * sqrt(ttm))
         d2 = d1 - sigma * sqrt(ttm)
@@ -723,27 +716,32 @@ class JWSS7Volatility(Volatility):
             / (sigma * sigma * sigma * sigma * ttm * ttm)
 
         return (S0 * normpdfD(d1) * d1K * d1K + S0_local * scipy.stats.norm.pdf(d1) * d1KK -
-                2.0 * scipy.stats.norm.pdf(d2) * d2K - K * normpdfD(d2) * d2K * d2K - K * scipy.stats.norm.pdf(d2) * d2KK)
+                2.0 * scipy.stats.norm.pdf(d2) * d2K - K * scipy.stats.norm.pdf(d2) * (-d2) * d2K * d2K - K * scipy.stats.norm.pdf(d2) * d2KK)
 
-    def skewed_distribution(self, fwd, S0, K, ttm):
-        return 1. + self.call_future_K(fwd, S0, K, ttm)
+    def skewed_distribution(self, fwdDate, S0, K, ttm):
+        return 1. + self.call_future_K(fwdDate, S0, K, ttm)
 
-    def skewed_cdf(self, fwd, S0, K, ttm, quantile):
+    def inversion_skewed_cdf( self
+                            , fwdDate
+                            , S0
+                            , ttm
+                            , quantile
+                            , lb = 0.01
+                            , ub = np.inf
+                            , maxIter = 150
+                            , iprint  = -9 ):
+        """ Function finds K such that: skewed_cdf_analy(K, quantile) = 0
         """
-        Computes the CDF of the stock price distribution.
 
-        """
-
-        return (self.skewed_distribution(fwd, S0, K, ttm) - quantile)**2
-
-    # find K : skewed_cdf_analy(K, quantile) = 0
-    def inversion_skewed_cdf(self, fwd, S0, ttm, quantile):
-        return NLP( lambda K: self.skewed_cdf(fwd, S0, K, ttm, quantile)
+        return NLP( lambda K: (self.skewed_distribution(fwdDate, S0, K, ttm) - quantile)**2
                       , S0
-                      , lb      = 0.01
-                      , ub      = np.inf
-                      , maxIter = 150
-                      , iprint  = -9 ).solve('scipy_cobyla').xf[0]
+                      , lb      = lb
+                      , ub      = ub
+                      , maxIter = maxIter
+                      , iprint  = iprint ).solve('scipy_cobyla').xf[0]
+
+
+class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
 
     def jw7_buttons(self, fwd, root, ax, dataPlot_canvas):
         fct_update = lambda cc: self.update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
@@ -788,10 +786,9 @@ class JWSS7Volatility(Volatility):
 
 
 class c0c1c2Volatility(Volatility):
-    """
-    c0-c1-c2 volatility parametrization
-    smooth_ind is the smoothness indicator
-    alpha is the smoothness factor
+    """ c0-c1-c2 volatility parametrization
+        smooth_ind is the smoothness indicator
+        alpha is the smoothness factor
 
     """
 
@@ -809,6 +806,11 @@ class c0c1c2Volatility(Volatility):
         self.alpha      = self._volParams[:, 5]
 
     def implied_vol(self, F, t):
+        """
+        Computes the implied volatility of quadratic volatility surface.
+
+        """
+
         K = 100.  # WRONG WRONG WRONG ...
         z = log(F / K)  # WRONG WRONG CHECK IF THIS IS CORRECT
         v = self.c0 + self.c1 * z + self.c2**2 * z**2
@@ -818,6 +820,7 @@ class c0c1c2Volatility(Volatility):
         # CHECK IF BELOW IS arctan or arctan2
         g = lambda sigma: 2 * a / pi * arctan ( pi / (2 * a) * (sigma - sigma_star) ) + \
             sigma_star
+
         return  ( v * ( v < self.c0 * self.theta) + self.c0 * self.theta * (v >= self.c0 * self.theta) ) * ( self.smooth_ind == False ) + \
             (v * (v < sigma_star) + g(v) * (v >= sigma_star)) * \
             (self.smooth_ind == True)
@@ -927,13 +930,16 @@ class CIVolatility(Volatility):
         self.wg_25 = double(p_mat[:, 2])  # vector of wg
 
 
-def getVolObject(comName : str, mktDate : datetime.date ):
-    """
-    Gets the vol object for the commodity in question.
+def getVolObject(comName : str, mkt_date : datetime.date) -> Volatility:
+    """ Gets the vol object for the commodity in question for the market date mkt_date
+
+    :param mkt_date: market date
+    :param
 
     """
 
-    volType, _, _ = ds.vol_hash[comName]
+    print('comname', comName)
+    volType, _, _, _ = ds.vol_hash[comName]
 
     return {'JWSS7': JWSS7Volatility
-           , 'ATM' : ATMFVolatility }[volType](mktDate, comName)
+           , 'ATM' : ATMFVolatility }[volType](mkt_date, comName, comName)

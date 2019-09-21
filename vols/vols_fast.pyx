@@ -37,8 +37,8 @@ cdef double rational_approximation (double t):
 cdef double normal_ppf(double p):
     if p < 0.5:
         return - rational_approximation(sqrt(-2.*log(p)))
-    else:
-        return rational_approximation(sqrt(-2.*log(1.-p)))
+
+    return rational_approximation(sqrt(-2.*log(1.-p)))
 
 
 cdef double b(double x, double sigma, double theta):
@@ -49,10 +49,10 @@ cdef double b(double x, double sigma, double theta):
         d1 = x/sigma + sigma /2.
         return theta * e1 * pricers.pricers_fast.cdf(theta * d1) - theta/e1 * pricers.pricers_fast.cdf(theta*(d1 - sigma))
     else:
-        if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0): #d1 = +infty or d1 = -infty 
+        if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0): # d1 = +infty or d1 = -infty
             return theta * e1 - theta / e1
-        else:
-            return 0.
+
+        return 0.
 
 
 cdef double sigma_c(double x):
@@ -73,8 +73,8 @@ cdef double one_step(x, sigma, theta, beta):
     if (beta < b_c(x, theta) ):
         return log((beta - iota(x, theta)) / (b(x, sigma, theta) - iota(x, theta))) * \
             (b(x, sigma, theta) - iota(x, theta)) / b_der
-    else:
-        return (beta - b(x,sigma, theta)) / b_der
+
+    return (beta - b(x,sigma, theta)) / b_der
 
 
 def black_vol_inverse_normalized(double beta, double x, double theta, double tol):
