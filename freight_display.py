@@ -3,16 +3,15 @@
 # see test_freight.py
 #
 
-import networkx as nx, matplotlib.pyplot as plt
+import networkx as nx
+import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 from freight import Freight
 
 
 class FreightDisplay(Freight):
-    """
-    Display class of the freight model.
-
+    """ Display class of the freight model.
     """
 
     def __updateDisplayMovement(self, timeStep : int):
@@ -26,11 +25,11 @@ class FreightDisplay(Freight):
         fg, pos = self.__freightGraph, self.__freightGraphLayout  # abbreviations
 
 
-        condMovesActive = [ (self._nbsToLocations[i], self._nbsToLocations[j])
-                            for i in range(self._nbLocations)
-                            for j in range(self._nbLocations)
-                            for u in range(timeStep+1, self._nbTimePeriods)
-                                if self.freightHedgeX(i, j, timeStep, u) != 0. ]
+        condMovesActive = [(self._nbsToLocations[i], self._nbsToLocations[j])
+                           for i in range(self._nbLocations)
+                           for j in range(self._nbLocations)
+                           for u in range(timeStep+1, self._nbTimePeriods)
+                           if self.freight_hedge_x(i, j, timeStep, u) != 0.]
         uncondMovesActive = [ (self._nbsToLocations[i], self._nbsToLocations[j])
                               for i in range(self._nbLocations)
                               for j in range(self._nbLocations)
@@ -47,10 +46,8 @@ class FreightDisplay(Freight):
         self.__ax.set_xticks([])
         self.__ax.set_yticks([])
 
-    def displayMovement(self):
-        """
-        Displays the movement of tankers.
-
+    def display_movement(self):
+        """ Displays the movement of tankers.
         """
 
         self.__fig, self.__ax  = plt.subplots(figsize=(6, 4))

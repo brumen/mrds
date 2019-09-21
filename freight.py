@@ -1,10 +1,12 @@
 # Freight model implementation
 #
 
-import datetime, numpy as np, logging
+import datetime
+import numpy as np
+import logging
 from scipy.optimize import linprog
 
-from ds import DF
+from discount import DF
 from pricers.pricers import spread_option_kirk
 
 
@@ -21,9 +23,9 @@ class Freight:
     """
 
     def __init__(self
-                 , mkt_date          : datetime.date
-                 , fwdCurveFct  # function
-                 , volCurveFct  # function
+                 , mkt_date         : datetime.date
+                 , fwd_curve_fct    # function
+                 , vol_curve_fct    # function
                  , corrMatrix       : dict
                  , travelMatrix     : dict
                  , costMatrix       : dict
@@ -33,7 +35,7 @@ class Freight:
         """
         :param mkt_date: market date
         :param locations: locations between which freight can be transported, list[str]
-        :param fwdCurveFct: fucntion of (location, mkt_date, future date), returns forward rate for that point.
+        :param fwd_curve_fct: fucntion of (location, mkt_date, future date), returns forward rate for that point.
         :param initialLocations: dictionary of how many ships are in a particular location.
                                  {location: nb_ships }
         :param corrMatrix: correlation between individual locations, dictionary where keys are
@@ -47,8 +49,8 @@ class Freight:
         """
 
         self.mkt_date     = mkt_date
-        self.fwdCurveFct  = fwdCurveFct
-        self.volCurveFct  = volCurveFct
+        self.fwdCurveFct  = fwd_curve_fct
+        self.volCurveFct  = vol_curve_fct
         self._corrMatrix  = corrMatrix
         self._travelMatrix = travelMatrix  # number of periods between different locations
         self._costMatrix   = costMatrix    # same as travel matrix, costs between locations
@@ -69,12 +71,12 @@ class Freight:
         self.__EM         = None
         self.__EV         = None
         self.__lowerBound = None
-        self.__freightHedgeResult = None
+        self.__freight_hedge_result = None
 
-    def fwdVolCurves( self
-                    , location : str
-                    , futureDate : datetime.date
-                    , fwdVolInd = 'fwd' ) -> float:
+    def fwd_vol_curves(self
+                       , location : str
+                       , futureDate : datetime.date
+                       , fwdVolInd = 'fwd') -> float:
         """
         Gets the forward curves for market date for the times requested in timeList
 
@@ -109,11 +111,11 @@ class Freight:
         Spread option value between city1, city2 and times t1, t2, t1<t2.
         """
 
-        return spread_option_kirk(self.fwdVolCurves(city1, t1)
-                                  , self.fwdVolCurves(city2, t2)
+        return spread_option_kirk(self.fwd_vol_curves(city1, t1)
+                                  , self.fwd_vol_curves(city2, t2)
                                   , self._costMatrix[(city1, city2) if (city1, city2) in self._costMatrix else (city2, city1)] if city1 != city2 else 0.
-                                  , self.fwdVolCurves(city1, t1, fwdVolInd='vol')
-                                  , self.fwdVolCurves(city2, t2, fwdVolInd='vol')
+                                  , self.fwd_vol_curves(city1, t1, fwdVolInd='vol')
+                                  , self.fwd_vol_curves(city2, t2, fwdVolInd='vol')
                                   , self._corrMatrix[(city1, city2) if (city1, city2) in self._corrMatrix else (city2, city1)]
                                   , (t2 - t1).days / self._dcf
                                   , DF(self.mkt_date, t2))
@@ -244,10 +246,8 @@ class Freight:
         return self.__EM, self.__EV
 
     @property
-    def _valueVec(self):
-        """
-        Setting the valuation vector - this is set for _MINIMIZING (COST) FUNCTION, therefore the values are negative.
-
+    def _value(self):
+        """ Setting the valuation vector - this is set for _MINIMIZING (COST) FUNCTION, therefore the values are negative.
         """
 
         if self.__valueVec is not None:
@@ -263,24 +263,25 @@ class Freight:
                                                                                   , self._nbsToLocations[j]
                                                                                   , self.__nbsToTimeGrid[t]
                                                                                   , self.__nbsToTimeGrid[u]) if self._travelAllowed(i,j,t,u) else LARGE_NUMBER
-                        self.__valueVec[self._Y(i,j,t,u)] = -(self.fwdVolCurves(self._nbsToLocations[j], self.__nbsToTimeGrid[u])
-                                                              - self.fwdVolCurves(self._nbsToLocations[i], self.__nbsToTimeGrid[t])) \
+                        self.__valueVec[self._Y(i,j,t,u)] = -(self.fwd_vol_curves(self._nbsToLocations[j], self.__nbsToTimeGrid[u])
+                                                              - self.fwd_vol_curves(self._nbsToLocations[i], self.__nbsToTimeGrid[t])) \
                                                               if self._travelAllowed(i,j,t,u) else LARGE_NUMBER
 
         return self.__valueVec
 
-    def freightHedge(self):
+    @property
+    def freight_hedge(self):
         """
         Find optimum freight hedge, solve the linear program.
 
         """
 
-        if self.__freightHedgeResult is not None:
-            return self.__freightHedgeResult
+        if self.__freight_hedge_result is not None:
+            return self.__freight_hedge_result
 
         EM, EV = self._EMVMat  # equality matrix condition EM * x = EV
 
-        result = linprog( self._valueVec
+        result = linprog( self._value
                         , A_ub  = self._LMMat  # inequality condition A_ub * x <= b_ub
                         , b_ub = np.zeros(self._LMMat.shape[0])  # zeros the shape of LMMat
                         , A_eq = EM
@@ -288,38 +289,36 @@ class Freight:
                         # , bounds = list(zip(self.lowerBound, [None] * len(self.lowerBound) ) ) )  # this bounds are by default.
 
         if result.success:
-            self.__freightHedgeResult = result.x
-            return self.__freightHedgeResult  # actual result
-        else:
-            raise FreightException(result.message)
+            self.__freight_hedge_result = result.x
+            return self.__freight_hedge_result  # actual result
 
-    def freightHedgeX(self, i, j, t, u):
-        return self.freightHedge()[self._X(i,j,t,u)]
+        raise FreightException(result.message)
+
+    def freight_hedge_x(self, i, j, t, u):
+        return self.freight_hedge[self._X(i, j, t, u)]
 
     def freightHedgeY(self, i, j, t, u):
-        return self.freightHedge()[self._Y(i,j,t,u)]
+        return self.freight_hedge[self._Y(i, j, t, u)]
 
-    def representHedge(self):
-        """
-        Represents the hedge obtained from optimization.
-
+    def represent_hedge(self):
+        """ Represents the hedge obtained from optimization.
         """
 
-        result = self.freightHedge()
+        hedge = self.freight_hedge
 
-        tankerLocations = {self._timeGrid[t]: {self._nbsToLocations[i]: result[self._N(i, t)] for i in range(self._nbLocations)}
-                           for t in range(self._nbTimePeriods)}
+        tanker_locations = {self._timeGrid[t]: {self._nbsToLocations[i]: hedge[self._N(i, t)] for i in range(self._nbLocations)}
+                            for t in range(self._nbTimePeriods)}
 
-        tankerMovementsConditional = {self._timeGrid[t]: {self._nbsToLocations[i]: [(self._nbsToLocations[j], self._timeGrid[u], result[self._X(i, j, t, u)])
+        tankerMovementsConditional = {self._timeGrid[t]: {self._nbsToLocations[i]: [(self._nbsToLocations[j], self._timeGrid[u], hedge[self._X(i, j, t, u)])
                                                                                     for j in range(self._nbLocations) for u in range(t + 1, self._nbTimePeriods)]
                                                            for i in range(self._nbLocations)}
                                       for t in range(self._nbTimePeriods)}
 
-        tankerMovementsUnConditional = {self._timeGrid[t]: {self._nbsToLocations[i]: [(self._nbsToLocations[j], self._timeGrid[u], result[self._Y(i, j, t, u)])
+        tankerMovementsUnConditional = {self._timeGrid[t]: {self._nbsToLocations[i]: [(self._nbsToLocations[j], self._timeGrid[u], hedge[self._Y(i, j, t, u)])
                                                                                       for j in range(self._nbLocations) for u in range(t + 1, self._nbTimePeriods)]
                                                              for i in range(self._nbLocations)}
                                         for t in range(self._nbTimePeriods)}
 
-        return { 'portfolioValue': - np.sum(np.array(self._valueVec) * np.array(result))  # self.valueVec is negative, cuase linprog is minimized
-               , 'locations'     : tankerLocations
-               , 'movements'     : (tankerMovementsConditional, tankerMovementsUnConditional) }
+        return { 'portfolioValue': - np.sum(np.array(self._value) * np.array(hedge))  # self.valueVec is negative, cuase linprog is minimized
+               , 'locations'     : tanker_locations
+               , 'movements'     : (tankerMovementsConditional, tankerMovementsUnConditional)}

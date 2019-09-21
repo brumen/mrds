@@ -24,7 +24,7 @@ def mc_mult_steps_gpu(F_v, s_v, T_l, rho_m, nb_sim,
     simulate forward curves on cuda
     
     generates a 3-dimensional array
-      0-th dimension: asset_nb
+      0-th dimension: asset
       1-st dimension: simulation times
       2-nd dimension: curve
       3-rd dimension: repeats of the curve

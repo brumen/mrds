@@ -1,5 +1,5 @@
 #
-#  Constructs a forward curve object.
+#  Forward curve object.
 #
 
 import datetime
