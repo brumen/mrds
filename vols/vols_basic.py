@@ -4,13 +4,11 @@ import config
 import logging
 
 import numpy as np
-from numpy import double, log, exp, sqrt
-
 import tkinter as tk
 
-import scipy
-import scipy.stats
-import scipy.interpolate  # spline package
+from numpy import double, log, exp, sqrt
+
+from scipy.interpolate import splev, splrep  # spline package
 from openopt import NLP
 import matplotlib as mpl
 mpl.use('TkAgg')
@@ -37,36 +35,30 @@ def interpolate_fwd_vols(fwd_tenors, fwd_prices, vol_tenors, vol_vols,
       vol_vols is a matrix, with as many rows as vol_tenors and multiple
       columns for all parameters
     """
-    fwd_function = lambda t: scipy.interpolate.splev(
-        t,
-        scipy.interpolate.splrep(
-            fwd_tenors,
-            fwd_prices))  # interpol. prices
+
+    fwd_function = lambda t: splev(t, splrep(fwd_tenors, fwd_prices))  # interpol. prices
     res = [fwd_function(fwd_tenors_wanted)]  # result, part 1
     # append an empty zero matrix
-    res.append(zeros((len(vol_tenors_wanted), vol_vols.shape[1])))
+    res.append(np.zeros((len(vol_tenors_wanted), vol_vols.shape[1])))
 
-    for vol_param_ind in xrange(vol_vols.shape[1]):
-        params_tmp = lambda t: scipy.interpolate.splev(
-            t,
-            scipy.interpolate.splrep(
-                vol_tenors,
-                vol_vols[
-                    :,
-                    vol_param_ind]))
+    for vol_param_ind in range(vol_vols.shape[1]):
+        params_tmp = lambda t: splev(t, splrep(vol_tenors, vol_vols[:, vol_param_ind]))
         res[:, vol_param_ind] = params_tmp(vol_tenors_wanted)
 
     return res
 
 
-def black_vol_inverse_vec(F, K_vec, p_vec, dt, DF, theta, tol):
-    """
-    Inverse black vol for a vector of strikes, and a vector or prices.
+def black_vol_inverse_vec( F : float
+                         , K_vec : np.array
+                         , p_vec : np.array
+                         , dt : float
+                         , DF : float
+                         , theta
+                         , tol : float ) -> np.array:
+    """ Inverse black vol for a vector of strikes, and a vector or prices.
 
     :param F: current forward vol.
-    :type F: double
     :param K_vec: vector of strikes.
-    :type K_vec: np.array[double]
     """
 
     return np.array([black_vol_inverse(F, K, p, dt, DF, theta, tol)
@@ -123,13 +115,17 @@ def black_vol_inverse_naive(F, K, p, dt, DF, theta, tol, solver=None):
     return optim_pr.solve('scipy_cobyla' if solver is None else solver).xf[0] / sqrt(dt)
 
 
-def sam_int(s, t, T_i, beta, sigma_L):
-    """
-    Samuelson volatility function.
+def sam_int(s : float, t : float, T_i : float, beta : float, sigma_L : float) -> float:
+    """ Samuelson volatility function.
+        Computes the squared integral of samuelson behavior
+           \int _s ^t (e^{-B(T_i - u)} + sigma_L )^2 du
 
-    Computes the squared integral of samuelson behavior
-    \int _s ^t (e^{-B(T_i - u)} + sigma_L )^2 du
-
+    :param s: lower bound of integration
+    :param t: upper bound of integration
+    :param T_i: expiry of the forward contract
+    :param beta: beta samuelson parameter, speed of decrease
+    :param sigma_L: initial volatility TODO: CHECK IF THIS IS TRUE
+    :returns: integrated samuelson volatility over a period.
     """
 
     t1 = exp(-2.0 * beta * (T_i - t)) / (2.0 * beta) - \
@@ -248,16 +244,19 @@ def draw_surface( model
             a.plot_surface(K_mesh, ttm_mesh, lv_surf)
         canvas.show()
 
-
-
     # same as for jw7 buttons
     def c0c1c2_buttons(root, ax, dataPlot_canvas):
         fct_update = lambda cc: update_graph(fwd, model, array(
             [c0.get(), c1.get(), c2.get(), alpha.get()]), ax, dataPlot_canvas)
 
         # parameter scales
-        c0 = tk.Scale(root, from_=80.0, to=120.0, resolution=0.1, label="c0", orient=tk.tk.HORIZONTAL,
-                   command=fct_update)
+        c0 = tk.Scale( root
+                     , from_      = 80.0
+                     , to         = 120.0
+                     , resolution = 0.1
+                     , label      = 'c0'
+                     , orient     = tk.HORIZONTAL
+                     , command    = fct_update )
         c1 = tk.Scale(root, from_=0.05, to=0.8, resolution=0.05, label="c1", orient=tk.HORIZONTAL,
                    command=fct_update)
         c2 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="c2", orient=tk.HORIZONTAL,
