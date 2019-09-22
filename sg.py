@@ -13,10 +13,10 @@ import opd.opd_avx as opd_avx
 
 
 def index_grid(K, l):
-    """
-    constructs all K- length vectors of integers 1... which sum to less than N
-    K ... dimension of the vectors
-    l ... level
+    """  Constructs all K- length vectors of integers 1... which sum to less than N
+
+    :param K: dimension of the vectors
+    :param l: level of sparse grid
     # constructs the index grid for sparse grid and saves it into Acc
     # k ... helper index that counts on what level we are
     # R ... current list
@@ -25,6 +25,7 @@ def index_grid(K, l):
     # N_low ... lower level of the grid
     # N_up ... upper level
     """
+
     N_low = l
     N_up = l + K - 1
 
@@ -45,53 +46,59 @@ def index_grid(K, l):
     Acc_ind = []
     Acc_w = [] 
     index_grid_help(0, [], K, N_low, N_up, Acc_ind, Acc_w)
-    return [Acc_ind, Acc_w] 
+
+    return [Acc_ind, Acc_w]
 
 
 def pairs_final(vec_list):
+    """ Does all pairs from a list of multiple vectors (is separate to be used by fem2d).
+
     """
-    does all pairs from a list of multiple vectors
-    (is separate to be used by fem2d)
-    """
+
     def pairs(vec_list_mod):
         vec_list_mod_len = len(vec_list_mod)
-        
-        def outer_vec(v1, v2):
-            return [v1[i] + v2[j] for i in range(len(v1))
-                    for j in range(len(v2))]
-        
+
         if vec_list_mod_len is 1:
             return vec_list_mod[0]
-        else:
-            return outer_vec(vec_list_mod[0], pairs(vec_list_mod[1:]))
 
-    # modified vector list 
-    vec_list_mod = map(lambda y: map(lambda x: [x], y), vec_list)
-    return pairs(vec_list_mod)
+        v1 = vec_list_mod[0]
+        v2 = pairs(vec_list_mod[1:])
+
+        return [ v1[i] + v2[j]
+                 for i in range(len(v1))
+                 for j in range(len(v2)) ]
+
+    return pairs(map(lambda y: map(lambda x: [x], y), vec_list))
 
 
 def sg_p(D, l, one_d_discret='gauss_hermite', one_d_grid=[]):
-    """
-    construct sparse grid points
-      D ... dimension
-      level ... sparse grid level
+    """ Construct sparse grid points:
+
+    :param D: dimension of sparse grid
+    :param level: sparse grid level
       one_d_discret ... 1-D discretization of points
         gauss_hermite ... G-H discretization
         linear ... equidistantly  spaced
         manual ... suplied in one_d_grid
     """
+
     ig = index_grid(D, l)[0]
+
     if one_d_discret is 'gauss_hermite':
-        hg = [[list(quad1d.gh_pw_hints(n)[0]) for n in B] for B in ig]
+        hg = [[list(quad1d.gh_pw(n)[0]) for n in B] for B in ig]
+
     elif one_d_discret is 'linear':
         hg = [[list(np.arange(-2**n, 2**n+1)/np.double(2**n)) for n in B] for B in ig]
+
     elif one_d_discret is 'manual':
         hg = [[list(one_d_grid)] * len(B) for B in ig]
 
-    spgb = [pairs_final(y) for y in hg]
-    # flattening, this is really effective !!!! IS THIS REALLY NEEDED BELOW 
+    else:
+        raise RuntimeError('one_d_discret parameter not one of gauss_hermite, linear, manual')
+
+    # flattening, this is really effective !!!!
     spg = []
-    for par_list in spgb:
+    for par_list in [pairs_final(y) for y in hg]:
         for inv_list in par_list:
             spg.append(inv_list)
 
@@ -99,25 +106,26 @@ def sg_p(D, l, one_d_discret='gauss_hermite', one_d_grid=[]):
 
 
 def sg_w(D, l, one_d_discret='gauss_hermite'):
+    """ Constructs weights for sparse grid of dimension D and level l
+
+    :param D: dimension of sparse grid.
+    :param l: level of sparse grid.
+    :param one_d_discret: type of 1-dimensional discretization.
     """
-    constructs weights for sparse grid of dimension D and level l
-      D ... dimension
-      l ... level
-    """
+
     iwg = index_grid(D, l)  # index and weight grid
     ig = iwg[0]  # index grid
     wg = iwg[1]  # weight grid
 
     if one_d_discret is 'gauss_hermite':
-        hg = [[list(quad1d.gh_pw_hints(n)[1]) for n in B] for B in ig]
+        hg = [[list(quad1d.gh_pw(n)[1]) for n in B] for B in ig]
     elif one_d_discret is 'linear':  # weights are all of 1
         hg = [[list(np.repeat(np.double(2**(-n)), 2**(n+1)+1)) for n in B] for B in ig]
+    else:
+        raise RuntimeError('one_d_discret not one of gauss_hermite, linear')
 
-    spgb = zip([pairs_final(y) for y in hg], wg)
-
-    # flattening, this is really effective
     spg = []
-    for par_list, w_list in spgb:
+    for par_list, w_list in zip([pairs_final(y) for y in hg], wg):
         for inv_list in par_list:
             spg.append([inv_list, w_list])
 
@@ -125,24 +133,26 @@ def sg_w(D, l, one_d_discret='gauss_hermite'):
     return [np.prod(x[0]) * x[1] for x in spg]
 
 
-def sg_quad(D, l, f, one_d_discret='gauss_hermite',
-            xmm_use=True):
-    """
-    sparse grid quadrature
-    integrates \int f(x) e^(-x**2) / (2 * pi)^(D/2)
-      D ... dimension of the function
-      l ... level
-      f ... function to integrate, takes a vector, i.e. f(x) = f(x[0], x[1]...)
-      one_d_discret ... 1 dimen. discretization, can be either
+def sg_quad(D, l, f, one_d_discret='gauss_hermite', xmm_use=True):
+    """ Sparse grid quadrature.
+        Integrates \int f(x) e^(-x**2) / (2 * pi)^(D/2)
+
+    :param D: dimension of function f
+    :param l: level of sparse grid.
+    :param f: function to integration, takes a vector, i.e. f(x) = f(x[0], x[1]...)
+    :param one_d_discret: 1 dimen. discretization, can be either
         gauss_hermite (support -inf, inf)
         linear (support [-1, 1] )
+    :param xmm_use: whether to use xmm optimization.
     """
+
     sqrt2 = np.sqrt(2.)
     sqrt_pi = np.sqrt(np.pi)
     g = lambda x: f(x * sqrt2) / sqrt_pi**D
     weights = np.array(sg_w(D, l, one_d_discret))
     vals = np.array(map(g, [np.array(x) for x in sg_p(D, l, one_d_discret)])).flatten()
+
     if not xmm_use:
         return np.sum(weights*vals)
-    else:
-        return opd_avx.num_quad(weights, vals, len(vals))
+
+    return opd_avx.num_quad(weights, vals, len(vals))
