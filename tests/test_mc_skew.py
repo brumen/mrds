@@ -1,37 +1,27 @@
 # Unit Testing script of mrds module 
 # 
-import config
-from numpy import *
-from numpy.linalg.linalg import norm 
+
+from numpy import exp, sqrt, pi, inf, arange, array
+from numpy.linalg.linalg import norm
 import scipy
 import scipy.optimize
 import scipy.integrate
 
-import mrds # mrd skew model
 import pricers
 import unittest
 import pickle
 import vols
 
-# main testing class 
-class mrds_tests(unittest.TestCase):
+class ComSkewTests(unittest.TestCase):
 
     # reads the market object 
     def setUp (self):
-        print "Creating object"
         self.mo = pickle.load (open ('/home/brumen/workspace/mrds/mobj/wti_skew.obj') ) # loading the calibrated object
         
     def tearDown(self):
-        print "Destroying object"
         self.mo = None
 
-
-    def test_check(self):
-        print "Test Check"
-        self.assertTrue(True)
-        
     def test_trunc_normal_above(self):
-        print "Testing the _trunc_normal_above"
         a = arange (-3, 3, 0.1)
         assertion = True
         for a in arange (-3,3,0.1):
@@ -45,42 +35,38 @@ class mrds_tests(unittest.TestCase):
                     
         self.assertTrue( assertion )
 
-
     def test_trunc_normal_below(self):
-        print "Testing the _trunc_normal_below"
         a = arange (-3, 3, 0.1)
         assertion = True
         for a in arange (-3,3,0.1):
             mo_res = self.mo._trunc_normal_below(a)
-            num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0], \
-                              scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0], \
-                              scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0], \
-                              scipy.integrate.quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0], \
+            num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
+                              scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
+                              scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
+                              scipy.integrate.quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
                               scipy.integrate.quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0] ] )
             assertion = ( norm ( mo_res - num_res) < 1e-7 ) and True
-                    
+
         self.assertTrue( assertion )
 
-
     def test_trunc_normal_interval(self):
-        print "Testing the _trunc_normal_interval"
         a = arange (-3, 3, 0.1)
         assertion = True
         for a in arange (-3,3,0.1):
             mo_res = self.mo._trunc_normal_interval(a, a + 1.)
-            num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0], \
-                              scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0], \
-                              scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0], \
-                              scipy.integrate.quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0], \
+            num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
+                              scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
+                              scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
+                              scipy.integrate.quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
                               scipy.integrate.quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0] ] )
             assertion = ( norm ( mo_res - num_res) < 1e-7 ) and True
                     
         self.assertTrue( assertion )
 
-
-    # comparing the black_vol_inverse: advanced function and _naive function 
     def test_inverse_naive (self):
-        print "Test black vol option - naive and advanced "
+        """ Comparing the black_vol_inverse: advanced function and _naive function.
+        """
+
         F = 100
         K = 100.0
         p = 21
@@ -94,51 +80,45 @@ class mrds_tests(unittest.TestCase):
         res = reduce (lambda x,y: x and y, abs (inv1 - inv2) < 1e-5, True)
         self.assertTrue ( res )
 
-    # tests whether the model simulation produces negative prices 
     def test_negative_forwards(self):
-        print "Skew: Testing the non-negativity of futures prices"
-        model='skew' # CHOOSE: skew, ln_ln, ln 
+        """ Tests whether the model simulation produces negative prices
+        """
+        model='skew' # CHOOSE: skew, ln_ln, ln
         sim_times = arange (0,5)/10. #array([0., 0.1, 0.2, 0.3, 0.4, 0.5]) # half a year extension 
         # sim_times = array ([0., 1.]) 
-        print "Simulation times = ", sim_times
         nb_sims = 100000
         self.mo.model_skew_ln_ind = model
         self.mo.update_sim_times (sim_times)
         self.mo.simulate_curves(nb_sims)
         skew_ind = sum (self.mo.simulated_curves[0] < 0 ) < 50 
-        print "Number of negative prices from", nb_sims, "simulations is", sum (self.mo.simulated_curves[0] < 0 )
 
-
-        print "Log-normal: Testing the non-negativity of futures prices"
-        model='ln_ln' # CHOOSE: skew, ln_ln, ln 
+        # TODO: THIS SHOULD BE THE NEXT CASE
+        model='ln_ln' # CHOOSE: skew, ln_ln, ln
         sim_times = arange (0,5)/10. #array([0., 0.1, 0.2, 0.3, 0.4, 0.5]) # half a year extension 
-        print "Simulation times = ", sim_times
         nb_sims = 100000
         self.mo.model_skew_ln_ind = model
         self.mo.update_sim_times (sim_times)
         self.mo.simulate_curves(nb_sims)
         ln_ln_ind = sum (self.mo.simulated_curves[0] < 0 ) < 50 
-        print "Number of negative prices from", nb_sims, "simulations is", sum (self.mo.simulated_curves[0] < 0 )
 
-        print "Log-normal (LN simulation): Testing the non-negativity of futures prices"
+        #
+        # print "Log-normal (LN simulation): Testing the non-negativity of futures prices"
         model='ln' # CHOOSE: skew, ln_ln, ln 
         sim_times = arange (0,5)/10. #array([0., 0.1, 0.2, 0.3, 0.4, 0.5]) # half a year extension 
-        print "Simulation times = ", sim_times
         nb_sims = 100000
         self.mo.model_skew_ln_ind = model
         self.mo.update_sim_times (sim_times)
         self.mo.simulate_curves(nb_sims)
         ln_ind = sum (self.mo.simulated_curves[0] < 0 ) < 50 
-        print "Number of negative prices from", nb_sims, "simulations is", sum (self.mo.simulated_curves[0] < 0 )
 
         self.assertTrue ( skew_ind and ln_ln_ind and ln_ind )
 
-
-    # tests whether the futures prices are martingales (at 0)
     def test_martingale (self):
-        model='skew' # CHOOSE: skew, ln_ln, ln 
+        """ Tests whether the futures prices are martingales (at 0)
+        """
+
+        model='skew' # CHOOSE: skew, ln_ln, ln
         sim_times = arange (0,12)/12. # 1 year, monthly simulations
-        print "Simulation times = ", sim_times
         nb_sims = 1000000
         self.mo.model_skew_ln_ind = model
         self.mo.update_sim_times (sim_times)
@@ -149,21 +129,18 @@ class mrds_tests(unittest.TestCase):
         for cm in range (nb_cms): # do this for every commodity
             for fwd in range ( sum (self.mo.option_tenors_list[cm] <= sim_times[-1]), 
                                len (self.mo.forward_curve_list[cm]) ):
-                print "Skew: Testing the martingale of futures prices for com.", cm," and future nb. ", fwd
+                # print "Skew: Testing the martingale of futures prices for com.", cm," and future nb. ", fwd
                 skew_ind[cm] = scipy.linalg.norm ( mean ( self.mo.simulated_curves[cm][:,fwd,:], axis=1) - 
                                                    self.mo.simulated_curves[cm][0,fwd,0] ) < 1e-3
                 
-                print "Simulated values = ", mean ( self.mo.simulated_curves[cm][:,fwd,:], axis=1)
-                print "Theoretical values = ", self.mo.simulated_curves[cm][0,fwd,0]
+                # print "Simulated values = ", mean ( self.mo.simulated_curves[cm][:,fwd,:], axis=1)
+                # print "Theoretical values = ", self.mo.simulated_curves[cm][0,fwd,0]
 
         self.assertTrue ( reduce (lambda x,y: x and y, skew_ind, True) ) # all skew indicators have to be 0
-                                 
-
-        
-
 
     def test_poly_eu_no_roots (self):
-        print "Testing the roots part of polynomial_european"
+        """ Testing the roots part of polynomial_european"
+        """
         C1_range = arange (-1., 1., 0.05)
         C2_range = arange (-2., 2., 0.05)
         C3_range = arange (-2., 4., 0.05)
@@ -201,9 +178,6 @@ class mrds_tests(unittest.TestCase):
             res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, 1)
             assert3 = assert3 and ( norm ( res1 - res2) < 1e-6 )
 
-        print "Finished call option testing"
-        print "Outcome = ", [assert1, assert2, assert3]
-
 
         # PUT option testing
         K = 70.
@@ -238,45 +212,17 @@ class mrds_tests(unittest.TestCase):
             res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, -1)
             assert6 = assert6 and ( norm ( res1 - res2) < 1e-6 )
 
-        print "Finished put option testing"
-        print "Outcome = ", [assert4, assert5, assert6]
-
-        res = assert1 and assert2 and assert3 and assert4 and assert5 and assert6
-
-        self.assertTrue( res )
-
-
-# tests whether the simulated option's implied vol in the LN model 
-# matches the ln-model simulated price 
-class mrds_tests_small(unittest.TestCase):
-
-    # reads the market object 
-    def setUp (self):
-        print "Creating object"
-        self.mo = pickle.load (open ('/home/brumen/workspace/mrds/mobj/wti_skew.obj') ) # loading the calibrated object
-        
-    def tearDown(self):
-        print "Destroying object"
-        self.mo = None
-
-    def test_check(self):
-        print "Test Check"
-        self.assertTrue(True)
+        self.assertTrue(assert1 and assert2 and assert3 and assert4 and assert5 and assert6)
 
     def test_ln_model(self):
-        print "Test: Simulated implied vol matches vol in the ln- model"
-        sim_times = array([0.5, 1.]) 
-        print "Simulation times = ", sim_times
+        sim_times = array([0.5, 1.])
         nb_sims = 10000000
         self.mo.model_skew_ln_ind = 'ln_ln'
         self.mo.update_sim_times (sim_times)
-        print self.mo.simulation_times
         self.mo.simulate_curves(nb_sims)
 
         pr1 = pricers.call (self.mo, [self.mo.forward_curve_list[0][15], 
                                       15, 1])
-
-        print "atm vol = ", self.mo.atm_vol_list[0][15]
 
         disc_fact = self.mo.DF (1.)
         theta = 1 # call options 
@@ -284,20 +230,8 @@ class mrds_tests_small(unittest.TestCase):
                                          [self.mo.forward_curve_list[0][15]], 
                                          [pr1], 1., disc_fact, theta, 1e-4)
 
-    
-        print "impl vol = ", iv
-
-        res1 = abs (iv - self.mo.atm_vol_list[0][15] ) < 1e-4
-
-        print res1[0]
-
-        self.assertTrue ( res1 )
-
-
-
+        self.assertTrue(abs (iv - self.mo.atm_vol_list[0][15] ) < 1e-4)
 
 # final statements that runs these tests 
-#suite = unittest.TestLoader().loadTestsFromTestCase(mrds_tests)
-#unittest.TextTestRunner(verbosity=2).run(suite)
-suite = unittest.TestLoader().loadTestsFromTestCase(mrds_tests_small)
-unittest.TextTestRunner(verbosity=2).run(suite)
+# suite = unittest.TestLoader().loadTestsFromTestCase(mrds_tests)
+# unittest.TextTestRunner(verbosity=2).run(suite)

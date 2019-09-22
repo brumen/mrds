@@ -142,7 +142,7 @@ class FreightTest(TestCase):
                                   , N_init
                                   , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
-        print (freight1.representHedge())
+        print (freight1.represent_hedge())
 
         self.assertTrue(True)
 
@@ -161,6 +161,6 @@ class FreightTest(TestCase):
                                  , N_init
                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
-        freight1.displayMovement()
+        freight1.display_movement()
 
         self.assertTrue(True)
