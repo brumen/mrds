@@ -14,13 +14,14 @@ class FreightException(Exception):
     pass
 
 
-LARGE_NUMBER = 1000000.  # large number to prohibit travel between certain directions & times.
 logger = logging.getLogger(__name__)
 
 
 class Freight:
     """ Freight class.
     """
+
+    LARGE_NUMBER = 1000000.  # large number to prohibit travel between certain directions & times.
 
     def __init__(self
                  , mkt_date         : datetime.date
@@ -49,8 +50,8 @@ class Freight:
         """
 
         self.mkt_date     = mkt_date
-        self.fwdCurveFct  = fwd_curve_fct
-        self.volCurveFct  = vol_curve_fct
+        self.fwd_curve_fct  = fwd_curve_fct
+        self.vol_curve_fct  = vol_curve_fct
         self._corrMatrix  = corrMatrix
         self._travelMatrix = travelMatrix  # number of periods between different locations
         self._costMatrix   = costMatrix    # same as travel matrix, costs between locations
@@ -61,16 +62,16 @@ class Freight:
         # simple derived variables
         self._locations       = initialLocations.keys()  # locations considered are given in initialLocations
         self._nbLocations     = len(self._locations)     # number of different locations
-        self._nbsToLocations = {idx: loc for (idx, loc) in enumerate(self._locations)}
+        self._nbsToLocations  = {idx: loc for (idx, loc) in enumerate(self._locations)}
         self.__nbsToTimeGrid  = {idx: timeStep for (idx, timeStep) in enumerate(self._timeGrid) }
-        self._nbTimePeriods  = len(self._timeGrid)                # length of grid = number of time periods + 1
+        self._nbTimePeriods   = len(self._timeGrid)                # length of grid = number of time periods + 1
 
         # cached values, used as properties
-        self.__valueVec   = None  # vector of all individual values
-        self.__LM         = None
-        self.__EM         = None
-        self.__EV         = None
-        self.__lowerBound = None
+        self.__value_vec   = None  # vector of all individual values
+        self.__LM          = None
+        self.__EM          = None
+        self.__EV          = None
+        self.__lower_bound = None
         self.__freight_hedge_result = None
 
     def fwd_vol_curves(self
@@ -86,7 +87,7 @@ class Freight:
         :returns: array of forwards or vols for that timeList and location (returns vector)
         """
 
-        return (self.fwdCurveFct if fwdVolInd == 'fwd' else self.volCurveFct)(self.mkt_date, location, futureDate)
+        return (self.fwd_curve_fct if fwdVolInd == 'fwd' else self.vol_curve_fct)(self.mkt_date, location, futureDate)
 
     @property
     def lowerBound(self):
@@ -95,12 +96,12 @@ class Freight:
 
         """
 
-        if self.__lowerBound is not None:
-            return self.__lowerBound
+        if self.__lower_bound:
+            return self.__lower_bound
 
-        self.__lowerBound = np.zeros(self._nbLPVariables)
+        self.__lower_bound = np.zeros(self._nbLPVariables)
 
-        return self.__lowerBound
+        return self.__lower_bound
 
     def spreadOption( self
                     , city1 : str
@@ -121,19 +122,15 @@ class Freight:
                                   , DF(self.mkt_date, t2))
 
     def _X(self, i : int, j : int, t : int, u :int) -> int:
-        """
-        Conditional transport variable.
-        Location of the variable x_(i,j,t,u) in the matrix, t<u
-        Index corresponding to shipping from city i to city j between time t and u conditional.
-
+        """ Conditional transport variable.
+            Location of the variable x_(i,j,t,u) in the matrix, t<u
+            Index corresponding to shipping from city i to city j between time t and u conditional.
         """
 
         return i + j * self._nbLocations + self._nbLocations**2 * (self._nbTimePeriods - 1 - u + (self._nbTimePeriods * t - t * (t + 1) // 2))
 
     def _Y(self, i : int, j: int, t : int, u: int) -> int:
-        """
-
-        Unconditional transport variable.
+        """ Unconditional transport variable.
         """
 
         # first line is the number of variables X
@@ -141,8 +138,7 @@ class Freight:
                + self._X(i, j, t, u)
 
     def _N(self, i, t) -> int:
-        """
-        Number of tankers in city i at time t. Location of the variable n_(i,t) in the vector of all variables.
+        """ Number of tankers in city i at time t. Location of the variable n_(i,t) in the vector of all variables.
         """
 
         return self._nbLocations ** 2 * self._nbTimePeriods * (self._nbTimePeriods - 1) \
@@ -171,77 +167,75 @@ class Freight:
 
     @property
     def _LMMat(self) -> np.array:
-        """
-        Constructs the inequality matrix self.__LM, i.e. for conditions:
-        self.__LM * x <= 0. (0. is a vector)
+        """ Constructs the inequality matrix self.__LM, i.e. for conditions:
+               self.__LM * x <= 0. (0. is a vector)
         """
 
-        if self.__LM is not None:
+        if self.__LM:
             return self.__LM
 
-        consMat = []  # constraint matrix
+        constraints_mat = []  # constraint matrix
 
         # constraint n_{i,t} >= sum_{j,u} X(i,j,t,u) + Y(i,j,t,u)
         for t in range(self._nbTimePeriods):
             for i in range(self._nbLocations):
-                consVec = np.zeros(self._nbLPVariables)
-                consVec[self._N(i, t)] = -1.
+                constraints_vec = np.zeros(self._nbLPVariables)
+                constraints_vec[self._N(i, t)] = -1.
                 for j in range(self._nbLocations):
                     for u in range(t+1, self._nbTimePeriods):
-                        consVec[self._X(i, j, t, u)] = 1.
-                        consVec[self._Y(i, j, t, u)] = 1.
-                consMat.append(consVec)
+                        constraints_vec[self._X(i, j, t, u)] = 1.
+                        constraints_vec[self._Y(i, j, t, u)] = 1.
+                constraints_mat.append(constraints_vec)
 
-        self.__LM = np.array(consMat)
+        self.__LM = np.array(constraints_mat)
 
         return self.__LM
 
     @property
     def _EMVMat(self) -> (np.array, np.array):
-        """
-        Sets the equality matrix (EM) and equality vector (EV), for constraints:
-        EM * x = EV, EM is a matrix, EV is a vector.
+        """ Sets the equality matrix (EM) and equality vector (EV), for constraints:
+              EM * x = EV, EM is a matrix, EV is a vector.
         """
 
-        if (self.__EM is not None) and (self.__EV is not None):
+        if self.__EM and self.__EV:
             return self.__EM, self.__EV
 
-        __equalityMatrix = []
-        __equalityVector = []
+        equality_matrix = []
+        equality_vector = []
 
         # initial setting of N: N(i,0) = initialLocation(i)
         for i in range(self._nbLocations):
-            consVec = np.zeros(self._nbLPVariables)
-            consVec[self._N(i, 0)] = 1.
-            __equalityVector.append(self._initialLocations[self._nbsToLocations[i]])
-            __equalityMatrix.append(consVec)
+            constraints_vec = np.zeros(self._nbLPVariables)
+            constraints_vec[self._N(i, 0)] = 1.
+            equality_vector.append(self._initialLocations[self._nbsToLocations[i]])
+            equality_matrix.append(constraints_vec)
 
         # sum_i n_i,t = K 
         for t in range(1, self._nbTimePeriods):  # t=0 already given above
-            consVec = np.zeros(self._nbLPVariables)
+            constraints_vec = np.zeros(self._nbLPVariables)
             for i in range(self._nbLocations):
-                consVec[self._N(i, t)] = 1.
-            __equalityVector.append(sum(self._initialLocations.values()))  # number of tankers, ships
-            __equalityMatrix.append(consVec)
+                constraints_vec[self._N(i, t)] = 1.
+            equality_vector.append(sum(self._initialLocations.values()))  # number of tankers, ships
+            equality_matrix.append(constraints_vec)
 
         # constraint n_i,t = n_i,t-1 + sum_{j, u<t} (X(j, i, u, t) + Y(j,i,t,u)) - sum _{u>t-1, j} (X(i,j,t-1, u) + Y(i,j,t-1,u))
         for t in range(1, self._nbTimePeriods):
             for i in range(self._nbLocations):
-                consVec = np.zeros(self._nbLPVariables)  # consVec is constraints vector
-                consVec[self._N(i, t)]     =  1.
-                consVec[self._N(i, t - 1)] = -1.
+                constraints_vec = np.zeros(self._nbLPVariables)  # constraints_vec is constraints vector
+                constraints_vec[self._N(i, t)]     =  1.
+                constraints_vec[self._N(i, t - 1)] = -1.
                 for j in range(self._nbLocations):
                     for u in range(t):
-                        consVec[self._X(j, i, u, t)] = -1.
-                        consVec[self._Y(j, i, u, t)] = -1.
+                        constraints_vec[self._X(j, i, u, t)] = -1.
+                        constraints_vec[self._Y(j, i, u, t)] = -1.
                     for u in range(t, self._nbTimePeriods):
-                        consVec[self._X(i, j, t - 1, u)] = 1.
-                        consVec[self._Y(i, j, t - 1, u)] = 1.
-                __equalityMatrix.append(consVec)
-                __equalityVector.append(0.)
+                        constraints_vec[self._X(i, j, t - 1, u)] = 1.
+                        constraints_vec[self._Y(i, j, t - 1, u)] = 1.
+                equality_matrix.append(constraints_vec)
+                equality_vector.append(0.)
 
-        self.__EM = np.array(__equalityMatrix)
-        self.__EV = np.array(__equalityVector)
+        self.__EM = np.array(equality_matrix)
+        self.__EV = np.array(equality_vector)
 
         return self.__EM, self.__EV
 
@@ -250,24 +244,24 @@ class Freight:
         """ Setting the valuation vector - this is set for _MINIMIZING (COST) FUNCTION, therefore the values are negative.
         """
 
-        if self.__valueVec is not None:
-            return self.__valueVec
+        if self.__value_vec is not None:
+            return self.__value_vec
 
-        self.__valueVec = np.zeros(self._nbLPVariables)
+        self.__value_vec = np.zeros(self._nbLPVariables)
 
         for t in range(self._nbTimePeriods):  # time period
             for i in range(self._nbLocations):  # cities
                 for j in range(self._nbLocations):
                     for u in range(t+1, self._nbTimePeriods):
-                        self.__valueVec[self._X(i, j, t, u)] = - self.spreadOption( self._nbsToLocations[i]
-                                                                                  , self._nbsToLocations[j]
-                                                                                  , self.__nbsToTimeGrid[t]
-                                                                                  , self.__nbsToTimeGrid[u]) if self._travelAllowed(i,j,t,u) else LARGE_NUMBER
-                        self.__valueVec[self._Y(i,j,t,u)] = -(self.fwd_vol_curves(self._nbsToLocations[j], self.__nbsToTimeGrid[u])
-                                                              - self.fwd_vol_curves(self._nbsToLocations[i], self.__nbsToTimeGrid[t])) \
-                                                              if self._travelAllowed(i,j,t,u) else LARGE_NUMBER
+                        self.__value_vec[self._X(i, j, t, u)] = - self.spreadOption(self._nbsToLocations[i]
+                                                                                    , self._nbsToLocations[j]
+                                                                                    , self.__nbsToTimeGrid[t]
+                                                                                    , self.__nbsToTimeGrid[u]) if self._travelAllowed(i,j,t,u) else self.LARGE_NUMBER
+                        self.__value_vec[self._Y(i, j, t, u)] = -(self.fwd_vol_curves(self._nbsToLocations[j], self.__nbsToTimeGrid[u])
+                                                                  - self.fwd_vol_curves(self._nbsToLocations[i], self.__nbsToTimeGrid[t])) \
+                                                              if self._travelAllowed(i,j,t,u) else self.LARGE_NUMBER
 
-        return self.__valueVec
+        return self.__value_vec
 
     @property
     def freight_hedge(self):
@@ -286,7 +280,6 @@ class Freight:
                         , b_ub = np.zeros(self._LMMat.shape[0])  # zeros the shape of LMMat
                         , A_eq = EM
                         , b_eq = EV )
-                        # , bounds = list(zip(self.lowerBound, [None] * len(self.lowerBound) ) ) )  # this bounds are by default.
 
         if result.success:
             self.__freight_hedge_result = result.x
@@ -297,7 +290,7 @@ class Freight:
     def freight_hedge_x(self, i, j, t, u):
         return self.freight_hedge[self._X(i, j, t, u)]
 
-    def freightHedgeY(self, i, j, t, u):
+    def freight_hedge_y(self, i, j, t, u):
         return self.freight_hedge[self._Y(i, j, t, u)]
 
     def represent_hedge(self):
