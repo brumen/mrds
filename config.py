@@ -1,5 +1,4 @@
 # configuration file
-import sys
 from subprocess import Popen, PIPE
 
 # cuda check
@@ -14,7 +13,7 @@ CUDA_PRESENT = False
 # adding various paths
 prod_dir = '/home/brumen/work/mrds/'
 work_dir = prod_dir
-sys.path.append(work_dir)  # basic path
+# path.append(work_dir)
 
 # cython params
 cython_include_dirs    = []
