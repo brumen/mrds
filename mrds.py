@@ -158,6 +158,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
     def vol_curves(self) -> List[Volatility]:
         return self._com_vol_curves
 
+    @property
+    def vol_curve_names(self):
+        if self.__vol_curve_names:
+            return self.__vol_curve_names
+
+        self.__vol_curve_names = {vol_curve.fwd_name: vol_curve for vol_curve in self.vol_curves}
+        return self.__vol_curve_names
+
 # TODO: INCLUDE THIS HERE
 #        , 'corr_init': np.array([[1., 0.5], [0.5, 1.]])
 #        , 'corr_lb': np.array([[1., -0.99], [-0.99, 1.]])
@@ -541,7 +549,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                , self._construct_corr_asset(asset_nb, rho_vec)
                                                , fwd_date )
                                  for fwd_date in self.fwd_curves[asset_nb].fwd_tenors])
-                       - self.vol_curves[asset_nb].atmVol() ) ** 2)  # TODO: FIX THIS atmVol
+                       - self.vol_curves[asset_nb].atmVol() ) ** 2)  # TODO: FIX THIS atm_vol
 
     @lru_cache(maxsize=MAX_ASSETS)
     def __kappa_sigma_rho(self, asset : str):
@@ -762,21 +770,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def __deltas_to_strikes(self
                             , asset : str
-                            , tenorDate : datetime.date
-                            , delta_vec_list : np.array) -> np.array:
+                            , tenor_date     : datetime.date
+                            , delta_vec_list : np.array ) -> np.array:
         """
         Converts deltas to strikes for particular asset and tenor.
 
         :param asset: commodity asset to compute
-        :param tenorDate: tenor considered.
+        :param tenor_date: tenor considered.
         :returns: a vector of deltas from the strikes given in self.delta_vec_list
         """
 
-        integrated_vol = self._com_vol_curves[asset].atmVol(tenorDate) * \
-                         np.sqrt(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, tenorDate)))
+        integrated_vol = self.vol_curve_names[asset].atm_vol(tenor_date) * \
+                         np.sqrt(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, tenor_date)))
 
         return np.exp((scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol ) * integrated_vol) * \
-               self.fwd_curves[asset].getFwdValue(tenorDate)
+               self.fwd_curve_names[asset].fwd_value(tenor_date)
 
     @staticmethod
     def __integr_analy( real_roots_tsf
@@ -933,24 +941,24 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                          , A4
                                          , V )
 
-    def __model_vol_surface(self, asset : str, C_vec, fwdDate : datetime.date):
+    def __model_vol_surface(self, asset : str, C_vec, fwd_date : datetime.date):
         """ Computes model vols for asset, C_vec, fwd_idx.
 
         :param asset: commodity considered.
         :param C_vec: skew vector
         """
 
-        strikes = self.__deltas_to_strikes(asset, fwdDate)  # TODO: fix this part
-        cp_ind = np.array([1 if (strike >= self.fwd_curves[asset].getFwdValue(fwdDate)) else -1 for strike in strikes])
+        strikes = self.__deltas_to_strikes(asset, fwd_date)  # TODO: fix this part
+        cp_ind = np.array([1 if (strike >= self.fwd_curve_names[asset].fwd_value(fwd_date)) else -1 for strike in strikes])
 
-        return np.array([black_vol_inverse(self.fwd_curves[asset].getFwdValue(fwdDate)
+        return np.array([black_vol_inverse(self.fwd_curve_names[asset].fwd_value(fwd_date)
                                            , strike
                                            , opt_price
-                                           , self.__option_tenor_for_fwd_tenor(asset, fwdDate)
-                                           , self.DF(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, fwdDate)))
+                                           , self.__option_tenor_for_fwd_tenor(asset, fwd_date)
+                                           , self.DF(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, fwd_date)))
                                            , cp
                                            , self.black_vol_inverse_tol)
-                         for opt_price, strike, cp in zip( [self.polynomial_european(asset, C_vec, fwdDate, strike, cp)
+                         for opt_price, strike, cp in zip( [self.polynomial_european(asset, C_vec, fwd_date, strike, cp)
                                                             for strike, cp in zip(strikes, cp_ind)]
                                                          , strikes
                                                          , cp_ind ) ] )
@@ -968,7 +976,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # penalization level is 10000
         #    imp_vol_vec_model - self.vol_surface_list[asset][fwd_idx, :]
         return NLP( lambda C_vec: scipy.linalg.norm(self.__model_vol_surface(asset, C_vec, fwd_dates) -
-                                                    self._com_vol_curves[asset].getVolForDate(fwd_dates))
+                                                    self.vol_curve_names[asset].getVolForDate(fwd_dates))
                   , np.array([1., 0., 0.])  # TODO: THIS HAS TO BE IMPROVED
                   , iprint = -1 )\
                   .solve(self.__class__.NLP_SOLVER).xf
@@ -1189,9 +1197,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return new_simulated_curves
 
     @lru_cache(maxsize=20)  # TODO: THIS IS NOT RIGHT HERE!!!
-    def __factor_positions(self, asset_nb : int) -> slice:
-        """
-        Returns factor positions in a matrix for asset
+    def __factor_positions(self, asset : str) -> slice:
+        """ Returns factor positions in a matrix for asset.
+
+        :param asset: asset for which factor positions are obtained, e.g. 'WTI'
         """
 
         # TODO: THIS BELOW IS WRONG, IMPROVE THIS PART

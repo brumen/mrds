@@ -4,8 +4,7 @@
 
 import datetime
 from scipy.interpolate import splev, splrep
-
-from typing import List, Tuple
+from typing            import List, Tuple
 
 import ds
 
@@ -75,9 +74,10 @@ class FwdCurve:
         self.__fwd_curve = splrep(self._fwdTenorsNumeric, self.fwd_values)
         return self.__fwd_curve
 
-    def fwd_value(self, fwd_date) -> float:
-        """ Gets the forward value for the forward date fwd_date
+    def fwd_value(self, fwd_date : [datetime.date, float, List[datetime.date]]) -> float:
+        """ Gets the forward value for the forward date fwd_date.
 
+        :param fwd_date:
         """
 
         if isinstance(fwd_date, list):  # TODO: list is problematic, as it can be list[float] or list[datetime.date]
@@ -96,14 +96,15 @@ class FwdCurve:
         """ Finds the 1st nearby contract to fwd_date.
 
         :param fwd_date: forward date to which the 1st nearby contract is searched.
+        :returns: tuple of TODO: FINISH HERE
         """
 
         if fwd_date > self.fwd_tenors[-1]:
             raise FwdCurveException('Fwd date searched {0} larger than the curve last date {1}'.format(fwd_date, self.fwd_tenors[-1]))
 
-        largerDates = sum([fwdTenor <= fwd_date for fwdTenor in self.fwd_tenors])
+        larger_dates = sum([fwdTenor <= fwd_date for fwdTenor in self.fwd_tenors])
 
-        return self.fwd_tenors[largerDates], self.fwd_values[largerDates]
+        return self.fwd_tenors[larger_dates], self.fwd_values[larger_dates]
 
     @classmethod
     def from_db(cls, mkt_date : datetime.date, fwd_curve_name : str):

@@ -139,7 +139,7 @@ def get_forward_curve_plot(fwd, date_):
 
 def get_vol_curve( comName : str
                  , mktDate : datetime.date) -> Dict:
-    """ Gets the vol curve comName for a particular market date.
+    """ Gets the vol curve com_name for a particular market date.
         In out example, we don't use the second parameter.
 
     :param comName: commodity name
