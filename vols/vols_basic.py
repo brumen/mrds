@@ -100,7 +100,7 @@ def black_vol_inverse_naive(F, K, p, dt, DF, theta, tol, solver=None):
     """
     black vol computation
 
-      theta = 1 ... call option, -1 ... put option
+      _theta = 1 ... call option, -1 ... put option
     """
 
     x = log(double(F) / double(K))  # insuring that no integer division is made
@@ -261,7 +261,7 @@ def draw_surface( model
                    command=fct_update)
         c2 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="c2", orient=tk.HORIZONTAL,
                    command=fct_update)
-        alpha = tk.Scale(root, from_=0.0, to=1.0, resolution=0.05, label="alpha", orient=tk.HORIZONTAL,
+        alpha = tk.Scale(root, from_=0.0, to=1.0, resolution=0.05, label="_alpha", orient=tk.HORIZONTAL,
                       command=fct_update)
 
         c0.grid(row=0, column=1)

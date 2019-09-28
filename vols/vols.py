@@ -9,7 +9,7 @@ import numpy as np
 from numpy import double, log, exp, sqrt
 
 from functools import lru_cache
-from typing import List
+from typing import List, Tuple
 
 import scipy
 import scipy.stats
@@ -59,10 +59,8 @@ class VolatilityException(Exception):
     pass
 
 
-class Volatility(object):
-    """
-    Base class for vol parametrization
-
+class Volatility:
+    """ Base volatility class.
     """
 
     SOLVER = 'scipy_cobyla'
@@ -76,14 +74,27 @@ class Volatility(object):
 
         :param com_name: name of the commodity to consider
         :param mkt_date: market date
-        :param fwd_params: ??
+        :param fwd_params: parameters about the forward curve
         :param vol_params: ???
         """
 
-        self.mktDate    = mkt_date
-        self.comName    = com_name
-        self._fwdParams = fwd_params
-        self._volParams = vol_params
+        self.mkt_date    = mkt_date
+        self.com_name    = com_name
+        self._fwd_params = fwd_params
+        self._vol_params = vol_params
+
+    @classmethod
+    def from_db(cls, com_name : str, mkt_date : datetime.date):
+        """ Reads the forward and vol curve from external source.
+
+        :param com_name: name of the commodity one wants, e.g. 'WTI', ...
+        :param mkt_date: for which market date the vol is needed
+        """
+
+        return cls( com_name
+                  , mkt_date
+                  , fwd_params = ds.get_forward_curve(com_name, mkt_date)
+                  , vol_params = ds.get_vol_curve(com_name, mkt_date) )
 
     def _vol_dates(self) -> List[datetime.date]:
         """ Volatility dates.
@@ -99,18 +110,7 @@ class Volatility(object):
 
         nearest_vol = sum([fwdDateInCurve < date_ for fwdDateInCurve in self._vol_dates])
 
-    @classmethod
-    def from_db(cls, com_name : str, mkt_date : datetime.date):
-        """ Reads the forward and vol curve from external source.
-
-        :param com_name: name of the commodity one wants, e.g. 'WTI', ...
-        :param mkt_date: for which market date the vol is needed
-        """
-
-        return cls( com_name
-                  , mkt_date
-                  , fwd_params = ds.get_forward_curve(com_name, mkt_date)
-                  , vol_params = ds.get_vol_curve(com_name, mkt_date) )
+        return 1.  # TODO: FIX THIS HERE!!!
 
     @staticmethod
     def normalized_strike(S0   : np.double
@@ -163,7 +163,7 @@ class Volatility(object):
 
     def time_to_maturity(self, fwd_date: datetime.date, dcf = 365.25):
 
-        return (fwd_date - self.mktDate).days / dcf  # time to maturity
+        return (fwd_date - self.mkt_date).days / dcf  # time to maturity
 
     def black_simple( self
                     , fwd_date : datetime.date
@@ -178,7 +178,7 @@ class Volatility(object):
         """
 
         ttm = self.time_to_maturity(fwd_date)
-        S0  = self._fwdParams.fwd_value(fwd_date)
+        S0  = self._fwd_params.fwd_value(fwd_date)
 
         return black_greeks( S0
                            , strike
@@ -495,7 +495,7 @@ class JWSS7Volatility(Volatility):
         fwdUsed = fwdDate_ if isinstance(fwdDate_, int) else self._vol_for_date(fwdDate_)
         volParams = self._transform_from_jwss7(fwdDate_)
 
-        _, fwdValues = self._fwdParams
+        _, fwdValues = self._fwd_params
 
         return self._vol_compute( fwdUsed
                                 , JWSS7Volatility.normalized_strike(fwdValues[fwdUsed]
@@ -780,49 +780,63 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
 
 class c0c1c2Volatility(Volatility):
     """ c0-c1-c2 volatility parametrization
-        smooth_ind is the smoothness indicator
-        alpha is the smoothness factor
-
+        _smooth_ind is the smoothness indicator
+        _alpha is the smoothness factor
     """
 
-    def __init__(self, com_name, mkt_date):
-        super().__init__(com_name, mkt_date)  # defines _volParams, _fwdParams
-        self.volName = 'c0c1c2'
+    def __init__(self
+                 , com_name : str
+                 , mkt_date : datetime.date
+                 , fwd_params
+                 , vol_params ):
+        super(c0c1c2Volatility, self).__init__(com_name, mkt_date, fwd_params=fwd_params, vol_params=vol_params)
+        vol_numbers = vol_params['vol_numbers']
+        self._c0        = vol_numbers[:, 0]  # vector of c0s
+        self._c1        = vol_numbers[:, 1]  # vector of c1s
+        self._c2        = vol_numbers[:, 2]
+        self._theta      = vol_numbers[:, 3]
+        self._smooth_ind = vol_numbers[:, 4]
+        self._alpha      = vol_numbers[:, 5]
 
-    # extracts the model parameters
-    def extract_ind(self, p_mat):
-        self._c0        = self._volParams[:, 0]  # vector of c0s
-        self._c1        = self._volParams[:, 1]  # vector of c1s
-        self._c2        = self._volParams[:, 2]
-        self.theta      = self._volParams[:, 3]
-        self.smooth_ind = self._volParams[:, 4]
-        self.alpha      = self._volParams[:, 5]
+        self.__vol_dates = vol_params['vol_dates']
 
-    def implied_vol(self, F, t):
+    def _vol_dates(self) -> List[datetime.date]:
+        return self.__vol_dates
+
+    def _get_c0c1c2(self, ttm : datetime.date) -> Tuple[float, float, float]:
+        return (1., 2., 3.)
+
+    def implied_vol(self, fwd_value : float, ttm : datetime.date):
+        """ Computes the implied volatility of quadratic volatility surface.
+
+        :param fwd_value: forward value for which to compute
+        :param ttm: time-to-maturity
         """
-        Computes the implied volatility of quadratic volatility surface.
 
-        """
+        atm_strike = self._fwd_params.fwd_value(ttm)
+        z = np.log(fwd_value / atm_strike)
 
-        K = 100.  # WRONG WRONG WRONG ...
-        z = log(F / K)  # WRONG WRONG CHECK IF THIS IS CORRECT
-        v = self.c0 + self.c1 * z + self.c2**2 * z**2
-        sigma_star = self.c0 * self.theta - \
-            self.alpha * (self.c0 * self.theta - self.c0)
-        a = self.c0 * self.theta - sigma_star
-        # CHECK IF BELOW IS arctan or arctan2
-        g = lambda sigma: 2 * a / pi * arctan ( pi / (2 * a) * (sigma - sigma_star) ) + \
-            sigma_star
+        c0, c1, c2 = self._get_c0c1c2(ttm)
 
-        return  ( v * ( v < self.c0 * self.theta) + self.c0 * self.theta * (v >= self.c0 * self.theta) ) * ( self.smooth_ind == False ) + \
-            (v * (v < sigma_star) + g(v) * (v >= sigma_star)) * \
-            (self.smooth_ind == True)
+        v = c0 + c1 * z + c2**2 * z**2
+        sigma_star = c0 * self._theta - self._alpha * (c0 * self._theta - c0)
+        a = c0 * self._theta - sigma_star
+
+        # TODO: CHECK IF BELOW IS arctan or arctan2
+        gv = 2. * a / np.pi * np.arctan ( np.pi / (2 * a) * (v - sigma_star) ) + sigma_star
+
+        if self._smooth_ind:
+            return v  if v < sigma_star else gv
+
+        # smooth_ind == False, some additional logic
+        if v >= c0 * self._theta:
+            return c0 * self._theta
+
+        return v
 
 
 class CIVolatility(Volatility):
-    """
-    CI parametrization: accepts deltas and vols
-
+    """ CI parametrization.
     """
 
     def __init__(self, tenor_l, delta_mn_l, vols_l, omega_l):
