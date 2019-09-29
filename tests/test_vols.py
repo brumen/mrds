@@ -5,15 +5,15 @@ import datetime
 
 from unittest import TestCase, TestLoader, TextTestRunner
 
-from vols.vols import JWSS7Volatility
+from forward_curve   import FwdCurve
+from vols.vols       import JWSS7Volatility, C0C1C2Volatility
+from data.c0c1c2vols import wti2_vol
 
 
 class JWVolTest(TestCase):
 
     def test_just_run(self):
-        """
-        Tries to run the JW7Volatility class.
-
+        """ Tries to run the JW7Volatility class.
         """
 
         vol1 = JWSS7Volatility.from_db('WTI', datetime.date(2015, 4, 1))
@@ -23,5 +23,14 @@ class JWVolTest(TestCase):
         self.assertTrue(True)
 
 
-def main():
-    TextTestRunner(verbosity=2).run(TestLoader().loadTestsFromTestCase(JWVolTest))
+class C0C1C2Tet(TestCase):
+
+    def test_c0c1c2(self):
+
+        mkt_date = datetime.date(2015, 4, 1)
+        vol1 = C0C1C2Volatility( 'WTI2'
+                               , mkt_date
+                               , FwdCurve.from_db( mkt_date, 'WTI')
+                               , wti2_vol )
+
+        self.assertTrue(False)
