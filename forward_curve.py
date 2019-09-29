@@ -4,7 +4,7 @@
 
 import datetime
 from scipy.interpolate import splev, splrep
-from typing            import List, Tuple
+from typing            import List, Tuple, Union
 
 import ds
 
@@ -16,6 +16,8 @@ class FwdCurveException(Exception):
 class FwdCurve:
     """ Forward curve object
     """
+
+    INTERPOLATION_DEGREE = 2  # interpolation degree of the splrep function
 
     def __init__(self
                  , mkt_date   : datetime.date
@@ -51,7 +53,7 @@ class FwdCurve:
         return (fwd_date - self.mkt_date).days / self._dcf
 
     @property
-    def _fwdTenorsNumeric(self, dcf=365.25):
+    def _fwd_tenors_numeric(self, dcf=365.25):
         """
         Converts datetime into numeric values given
 
@@ -63,6 +65,7 @@ class FwdCurve:
         self.__fwd_tenors_numeric = [self.__relative_date(fwdDate) for fwdDate in self.fwd_tenors]
         return self.__fwd_tenors_numeric
 
+    @property
     def _fwd_curve(self):
         """ Constructs the splined forward curve internally.
 
@@ -71,24 +74,23 @@ class FwdCurve:
         if self.__fwd_curve:
             return self.__fwd_curve
 
-        self.__fwd_curve = splrep(self._fwdTenorsNumeric, self.fwd_values)
+        self.__fwd_curve = splrep(self._fwd_tenors_numeric, self.fwd_values, k=self.INTERPOLATION_DEGREE)
         return self.__fwd_curve
 
-    def fwd_value(self, fwd_date : [datetime.date, float, List[datetime.date]]) -> float:
+    def fwd_value(self, fwd_date : Union[datetime.date, float, List[datetime.date]]) -> Union[float, List[float]]:
         """ Gets the forward value for the forward date fwd_date.
 
-        :param fwd_date:
+        :param fwd_date: date for which the forward value is to be computed.
         """
 
-        if isinstance(fwd_date, list):  # TODO: list is problematic, as it can be list[float] or list[datetime.date]
-            return splev([self.__relative_date(fwd_dates) for fwd_dates in fwd_date]
-                                           , self._fwd_curve)
+        if isinstance(fwd_date, list):
+            return [splev(self.__relative_date(fwd_dates), self._fwd_curve)[0] for fwd_dates in fwd_date]
 
         if isinstance(fwd_date, datetime.date):
-            return splev(self.__relative_date(fwd_date), self._fwd_curve)
+            return splev(self.__relative_date(fwd_date), self._fwd_curve)[0]
 
         if isinstance(fwd_date, float):
-            return splev(fwd_date, self._fwd_curve)
+            return splev(fwd_date, self._fwd_curve)[0]
 
         raise FwdCurveException('Forward value {0} not recognized'.format(str(fwd_date)))
 
