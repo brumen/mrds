@@ -84,13 +84,13 @@ class FwdCurve:
         """
 
         if isinstance(fwd_date, list):
-            return [splev(self.__relative_date(fwd_dates), self._fwd_curve)[0] for fwd_dates in fwd_date]
+            return [float(splev(self.__relative_date(fwd_dates), self._fwd_curve)) for fwd_dates in fwd_date]
 
         if isinstance(fwd_date, datetime.date):
-            return splev(self.__relative_date(fwd_date), self._fwd_curve)[0]
+            return float(splev(self.__relative_date(fwd_date), self._fwd_curve))
 
         if isinstance(fwd_date, float):
-            return splev(fwd_date, self._fwd_curve)[0]
+            return float(splev(fwd_date, self._fwd_curve))
 
         raise FwdCurveException('Forward value {0} not recognized'.format(str(fwd_date)))
 

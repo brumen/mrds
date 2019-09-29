@@ -9,7 +9,7 @@ import numpy as np
 from numpy import double, log, exp, sqrt
 
 from functools import lru_cache
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import scipy
 import scipy.stats
@@ -33,6 +33,8 @@ if config.CUDA_PRESENT:
 import ds
 from pricers.pricers import black_greeks
 # import vols.vols_fast as vols_fast
+from forward_curve import FwdCurve
+
 
 logger = logging.Logger(__name__)
 
@@ -96,6 +98,7 @@ class Volatility:
                   , fwd_params = ds.get_forward_curve(com_name, mkt_date)
                   , vol_params = ds.get_vol_curve(com_name, mkt_date) )
 
+    @property
     def _vol_dates(self) -> List[datetime.date]:
         """ Volatility dates.
         """
@@ -410,6 +413,7 @@ class ATMFVolatility(Volatility):
 
     @property
     def _vol_dates(self):
+        # TODO: THIS IS WRONG, DATES, NOT string
         return 'volDates'
 
     def atm_vol(self, fwdDate_ : datetime.date):
@@ -778,7 +782,7 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
         root.mainloop()
 
 
-class c0c1c2Volatility(Volatility):
+class C0C1C2Volatility(Volatility):
     """ c0-c1-c2 volatility parametrization
         _smooth_ind is the smoothness indicator
         _alpha is the smoothness factor
@@ -787,50 +791,58 @@ class c0c1c2Volatility(Volatility):
     def __init__(self
                  , com_name : str
                  , mkt_date : datetime.date
-                 , fwd_params
-                 , vol_params ):
-        super(c0c1c2Volatility, self).__init__(com_name, mkt_date, fwd_params=fwd_params, vol_params=vol_params)
-        vol_numbers = vol_params['vol_numbers']
-        self._c0        = vol_numbers[:, 0]  # vector of c0s
-        self._c1        = vol_numbers[:, 1]  # vector of c1s
-        self._c2        = vol_numbers[:, 2]
-        self._theta      = vol_numbers[:, 3]
-        self._smooth_ind = vol_numbers[:, 4]
-        self._alpha      = vol_numbers[:, 5]
+                 , fwd_params : FwdCurve
+                 , vol_params : Dict[datetime.date, List]):
+        super(C0C1C2Volatility, self).__init__(com_name, mkt_date, fwd_params=fwd_params, vol_params=vol_params)
+        self.__vol_dates = list(vol_params.keys())  # TODO: CHECK THIS PART
 
-        self.__vol_dates = vol_params['vol_dates']
-
+    @property
     def _vol_dates(self) -> List[datetime.date]:
         return self.__vol_dates
 
-    def _get_c0c1c2(self, ttm : datetime.date) -> Tuple[float, float, float]:
-        return (1., 2., 3.)
+    def _get_next_date(self, fwd_date : datetime.date ) -> datetime.date:
+        """ Returns the next date on the forward curve after fwd_date.
 
-    def implied_vol(self, fwd_value : float, ttm : datetime.date):
+        :param fwd_date: the date after which we are searching on the curve.
+        :returns: date after the fwd_date on the forward curve
+        """
+
+        fd_better = [fd for fd in self._vol_dates if fd > fwd_date]
+
+        if fd_better:  # the list of larger dates is not empty
+            return fd_better[0]
+
+        # else returns the last date on the curve
+        return self._vol_dates[-1]
+
+    def _get_c0c1c2(self, ttm : datetime.date) -> Tuple[float, float, float, float, float]:
+        next_date = self._get_next_date(ttm)
+        return self._vol_params[next_date]
+
+    def implied_vol(self, fwd_value : float, ttm : datetime.date, smooth_ind=True) -> float:
         """ Computes the implied volatility of quadratic volatility surface.
 
         :param fwd_value: forward value for which to compute
         :param ttm: time-to-maturity
+        :param smooth_ind: indicator whether to smooth the curve.
         """
 
         atm_strike = self._fwd_params.fwd_value(ttm)
         z = np.log(fwd_value / atm_strike)
 
-        c0, c1, c2 = self._get_c0c1c2(ttm)
+        c0, c1, c2, theta, alpha = self._get_c0c1c2(ttm)
 
         v = c0 + c1 * z + c2**2 * z**2
-        sigma_star = c0 * self._theta - self._alpha * (c0 * self._theta - c0)
-        a = c0 * self._theta - sigma_star
+        sigma_star = c0 * theta - alpha * (c0 * theta - c0)
+        a = c0 * theta - sigma_star
 
         # TODO: CHECK IF BELOW IS arctan or arctan2
-        gv = 2. * a / np.pi * np.arctan ( np.pi / (2 * a) * (v - sigma_star) ) + sigma_star
-
-        if self._smooth_ind:
-            return v  if v < sigma_star else gv
+        if smooth_ind:
+            return v if v < sigma_star else 2. * a / np.pi * np.arctan ( np.pi / (2 * a) * (v - sigma_star) ) + sigma_star
 
         # smooth_ind == False, some additional logic
-        if v >= c0 * self._theta:
-            return c0 * self._theta
+        if v >= c0 * theta:
+            return c0 * theta
 
         return v
 
