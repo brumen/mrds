@@ -1,8 +1,13 @@
 # JWSS7 volatility structure
 import datetime
 import numpy as np
+import logging
+
+from functools       import lru_cache
 
 from vols.vols import Volatility
+
+logger = logging.getLogger(__name__)
 
 
 class JWSS7Volatility(Volatility):
@@ -10,17 +15,11 @@ class JWSS7Volatility(Volatility):
     """
 
     @property
-    def _vol_name(self):
-        return 'JWSS7'
-
-    @property
     def _vol_dates(self):
         return 'vol_dates'
 
-    def atmVol( self
-              , fwdDate : datetime.date ) -> np.double :
-        """
-        Returns the atm forward for the fwd date fwd_date.
+    def atm_vol(self, fwdDate : datetime.date) -> np.double:
+        """ Returns the atm forward for the fwd date fwd_date.
 
         :param fwdDate: forward date for which the ATM is constructed
         """
@@ -29,8 +28,7 @@ class JWSS7Volatility(Volatility):
 
     @lru_cache(maxsize=None)
     def _transform_from_jwss7(self, fwdDate : datetime.date ):
-        """
-        Returns jw7 parametrization from jwss7 for particular fwd date.
+        """ Returns jw7 parametrization from jwss7 for particular fwd date.
 
         vol_params in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
         vol_params in jw7  : [S0, atm, A   , B    , C       , P      , alphaC   , alphaP  ]
@@ -52,51 +50,44 @@ class JWSS7Volatility(Volatility):
                 'alphaC' : call_bend,
                 'alphaP' : put_bend }
 
-    def _vol_compute(self, fwdUsed : datetime.date, z : np.double ):
+    def _vol_compute(self, fwdUsed : datetime.date, z : float ) -> float:
         """
         Computes the volatility given the following parameters:
 
         :param z: normalized strike
-        :param alphaC, alphaP, ...: parameters for the JW7 parametrization.
-
         """
 
         volParams = self._transform_from_jwss7(fwdUsed)
 
-        return volParams['sigma_0'] * sqrt(1. + volParams['A'] * log(volParams['B'] * exp(volParams['C'] * (z / (1.0 + z * z) ** (volParams['alphaC']/2))) + \
-                                                                     (1. - volParams['B']) * exp(- volParams['P'] * (z / (1.0 + z * z) ** (volParams['alphaP']/2)))))
+        return volParams['sigma_0'] * np.sqrt(1. + volParams['A'] * np.log(volParams['B'] * np.exp(volParams['C'] * (z / (1.0 + z * z) ** (volParams['alphaC']/2))) + \
+                                                                     (1. - volParams['B']) * np.exp(- volParams['P'] * (z / (1.0 + z * z) ** (volParams['alphaP']/2)))))
 
-    def implied_vol(self, fwdDate_ : datetime.date or int, K : np.double, ttm : np.double):
-        """
-        Implied vol for the fwd
+    def implied_vol(self, fwd_date : [datetime.date, int], K : float, ttm : float) -> float:
+        """ Implied vol for the fwd_date.
 
-        :param fwd: forward tenor - could be either an integer, like 5,
-                    or datetime.date
-        :type fwd: int or datetime.date
+        :param fwd_date: date for which the volatility is to be computed.
         :param K: strike price
         :param ttm: time to maturity
         """
 
-        fwdUsed = fwdDate_ if isinstance(fwdDate_, int) else self._vol_for_date(fwdDate_)
-        volParams = self._transform_from_jwss7(fwdDate_)
+        volParams = self._transform_from_jwss7(fwd_date)
 
         _, fwdValues = self._fwd_params
 
-        return self._vol_compute( fwdUsed
+        return self._vol_compute( fwd_date
                                 , JWSS7Volatility.normalized_strike(fwdValues[fwdUsed]
                                                                     , np.array([K])
                                                                     , volParams['sigma_0']
                                                                     , ttm) )
 
-    def localVol(self, fwdDate : datetime.date, S, T, ttm):
-        """
-        Local volatility of the JWSS7 parametrization.
+    def local_vol(self, fwd_date : datetime.date, S : float, T : float, ttm : float) -> float:
+        """ Local volatility of the JWSS7 parametrization.
 
-        :param fwdDate: forward index that we are computing the local vol of
+        :param fwd_date: forward index that we are computing the local vol of
         :param ttm: option time to maturity
         """
 
-        jw7Params = self._transform_from_jwss7(fwdDate)
+        jw7Params = self._transform_from_jwss7(fwd_date)
         sigma_0 = jw7Params['sigma_0']
         A       = jw7Params['A']
         B       = jw7Params['B']
@@ -146,11 +137,11 @@ class JWSS7Volatility(Volatility):
                     (sigmaKK - d1 * sigmaK * sigmaK * ttm)
 
         # catching nan-s
-        if (up_part / down_part < 0.0):
+        if up_part / down_part < 0.:
             logger.info("Caution: Imaginary local vol., using ATM vol.")
             return sigma_0
 
-        return sqrt(up_part / down_part)
+        return np.sqrt(up_part / down_part)
 
     def callFutureT(self, fwdDate, S0, K, ttm):
         """

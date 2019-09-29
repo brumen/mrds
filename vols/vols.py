@@ -1,4 +1,4 @@
-# Implements volatility classes.
+# Implements base volatility class
 
 import config
 import logging
@@ -8,12 +8,10 @@ import datetime
 import numpy as np
 from numpy import double, log, exp, sqrt
 
-from functools import lru_cache
 from typing import List, Tuple, Dict
 
 import scipy
 import scipy.stats
-from scipy.stats import norm
 import scipy.interpolate  # spline package
 from openopt import NLP
 import matplotlib as mpl
@@ -26,14 +24,11 @@ import tkinter as tk
 
 if config.CUDA_PRESENT:
     import pycuda.autoinit  # this needs to be here.
-    import pycuda.gpuarray as gpa
     from pycuda.gpuarray import to_gpu
     from pycuda.compiler import SourceModule
 
 import ds
 from pricers.pricers import black_greeks
-# import vols.vols_fast as vols_fast
-from forward_curve import FwdCurve
 
 
 logger = logging.Logger(__name__)
@@ -214,12 +209,12 @@ class Volatility:
                                , T
                                , 0 )
         return (pr_delta - pr_0) / delta_K
-        return self.delta(S0, )
+        # return self.delta(S0, )
 
     def skewed_distribution(self, K, delta_K, ttm):
+        """ Gives the CDF of a skewed distribution using UN-discounted call values
         """
-        gives the CDF of a skewed distribution using UN-discounted call values
-        """
+
         return 1.0 + self.call_future_K(S0, K, ttm)
 
     def skewed_cdf_analy(self, K, quantile):
