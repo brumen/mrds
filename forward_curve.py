@@ -25,7 +25,7 @@ class FwdCurve:
                  , fwd_tenors : List[datetime.date]
                  , fwd_values : List[float]
                  , dcf = 365.25):
-        """ Forward curve class
+        """ Forward curve class.
 
         :param mkt_date: market date
         :param fwd_name: forward name of the curve
@@ -68,7 +68,6 @@ class FwdCurve:
     @property
     def _fwd_curve(self):
         """ Constructs the splined forward curve internally.
-
         """
 
         if self.__fwd_curve:
@@ -83,9 +82,11 @@ class FwdCurve:
         :param fwd_date: date for which the forward value is to be computed.
         """
 
+        # TODO: CHECK IF YOU CAN DO WITHOUT THE LIST in LIST
         if isinstance(fwd_date, list):
             return [float(splev(self.__relative_date(fwd_dates), self._fwd_curve)) for fwd_dates in fwd_date]
 
+        # IMPORTANT: float is _important_ here, splev returns a np.array
         if isinstance(fwd_date, datetime.date):
             return float(splev(self.__relative_date(fwd_date), self._fwd_curve))
 

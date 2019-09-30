@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from typing import Dict, List
 
 import ds_data
+from data.discount_data import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
+
 
 # forward codes
 fwd_mth_codes = ['f', 'g', 'h',
@@ -72,7 +74,9 @@ fwd_hash = { 'WTI':                (ds_data.wti_curve_dates, ds_data.wti_curve_v
            , 'NG_MICHCON_CASHVOL': (ds_data.ng_michcon_cv_curve_dates, ds_data.ng_michcon_cv_curve_vals)
            , 'PJMW-OFFPEAK_CV':    (ds_data.pjm_offpeak_cv_curve_dates, ds_data.pjm_offpeak_cv_curve_vals)
            , 'PJMW-PEAK_CV':       (ds_data.pjm_peak_cv_curve_dates, ds_data.pjm_peak_cv_curve_vals)
-           , 'DISCOUNT':           (ds_data.discount_curve_dates, ds_data.discount_curve_vals) }
+           , 'DISCOUNT':           (discount_curve_dates, discount_curve_vals)
+           , 'DISCOUNT_QL'       : discount_curve_ois_rates  # QuantLib ois rates.
+           , }
 
 
 def get_forward_curve( comName: str

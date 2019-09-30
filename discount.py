@@ -1,10 +1,10 @@
 import datetime
-import numpy as np
+import numpy    as np
+import QuantLib as ql
 
 from scipy.interpolate import splrep, splev
 
 from ds import get_forward_curve  # , fwd_codes
-# from convert_date import d2s
 
 
 def read_discount_curve(mkt_date: datetime.date, dcf=365.25):
@@ -24,14 +24,26 @@ def read_discount_curve(mkt_date: datetime.date, dcf=365.25):
                  , np.exp(-disc_tenors_numeric * discount_yields))  # interpolation function
 
 
-# def code_to_date(code_ : str) -> str:
-#     """ Converts fwd code (z15) into date 20151201.
-#
-#     :param code_: forward code.
-#     """
-#
-#     return ('20' + code_[1:3]) + d2s(fwd_codes[code_[0]]) + '01'
+def read_discount_curve_quantlib(mkt_date: datetime.date, dcf=365.25):
+    """ Returns the discount curve for a particular market date. Usues quantlib to construct it
 
+    :param mkt_date: market date
+    :param dcf: day-count factor.
+    :returns:
+    """
+
+    eonia_rates = get_forward_curve('DISCOUNT_QL', mkt_date)
+    ql.Settings.instance().evaluationDate = ql.Date(mkt_date)
+    eonia_helpers = [ql.OISRateHelper(2, ql.Period(*tenor), ql.QuoteHandle(ql.SimpleQuote(rate/100)), ql.Eonia() )
+                     for rate, tenor in eonia_rates]
+
+    eonia_curve_flat = ql.PiecewiseFlatForward(0, ql.TARGET(), eonia_helpers, ql.Actual365Fixed())
+    eonia_curve_flat.enableExtrapolation()
+
+    return eonia_curve_flat
+
+
+# TODO: THESE TWO FUNCTIONS SHOULD GO OUT.
 
 def DF_single( mktDate: datetime.date
              , fwdDate: datetime.date

@@ -20,7 +20,7 @@ from correlations  import corr_hyp_sec_mat
 from near_corr     import near_corr_simple
 from vols.vols     import getVolObject, Volatility  # , black_vol_inverse  TODO: ADD THIS black_vol_inverse back
 from vols.vols_basic import black_vol_inverse
-from discount      import read_discount_curve
+from discount      import read_discount_curve, read_discount_curve_quantlib
 from forward_curve import FwdCurve
 from quartic.quartic_cy import QuadRoots, CubicRoots, QuarticRoots
 from opd.opd_avx   import skew_fom
@@ -90,8 +90,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self.__black_vol_inverse_tol = 1e-4  # default value of the black vol inverse parameter
 
         # hashed values
-        self.__com_curve_names = None
-        self.__discount_function = None  # has for discount function
+        self.__com_curve_names      = None
+        self.__discount_function    = None  # has for discount function
+        self.__discount_function_ql = None  # placeholder for QuantLib discount function
         self.__factor_corr_mtx = dict()  # to keep track of the factor correlation matrices.
         self.__market_corr_mtx = dict()  # track of the market correlation matrix
         self.__complete_corr_mtx            = None  # complete correlation matrix hash
@@ -327,10 +328,22 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self.__discount_function
 
+    @property
+    def _discount_function_ql(self):
+        """ Returns the Quantlib discount function for the market date.
+        """
+
+        if self.__discount_function_ql:
+            return self.__discount_function_ql
+
+        self.__discount_function_ql = read_discount_curve_quantlib(self.mkt_date)
+
+        return self.__discount_function_ql
+
     def DF( self
-          , fwd_time : [str, np.double, float]
+          , fwd_time : [float, datetime.date]
           , dcf = 365.25 ):
-        """ Discount from self.mkt_date to t
+        """ Discount from self.mkt_date to fwd_time. Using basic discount curve.
 
         :param fwd_time: future time to discount to. can be '20140101', ...
         :param dcf: day-count factor.
@@ -346,6 +359,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             raise ComSkewError('fwd_time given in function DF is not of form [str, double, float]')
 
         return scipy.interpolate.splev(time_diff, self._discount_function)
+
+    def DF_ql(self, fwd_time :[datetime.date, float], dcf = 365.25 ):
+        """ Discount from self.mkt_date to t
+
+        :param fwd_time: future time to discount to. can be '20140101', ...
+        :param dcf: day-count factor.
+        """
+
+        return self.__discount_function_ql.discount(fwd_time)
 
     @staticmethod
     def _construct_corr(mtx_size, theta_vector):

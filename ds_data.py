@@ -631,14 +631,3 @@ pjm_offpeak_cv_curve_dates = ng_michcon_cv_curve_dates
 pjm_offpeak_cv_curve_vals = ng_michcon_gd_peak_curve_vals  # unimportant
 pjm_offpeak_cv_vol_dates = pjm_offpeak_cv_curve_dates
 pjm_offpeak_cv_vol_vals = ng_michcon_cv_vol_vals
-
-
-# discount curves
-discount_curve_dates = []
-for year in range(2015, 2027):  # appx 10 years
-    for month in range(1, 13):
-        discount_curve_dates.append(dt.date(year, month, 1))
-
-
-# discount_curve_vals = [0.003] * 12 + [0.01] * 13
-discount_curve_vals = [0.003] * len(discount_curve_dates)
