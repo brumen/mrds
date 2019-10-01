@@ -18,7 +18,8 @@ from mrds_maths    import ComMathsMixin
 from mrds_defaults import ComSkewDefaultsMixin
 from correlations  import corr_hyp_sec_mat
 from near_corr     import near_corr_simple
-from vols.vols     import getVolObject, Volatility  # , black_vol_inverse  TODO: ADD THIS black_vol_inverse back
+from vols.vols     import Volatility  # , black_vol_inverse  TODO: ADD THIS black_vol_inverse back
+from vols.vols_get import get_vol_object
 from vols.vols_basic import black_vol_inverse
 from discount      import read_discount_curve, read_discount_curve_quantlib
 from forward_curve import FwdCurve
@@ -91,6 +92,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         # hashed values
         self.__com_curve_names      = None
+        self.__vol_curve_names      = None
         self.__discount_function    = None  # has for discount function
         self.__discount_function_ql = None  # placeholder for QuantLib discount function
         self.__factor_corr_mtx = dict()  # to keep track of the factor correlation matrices.
@@ -145,27 +147,34 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self._com_fwd_curves
 
-    @property
-    def fwd_curve_names(self) -> Dict[str, FwdCurve]:
-        """ Memoizes the forward curve names.
+    def fwd_curve_names(self, asset : str) -> FwdCurve:
+        """ Memoizes the forward curve names and returns the forward curve for a particular asset.
+
+        :param asset: asset for which the forward curve is computed, e.g. ('WTI')
         """
+
         if self.__com_curve_names:
-            return self.__com_curve_names
+            return self.__com_curve_names[asset]
 
         self.__com_curve_names = {fwd_curve.fwd_name: fwd_curve for fwd_curve in self.fwd_curves}
-        return self.__com_curve_names
+        return self.__com_curve_names[asset]
 
     @property
     def vol_curves(self) -> List[Volatility]:
         return self._com_vol_curves
 
-    @property
-    def vol_curve_names(self):
+    def vol_curve_names(self, asset : str) -> Volatility:
+        """ Same as vol curves, but it produces a dictionary where keys are assets.
+
+        :param asset: asset for which vol you want to obtain (e.g. 'WTI')
+        """
+
         if self.__vol_curve_names:
-            return self.__vol_curve_names
+            return self.__vol_curve_names[asset]
 
         self.__vol_curve_names = {vol_curve.fwd_name: vol_curve for vol_curve in self.vol_curves}
-        return self.__vol_curve_names
+
+        return self.__vol_curve_names[asset]
 
 # TODO: INCLUDE THIS HERE
 #        , 'corr_init': np.array([[1., 0.5], [0.5, 1.]])
@@ -246,8 +255,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         return cls( mkt_date
-                  , [FwdCurve.from_db(mkt_date, fwdCurveName) for fwdCurveName in fwd_curves]
-                  , [getVolObject(fwd_curve, mkt_date) for fwd_curve in fwd_curves])  # TODO: VOL CURVE HAS TO BE REFACTORED
+                  , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
+                  , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
 
     @property
     def mkt_date(self) -> datetime.date:
@@ -553,25 +562,34 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return fwd_tenor
 
     def __distance_model_market_black_vol( self
-                                         , asset_nb
+                                         , asset
                                          , kappa_vec
                                          , sigma_vec
-                                         , rho_vec):
-        """ Distance between model & market black volatility, used for calibration.
+                                         , rho_vec
+                                         , fwd_tenors_restr = None ):
+        """ Distance between model & market black volatility, used for calibration of the entire curve.
 
-       :param asset_nb: asset to consider, e.g. 'WTI'
+       :param asset: asset to consider, e.g. 'WTI'
        :param kappa_vec: kappa vector to calibrate
        :param sigma_vec: sigma vector to calibrate for asset asset
        :param rho_vec: correlation _vector_ to calibrate
+       :param fwd_tenors_restr: perhaps you want to restrict the forward tenors to a pre-defined set
         """
 
-        return np.sum((np.array([self.black_vol( asset_nb
-                                               , kappa_vec
-                                               , sigma_vec
-                                               , self._construct_corr_asset(asset_nb, rho_vec)
-                                               , fwd_date )
-                                 for fwd_date in self.fwd_curves[asset_nb].fwd_tenors])
-                       - self.vol_curves[asset_nb].atmVol() ) ** 2)  # TODO: FIX THIS atm_vol
+        fwd_tenors = fwd_tenors_restr if fwd_tenors_restr else self.fwd_curve_names(asset).fwd_tenors
+
+        model_vol = [self.black_vol( asset
+                                   , kappa_vec
+                                   , sigma_vec
+                                   , self._construct_corr_asset(asset, rho_vec)
+                                   , fwd_date )
+                     for fwd_date in fwd_tenors ]
+
+        market_vol_curve = self.vol_curve_names(asset)
+        market_vol = [market_vol_curve.atm_vol(fwd_date) for fwd_date in fwd_tenors ]
+
+        return sum([(market_vol_elt - model_vol_elt)**2
+                    for market_vol_elt, model_vol_elt in zip(market_vol, model_vol)])
 
     @lru_cache(maxsize=MAX_ASSETS)
     def __kappa_sigma_rho(self, asset : str):
@@ -643,7 +661,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param tenors: list of tenors for which the beta is calibrated ( normally in form: List[datetime.date])
         """
 
-        tenors_used = tenors if tenors else self.vol_curves[asset].tenors
+        tenors_used = tenors if tenors else self.vol_curve_names(asset).tenors
 
         return self.vol_curves[asset].atmVol(tenors_used) / \
                np.array([ self.black_vol( asset
@@ -667,7 +685,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         corr = self._factor_corr_mat(asset, asset)  # correlation matrix
         kv = self._kappa_vec(asset)
         sv = self._sigma_vec(asset)
-        ft = self.fwd_curve_names[asset].fwd_values  # forward vector
+        ft = self.fwd_curve_names(asset).fwd_values  # forward vector
         nbf = self.nb_factors_for_asset(asset)
 
         a = np.array([corr[ind_1, ind_2] * sv[factor_nb_1] * sv[factor_nb_2] *
@@ -806,7 +824,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                          np.sqrt(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, tenor_date)))
 
         return np.exp((scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol ) * integrated_vol) * \
-               self.fwd_curve_names[asset].fwd_value(tenor_date)
+               self.fwd_curve_names(asset).fwd_value(tenor_date)
 
     @staticmethod
     def __integr_analy( real_roots_tsf
@@ -971,9 +989,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         strikes = self.__deltas_to_strikes(asset, fwd_date)  # TODO: fix this part
-        cp_ind = np.array([1 if (strike >= self.fwd_curve_names[asset].fwd_value(fwd_date)) else -1 for strike in strikes])
+        cp_ind = np.array([1 if (strike >= self.fwd_curve_names(asset).fwd_value(fwd_date)) else -1 for strike in strikes])
 
-        return np.array([black_vol_inverse(self.fwd_curve_names[asset].fwd_value(fwd_date)
+        return np.array([black_vol_inverse(self.fwd_curve_names(asset).fwd_value(fwd_date)
                                            , strike
                                            , opt_price
                                            , self.__option_tenor_for_fwd_tenor(asset, fwd_date)

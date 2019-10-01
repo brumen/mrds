@@ -24,8 +24,9 @@ import tkinter as tk
 
 if config.CUDA_PRESENT:
     import pycuda.autoinit  # this needs to be here.
-    from pycuda.gpuarray import to_gpu
+    from pycuda.gpuarray import to_gpu, GPUArray
     from pycuda.compiler import SourceModule
+
 
 import ds
 from pricers.pricers import black_greeks
@@ -310,8 +311,8 @@ class VolatilityDrawMixin:
         ttm_grid = np.arange(t_min, t_max, t_step)
 
         if cuda_ind:
-            K_grid_d = to_gpu(K_grid).astype(np.float32)  # K, ttm grid on device
-            ttm_grid_d = to_gpu(ttm_grid).astype(np.float32)
+            K_grid = to_gpu(K_grid).astype(np.float32)  # K, ttm grid on device
+            ttm_grid = to_gpu(ttm_grid).astype(np.float32)
 
         K_mesh, ttm_mesh = np.meshgrid(K_grid, ttm_grid)
         impl_surf = np.zeros((len(ttm_grid), len(K_grid)))
@@ -322,7 +323,7 @@ class VolatilityDrawMixin:
         self.lv_impl_surf()
 
         root = tk.Tk()  # root canvas
-        # plot market vols as initial
+        # plot initial market as initial
         fig = plt.figure()
         # construct canvas
         dataPlot_canvas = FigureCanvasTkAgg(fig, master=root)
@@ -357,7 +358,10 @@ class VolatilityDrawMixin:
 
         return (to_gpu(K_grid), to_gpu(ttm_grid))
 
-    def lv_impl_surf(self):
+    def _lv_impl_surf_cuda(self, K_grid : [GPUArray], ttm_grid : [GPUArray]):
+        """ Generates the local volatility surface.
+        """
+
 
         K_size = len(K_grid)
         ttm_size = len(ttm_grid)
@@ -372,38 +376,12 @@ class VolatilityDrawMixin:
 
         c_d = to_gpu(c).astype(np.float32)
         # compute both local and implied vol
-        comp_imp_vol(impl_surf_d, c_d, K_grid_d, ttm_grid_d,
-                     block=(ttm_size, 1, 1), grid=(K_size, 1))
+        comp_imp_vol(impl_surf_d, c_d, K_grid, ttm_grid, block=(ttm_size, 1, 1), grid=(K_size, 1))
         impl_surf = impl_surf_d.get()  # get impl. surf from device
-        comp_local_vol(lv_surf_d, c_d, K_grid_d, ttm_grid_d,
-                       block=(ttm_size, 1, 1), grid=(K_size, 1))
+        comp_local_vol(lv_surf_d, c_d, K_grid, ttm_grid, block=(ttm_size, 1, 1), grid=(K_size, 1))
         lv_surf = lv_surf_d.get()  # get local. surf from device
 
-    def update_graph(self, fwd, model, c, a, canvas):
-
-        model.set_params(fwd, c)  # sets the params in the model
-        if impl_local_ind == 'impl':
-            if cuda_ind:
-                impl_surf = model.gen_impl_surf_cuda(fwd,
-                                                     ttm_grid_d, K_grid_d,
-                                                     len(ttm_grid), len(
-                                                         K_grid),
-                                                     impl_surf_d, comp_imp_vol)
-            else:
-                # TO CORRECT HERE TO CORRECT HERE
-                # impl_surf = model.gen_impl_surf_v() # vol. surface on cpu
-                impl_surf = model.gen_impl_surf(
-                    fwd,
-                    ttm_grid,
-                    K_grid)  # vol. surface on cpu
-            a.plot_surface(K_mesh, ttm_mesh, impl_surf)
-        else:
-            if cuda_ind:
-                lv_surf = model.gen_lv_surf_cuda()  # local vol on cuda
-            else:
-                lv_surf = model.gen_lv_surf()  # local vol surface on cpu
-            a.plot_surface(K_mesh, ttm_mesh, lv_surf)
-        canvas.show()
+        return lv_surf
 
 
 class ATMFVolatility(Volatility):
@@ -415,24 +393,11 @@ class ATMFVolatility(Volatility):
         # TODO: THIS IS WRONG, DATES, NOT string
         return 'volDates'
 
-    def atm_vol(self, fwdDate_ : datetime.date):
+    def atm_vol(self, fwd_date : datetime.date) -> float:
         """ Returns the ATM volatility for the forward date fwd_date.
 
+        :param fwd_date: forward point on the vol curve.
+        :returns: atm volatility for that point.
         """
 
-        return self._volParams[self._vol_dates][self._vol_for_date(fwdDate_)]
-
-
-def getVolObject(comName : str, mkt_date : datetime.date) -> Volatility:
-    """ Gets the vol object for the commodity in question for the market date mkt_date
-
-    :param mkt_date: market date
-    :param
-
-    """
-
-    print('comname', comName)
-    volType, _, _, _ = ds.vol_hash[comName]
-
-    return {'JWSS7': JWSS7Volatility
-           , 'ATM' : ATMFVolatility }[volType](mkt_date, comName, comName)
+        return self._volParams[self._vol_dates][self._vol_for_date(fwd_date)]

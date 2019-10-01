@@ -2,9 +2,7 @@
 
 import config
 import logging
-
 import numpy as np
-import tkinter as tk
 
 from numpy import double, log, exp, sqrt
 
@@ -14,6 +12,7 @@ import matplotlib as mpl
 mpl.use('TkAgg')
 
 import vols.vols_fast as vols_fast
+
 
 if config.CUDA_PRESENT:
     import pycuda.autoinit  # this needs to be here.
@@ -244,37 +243,3 @@ def draw_surface( model
             a.plot_surface(K_mesh, ttm_mesh, lv_surf)
         canvas.show()
 
-    # same as for jw7 buttons
-    def c0c1c2_buttons(root, ax, dataPlot_canvas):
-        fct_update = lambda cc: update_graph(fwd, model, array(
-            [c0.get(), c1.get(), c2.get(), alpha.get()]), ax, dataPlot_canvas)
-
-        # parameter scales
-        c0 = tk.Scale( root
-                     , from_      = 80.0
-                     , to         = 120.0
-                     , resolution = 0.1
-                     , label      = 'c0'
-                     , orient     = tk.HORIZONTAL
-                     , command    = fct_update )
-        c1 = tk.Scale(root, from_=0.05, to=0.8, resolution=0.05, label="c1", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c2 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="c2", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        alpha = tk.Scale(root, from_=0.0, to=1.0, resolution=0.05, label="_alpha", orient=tk.HORIZONTAL,
-                      command=fct_update)
-
-        c0.grid(row=0, column=1)
-        c1.grid(row=1, column=1)
-        c2.grid(row=2, column=1)
-        alpha.grid(row=3, column=1)
-
-        # replot button
-        b1 = tk.Button(root, text="replot",
-                       command=lambda: update_graph(fwd,
-                                                    model,
-                                                    np.array([c0.get(), c1.get(), c2.get(), alpha.get()]),
-                                                    ax,
-                                                    dataPlot_canvas)).grid(row=8, column=0)
-        dataPlot_canvas.show()
-        root.mainloop()
