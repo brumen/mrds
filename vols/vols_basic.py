@@ -64,15 +64,14 @@ def black_vol_inverse_vec( F : float
                      for K, p in zip(K_vec, p_vec)]).ravel()
 
 
-def black_vol_inverse( F         : np.double
-                     , K         : np.double
-                     , p         : np.double
-                     , dt        : np.double
-                     , DF        : np.double
-                     , theta     : np.double
-                     , tolerance : np.double ):
-    """
-    Computation of black vol from option prices.
+def black_vol_inverse( F         : float
+                     , K         : float
+                     , p         : float
+                     , dt        : float
+                     , DF        : float
+                     , theta     : float
+                     , tolerance : float ):
+    """ Computation of black vol from option prices.
 
     :param F: forward price
     :param K: strike price

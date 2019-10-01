@@ -99,11 +99,20 @@ class C0C1C2VolatilityDraw(C0C1C2Volatility, VolatilityDrawMixin):
     """ c0c1c2 vol class w/ the ability to draw implied vol surfaces.
     """
 
+    def _update_graph( self
+                     , fwd_date : datetime.date
+                     , ttm      : datetime.date
+                     , c_vec : Tuple[float, float, float, float] ):
+
+        # TO UPDATE THE PARAMETERS.
+
+        return self.implied_surf(fwd_date, ttm_grid, K_grid)
+
     def _draw_buttons(self, root, ax, dataPlot_canvas):
         """ Draws the buttons of the C0C1C2 volatility.
 
         """
-        fct_update = lambda cc: self.update_graph( fwd
+        fct_update = lambda cc: self._update_graph( fwd_date
                                                  , model
                                                  , [c0.get(), c1.get(), c2.get(), alpha.get()]
                                                  , ax

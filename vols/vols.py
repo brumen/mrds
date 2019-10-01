@@ -259,7 +259,10 @@ class Volatility:
 
         return 2. * up_part / down_part / K**2
 
-    def implied_surf(self, fwd, ttm_grid : List[float], K_grid : List[float]) -> np.ndarray:
+    def implied_surf( self
+                    , fwd_date : datetime.date
+                    , ttm_grid : List[float]
+                    , K_grid   : List[float]) -> np.ndarray:
         """ Generates the implied vol surface for the following parameters:
 
         :param fwd: number of the forward contract
@@ -267,7 +270,7 @@ class Volatility:
         :param K_grid: list of strikes
         """
 
-        return np.array ( [ [self.implied_vol(fwd, K, ttm)
+        return np.array ( [ [self.implied_vol(fwd_date, K, ttm)
                              for K in K_grid]
                             for ttm in ttm_grid ] )
 
