@@ -3,9 +3,10 @@ import datetime
 import numpy as np
 import logging
 
-from functools       import lru_cache
+from functools import lru_cache
+from tkinter   import Scale, Button, HORIZONTAL
 
-from vols.vols import Volatility
+from vols.vols import Volatility, VolatilityDrawMixin
 
 logger = logging.getLogger(__name__)
 
@@ -312,30 +313,29 @@ class JWSS7Volatility(Volatility):
 
 class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
 
-    def jw7_buttons(self, fwd, root, ax, dataPlot_canvas):
-        fct_update = lambda cc: self.update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
-                                             dataPlot_canvas)
+    def _draw_buttons(self, fwd, root, ax, dataPlot_canvas):
+        """
         # root ... Tk root
         # ax ... Axes3D object
         # dataPlot_canvas ... canvas object
 
+        """
+
+        fct_update = lambda cc: self.update_graph( fwd
+                                                 , model
+                                                 , [c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]
+                                                 , ax
+                                                 , dataPlot_canvas )
+
         # parameter tk.SCALEs
-        c1 = tk.Scale(root, from_=80.0, to=120.0, resolution=0.1, label="S0", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c2 = tk.Scale(root, from_=0.05, to=0.8, resolution=0.05, label="sig", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c3 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.25, label="A", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c4 = tk.Scale(root, from_=0.0, to=1.0, resolution=0.05, label="B", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c5 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="C", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c6 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="P", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c7 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_C", orient=tk.HORIZONTAL,
-                   command=fct_update)
-        c8 = tk.Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_P", orient=tk.HORIZONTAL,
-                   command=fct_update)
+        c1 = Scale(root, from_=80.0, to=120.0, resolution=0.1, label="S0", orient=HORIZONTAL,command=fct_update)
+        c2 = Scale(root, from_=0.05, to=0.8, resolution=0.05, label="sig", orient=HORIZONTAL,command=fct_update)
+        c3 = Scale(root, from_=0.0, to=5.0, resolution=0.25, label="A", orient=HORIZONTAL,command=fct_update)
+        c4 = Scale(root, from_=0.0, to=1.0, resolution=0.05, label="B", orient=HORIZONTAL,command=fct_update)
+        c5 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="C", orient=HORIZONTAL,command=fct_update)
+        c6 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="P", orient=HORIZONTAL,command=fct_update)
+        c7 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_C", orient=HORIZONTAL,command=fct_update)
+        c8 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_P", orient=HORIZONTAL,command=fct_update)
 
         c1.grid(row=0, column=1)
         c2.grid(row=1, column=1)
@@ -347,8 +347,11 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
         c8.grid(row=7, column=1)
 
         # replot button
-        b1 = tk.Button(root, text="replot", command=lambda: update_graph(fwd, model, array([c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]), ax,
-                                                                      dataPlot_canvas)).grid(row=8, column=0)
+        b1 = Button(root, text="replot", command=lambda: update_graph( fwd
+                                                                     , model
+                                                                     , [c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]
+                                                                     , ax
+                                                                     , dataPlot_canvas )).grid(row=8, column=0)
 
         dataPlot_canvas.show()
         root.mainloop()

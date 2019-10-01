@@ -3,10 +3,11 @@
 
 import datetime
 
-from unittest import TestCase, TestLoader, TextTestRunner
+from unittest import TestCase
 
 from forward_curve   import FwdCurve
-from vols.vols       import JWSS7Volatility, C0C1C2Volatility
+from vols.jwss7      import JWSS7Volatility
+from vols.c0c1c2     import C0C1C2Volatility
 from data.c0c1c2vols import wti2_vol
 
 
@@ -32,5 +33,13 @@ class C0C1C2Tet(TestCase):
                                , mkt_date
                                , FwdCurve.from_db( mkt_date, 'WTI')
                                , wti2_vol )
+
+        self.assertTrue(False)
+
+    def test_c0c1c2_fake(self):
+
+        mkt_date = datetime.date(2015, 4, 1)
+        vol1 = C0C1C2Volatility.from_db( 'WTI'
+                                       , mkt_date )
 
         self.assertTrue(False)

@@ -2,11 +2,12 @@
 import datetime
 import numpy as np
 
-from typing import List, Dict, Tuple
+from tkinter import Scale, Button, HORIZONTAL
+from typing  import List, Dict, Tuple
 
 import ds
 from forward_curve import FwdCurve
-from vols.vols import Volatility
+from vols.vols import Volatility, VolatilityDrawMixin
 
 
 class C0C1C2Volatility(Volatility):
@@ -92,3 +93,47 @@ class C0C1C2Volatility(Volatility):
             return c0 * theta
 
         return v
+
+
+class C0C1C2VolatilityDraw(C0C1C2Volatility, VolatilityDrawMixin):
+    """ c0c1c2 vol class w/ the ability to draw implied vol surfaces.
+    """
+
+    def _draw_buttons(self, root, ax, dataPlot_canvas):
+        """ Draws the buttons of the C0C1C2 volatility.
+
+        """
+        fct_update = lambda cc: self.update_graph( fwd
+                                                 , model
+                                                 , [c0.get(), c1.get(), c2.get(), alpha.get()]
+                                                 , ax
+                                                 , dataPlot_canvas )
+
+        # parameter scales
+        c0 = Scale( root
+                     , from_      = 80.0
+                     , to         = 120.0
+                     , resolution = 0.1
+                     , label      = 'c0'
+                     , orient     = HORIZONTAL
+                     , command    = fct_update )
+
+        c1 = Scale(root, from_=0.05, to=0.8, resolution=0.05, label="c1", orient=HORIZONTAL,command=fct_update)
+        c2 = Scale(root, from_=0.0, to=5.0, resolution=0.25, label="c2", orient=HORIZONTAL,command=fct_update)
+        alpha = Scale(root, from_=0.0, to=1.0, resolution=0.05, label="_alpha", orient=HORIZONTAL,command=fct_update)
+
+        c0.grid(row=0, column=1)
+        c1.grid(row=1, column=1)
+        c2.grid(row=2, column=1)
+        alpha.grid(row=3, column=1)
+
+        # replot button
+        b1 = Button( root
+                   , text = "replot"
+                   , command = lambda: self.update_graph( fwd
+                                                        , model
+                                                        , [c0.get(), c1.get(), c2.get(), alpha.get()]
+                                                        , ax
+                                                        , dataPlot_canvas ) ).grid(row=8, column=0)
+        dataPlot_canvas.show()
+        root.mainloop()
