@@ -1,32 +1,34 @@
 from config import CUDA_PRESENT
 
+from typing import Tuple, Union
+
 import numpy as np
 import scipy.integrate
 import scipy.stats
 import scipy.interpolate
 import logging
 
+import QuantLib as ql
+
 if CUDA_PRESENT:
     import pycuda.autoinit
     import cuda.cuda_ops as co
 
-import ds, sg, vols, pricers.pricers_fast as pricers_fast
+import sg
+import pricers.pricers_fast as pricers_fast
 
+from vols.vols_basic import sam_int
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
 def cdf_vec(x, ci=False):
-    """
-    Computes the cdf of either x which is on the host or the device
-
-    on 100.000 elts, the gpu is approximately 10x faster than cpu
+    """ Computes the cdf of either x which is on the host or the device.
+           on 100.000 elts, the gpu is approximately 10x faster than cpu
 
     :param ci: indicator whether to use cuda
-    :type ci: bool
     :returns: vector of cdf, if ci = False, then the memory allocation is on CPU, else on GPU
-    :rtype:
     """
 
     return cdf_vec_cpu(x) if not ci else co.cdf_vec_gpu(x)
@@ -42,7 +44,7 @@ def cdf_vec_cpu(x: np.array) -> np.array:
 
     """
 
-    l  = np.abs(np.array(x))
+    l  = np.abs(x)
     k  = 1. / (1. + 0.2316419 * l)
     k2 = k**2
     k4 = k2**2
@@ -51,14 +53,12 @@ def cdf_vec_cpu(x: np.array) -> np.array:
     w = 1. - 0.3989422804 * np.exp(-l*l / 2) * (0.31938153 * k -0.356563782 * k2 +
                                                 1.781477937 * k2 * k + -1.821255978 * k4 + 1.330274429 * k4 * k)
 
-    # TODO: This part here is not optimal, as it computes both, but maybe it's faster than the conditional jump
-    return w * (x >= 0.) + (1. - w) * (x < 0.)
+    xPos = x >= 0.
+    return w * xPos + (1. - w) * (~xPos)
 
 
 def pdf_vec(x: np.array) -> np.array :
-    """
-    Standardized normal vector of pdfs.
-
+    """ Standardized normal vector of pdfs.
     """
 
     return np.exp(-x**2/2.)/np.sqrt(2. * np.pi)
@@ -174,14 +174,14 @@ def apo_long_f(args):
                                       t, beta, sigma_L, cp_ind)
 
 
-def black_greeks( S_0   : np.double
-                , K     : np.double
-                , r     : np.double
-                , sigma : np.double
-                , T     : np.double
+def black_greeks( S_0   : float
+                , K     : float
+                , r     : float
+                , sigma : float
+                , T     : float
                 , cp_ind     = 'c'
                 , price_only = False
-                , fast_appx  = True ) -> np.array:
+                , fast_appx  = True ) -> Union[float, Tuple]:
     """
     Black's formula implementation.
 
@@ -226,19 +226,32 @@ def black_greeks( S_0   : np.double
               r * K * disc * scipy.stats.norm.cdf(-d2) - r * S_0 * disc * scipy.stats.norm.cdf(-d1)
         rho   = - K * T * disc * scipy.stats.norm.cdf(-d2)  # TODO: THIS CAN BE MADE FASTER.
 
-    return np.array([black, delta, gamma, vega, theta, rho])
+    return (black, delta, gamma, vega, theta, rho)
 
 
-def black_simple(mktDate, comName, expiry, strike):
-    """
-    Simple version of the black volatility.
+def black_quantlib( S_0   : float
+                  , K     : float
+                  , r     : float
+                  , sigma : float
+                  , calc_date : ql.Date
+                  , maturity  : ql.Date
+                  , day_count = ql.ActualActual()
+                  , cp_ind     = 'c'
+                  , price_only = False ) -> Union[float, Tuple]:
 
-    """
+    yield_curve = ql.FlatForward(calc_date, r, day_count, ql.Compounded, ql.Continuous)
+    ql.Settings.instance().evaluationDate = calc_date
+    flavor = ql.Option.Call if cp_ind == 'c' else ql.Option.Put
+    T = yield_curve.dayCounter().yearFraction(calc_date, maturity)
+    black = ql.BlackCalculator( ql.PlainVanillaPayoff(flavor, K)
+                              , S_0
+                              , sigma * np.sqrt(T)
+                              , yield_curve.discount(maturity))
 
-    ttm = ds.time_diff(mktDate, expiry)  # time to maturity
-    sigma_u = vols.vols.getVolObject(mktDate, comName).implied_vol(tenor_idx, strike, )
+    if price_only:
+        return black.value()
 
-    return black_greeks(S0, strike, -np.log(ds.DF(mktDate, expiry))/ttm, sigma_u, ttm)
+    return (black.value(), black.delta(), black.gamma(), black.vega(), black.theta(), black.rho())
 
 
 def trivariate_spread_kirk(F_v, K, sigma_v, rho, T, DF,
@@ -323,8 +336,8 @@ def multivariate_spread_mm(multi_option_fct, l, K, sim_t_i, T, mm, fwd_idx):
     mm is the market model containing values:
       nb_assets
       simulated_curves (standard form, refer to mrds doc)
-      V_fct_current
-      market_corr_list
+      __V_current
+      _market_corr
       discount function
       simulation_times
     tri_option_fct ... function that computes the value of the trivariate option
@@ -339,9 +352,9 @@ def multivariate_spread_mm(multi_option_fct, l, K, sim_t_i, T, mm, fwd_idx):
     F_v_mat = np.kron(l.reshape (multi_nb,1), np.ones(mm.simulated_curves[0].shape[2])) * \
               np.array([mm.simulated_curves[asset][sim_t_i, fwd_idx, :]
                         for asset in range(mm.nb_assets)])
-    sigma_v = np.array([np.sqrt(mm.V_fct_current (asset_nb, fwd_idx, T) / T )
+    sigma_v = np.array([np.sqrt(mm.__V_current (asset_nb, fwd_idx, T) / T)
                         for asset_nb in range(mm.nb_assets)]) # !!! WRONG WRONG WRONG
-    rho = [mm.market_corr_list[i][j][fwd_idx]
+    rho = [mm._market_corr[i][j][fwd_idx]
            for i in range(mm.nb_assets)
            for j in range(i+1,mm.nb_assets)]
     DF = scipy.interpolate.splev(T, mm.discount_function) / \
@@ -461,8 +474,8 @@ def apoLong(F_c, K, df, T, sigma_c, rho_mat, Ti_c, ti_c, t, beta, sigma_L,
         t2 = sigma_L * (np.exp(-beta * (T_b - t_i)) - np.exp(-beta * (T_b - t)) +
                         np.exp(-beta * (T_a - t_i)) - np.exp(-beta * (T_a - t))) / beta
         t3 = (np.exp(-2 * beta * ((T_a + T_b) / 2. - t_i)) - np.exp(-2 * beta * ((T_a + T_b) / 2. - t))) / (2*beta)
-        return (t1 + t2 + t3) / ((t_i - t) * vols.sam_int(t, T_a, T_a, beta, sigma_L) *
-                                 vols.sam_int(t, T_b, T_b, beta, sigma_L))
+        return (t1 + t2 + t3) / ((t_i - t) * sam_int(t, T_a, T_a, beta, sigma_L) *
+                                 sam_int(t, T_b, T_b, beta, sigma_L))
 
     M_1 = np.mean(F_c)
     M_2_term1 = F_c**2 * np.array([np.exp(A(Ti_c[i], Ti_c[i], t, Ti_c[i]) *
