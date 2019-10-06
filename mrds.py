@@ -176,10 +176,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if self.__vol_curve_names:
             return self.__vol_curve_names[asset]
 
-        self.__vol_curve_names = {vol_curve.fwd_name: vol_curve for vol_curve in self.vol_curves}
+        self.__vol_curve_names = {vol_curve.com_name: vol_curve for vol_curve in self.vol_curves}
 
         return self.__vol_curve_names[asset]
-
 
     def _set_factor_corr_mat(self, asset_1, asset_2, new_corr_mtx = None, lb_ub_ind=None):
         """ Returns the factor correlation between assets 1 & 2. If new_corr_mtx is provided,
@@ -671,35 +670,42 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                         , tenor)
                          for tenor in tenors_used])
 
-    def __black_corr_within_curve(self, asset : str, ind_1 : int, ind_2 : int):
-        """ Cummulative correlation between the ind_1-th and the ind_2-th future's contract
+    def __numerical_dist_to_mktdate(self, fwd_date : datetime.date, dcf=365.25):
+        return (fwd_date - self.mkt_date).days / dcf
+
+
+    def __black_corr_within_curve( self, asset : str
+                                 , fwd_date_1 : datetime.date
+                                 , fwd_date_2 : datetime.date ):
+        """ Cummulative correlation between the fwd_date_1 and fwd_date_2 points on the forward curve.
             up to the option time of the smallest of the two contracts
 
         :param asset: curve asset
-        :param ind_1: contract ind_1 on the curve
-        :param ind_2: contract ind_2 on the curve
+        :param fwd_date_1: first contract on the curve
+        :param fwd_date_2: second contract on the curve
         """
 
-        # TODO: opt_mat is WRONG
-        opt_mat = self.__option_tenor_for_fwd_tenor(asset, np.min(ind_1, ind_2))  # opt_mat until the smallest one
+        opt_mat = self.__option_tenor_for_fwd_tenor(asset, fwd_date_1 if fwd_date_1 <= fwd_date_2 else fwd_date_2)  # opt_mat until the smallest one
+        num_fwd_opt_date_1 = self.__numerical_dist_to_mktdate(fwd_date_1) - self.__numerical_dist_to_mktdate(opt_mat)
+        num_fwd_opt_date_2 = self.__numerical_dist_to_mktdate(fwd_date_2) - self.__numerical_dist_to_mktdate(opt_mat)
+        num_fwd_date_1 = self.__numerical_dist_to_mktdate(fwd_date_1)
+        num_fwd_date_2 = self.__numerical_dist_to_mktdate(fwd_date_2)
         corr = self._factor_corr_mat(asset, asset)  # correlation matrix
         kv = self._kappa_vec(asset)
         sv = self._sigma_vec(asset)
-        ft = self.fwd_curve_names(asset).fwd_values  # forward vector
         nbf = self.nb_factors_for_asset(asset)
 
-        a = np.array([corr[ind_1, ind_2] * sv[factor_nb_1] * sv[factor_nb_2] *
+        a = np.array([corr[factor_nb_1, factor_nb_1] * sv[factor_nb_1] * sv[factor_nb_2] *
                       np.product(self._beta_T[asset]) *
-                      (np.exp(- kv[factor_nb_1] * (ft[ind_1] - opt_mat) -
-                              kv[factor_nb_2] * (ft[ind_2] - opt_mat) ) -
-                       np.exp(- kv[factor_nb_1] * ft[ind_1] -
-                              kv[factor_nb_2] * ft[ind_2])) /
+                      (np.exp(- kv[factor_nb_1] * num_fwd_opt_date_1 - kv[factor_nb_2] * num_fwd_opt_date_2 ) -
+                       np.exp(- kv[factor_nb_1] * num_fwd_date_1 - kv[factor_nb_2] * num_fwd_date_2)) /
                       (kv[factor_nb_1] + kv[factor_nb_2])
                       for factor_nb_1 in range(nbf)
                       for factor_nb_2 in range(nbf)])
 
-        return (np.exp(np.sum(a)) - 1.) / self.black_vol(asset, kv, sv, ind_1) / \
-               self.black_vol(asset, kv, sv, ind_2)  # covariance divided by 2 standard deviations
+        # covariance divided by 2 standard deviations
+        return (np.exp(np.sum(a)) - 1.) / self.black_vol(asset, fwd_date_1, kv, sv, corr) / \
+               self.black_vol(asset, fwd_date_2, kv, sv, corr)
 
     def black_corr_intra_curves( self
                                , model_corr_mtx
@@ -707,7 +713,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                , curve_2 : str
                                , tenor_1 : datetime.date
                                , tenor_2 : datetime.date ) -> np.double:
-        """
+        """ Returns the black correlation between different curves and different forward points.
 
         :param curve_1: name of the first curve
         :param curve_2: name of second commodity curve
@@ -717,7 +723,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         t_1 = self.__option_tenor_for_fwd_tenor(curve_1, tenor_1)
         t_2 = self.__option_tenor_for_fwd_tenor(curve_2, tenor_2)
-        opt_mat = t_1 if  t_1 <= t_2 else t_2  # opt_mat until the smallest one
+        opt_mat = t_1 if t_1 <= t_2 else t_2  # opt_mat until the smallest of the two tenors
         kv1 = self._kappa_vec(curve_1)
         kv2 = self._kappa_vec(curve_2)
 
@@ -768,6 +774,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1.) / \
                (kv1[factor_nb_1] + kv2[factor_nb_2]) / (bv1 * bv2)
 
+    # TODO: CHECK IF THIS METHOD IS EVEN NEEDED.
     def __black_corr_intra_curves_calib( self
                                        , curve_1 : str
                                        , curve_2 : str
@@ -941,13 +948,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param call_put_ind: indicator whether this is a call or a put.
         :param ttm: time to maturity of the option.
         :param debug_mode: debug mode, computes the value numerically
-
         """
 
         # obtaining the coefficients
-        A0, A1, A2, A3, A4, V = ComSkew.__unpack_params( self.skew_params(asset_nb, C_vec, opt_mat_idx)
-                                                       , call_put_ind
-                                                       , strike)
+        A0, A1, A2, A3, A4, V = self.__class__.__unpack_params( self.skew_params(asset_nb, C_vec, opt_mat_idx)
+                                                              , call_put_ind
+                                                              , strike )
 
         if debug_mode:
             poly_roots = np.sort(np.poly1d([A4, A3, A2, A1, A0]).roots)
@@ -971,14 +977,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         #else:  # production mode
 
         return self.DF(ttm) * \
-                   ComSkew.__integr_analy( real_roots / V
-                                         , np.sum(poly_roots == poly_roots.real)  # number of real roots
-                                         , A0
-                                         , A1
-                                         , A2
-                                         , A3
-                                         , A4
-                                         , V )
+                   self.__class__.__integr_analy( real_roots / V
+                                                , np.sum(poly_roots == poly_roots.real)  # number of real roots
+                                                , A0
+                                                , A1
+                                                , A2
+                                                , A3
+                                                , A4
+                                                , V )
 
     def _default_deltas_for_skew(self):
         """ Default deltas to be used for calibration. - simple here, can be overwritten
@@ -1283,7 +1289,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         np.random.seed(seed=seed)
 
-        sim_times = self.vol_curves[asset].vol_tenors if not tenors_list else self.vol_curves[asset].vol_tenors[tenors_list]
+        sim_times = self.vol_curve_names(asset).vol_tenors if not tenors_list else self.vol_curve_names(asset).vol_tenors[tenors_list]
         complete_corr_mtx = self._complete_corr_mtx()
 
         # looping over tenors
