@@ -7,7 +7,7 @@ import numpy as np
 import scipy
 import scipy.stats
 import scipy.interpolate  # spline package
-from openopt         import NLP, NSP  # CHECK THIS HERE!!1
+from openopt         import NLP, NSP
 from logging         import Logger
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
@@ -640,7 +640,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return self.__kappa_sigma_rho(asset).xf[nbf:(2 * nbf)]
 
     @lru_cache(maxsize=_LRU_CACHE_SIZE_CALIB)
-    def __factorCorrMatList(self, asset : str):
+    def __factor_corr_mat_list(self, asset : str):
         """ Factor correlation matrix
             TODO: FIX THIS!!! WHAT DOES THIS SERVE!!!
 
@@ -810,10 +810,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         correlation_matrix = np.array(optim_pr.xf).reshape((curve_1_nb_fact, curve_2_nb_fact))
 
-        self.__factorCorrMatList[curve_1][curve_2] = correlation_matrix
-        self.__factorCorrMatList[curve_2][curve_1] = correlation_matrix
+        self.__factor_corr_mat_list[curve_1][curve_2] = correlation_matrix
+        self.__factor_corr_mat_list[curve_2][curve_1] = correlation_matrix
 
-        return self.__factorCorrMatList[curve_1][curve_2]
+        return self.__factor_corr_mat_list[curve_1][curve_2]
 
     def __deltas_to_strikes(self
                             , asset : str
@@ -1063,7 +1063,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def _complete_corr_mtx(self, nb_steps=300) -> np.ndarray:
         """  Generates the factor correlation matrix from a list of list of corr. matrices
-        gathered in __factorCorrMatList
+        gathered in __factor_corr_mat_list
 
         :param nb_steps: number of steps to converge to the correlation matrix, maybe 30 steps is enough
         :returns: None, just sets the self.__completeCorrMat

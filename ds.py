@@ -3,7 +3,7 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import ds_data
 from data.discount_data import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
@@ -141,22 +141,21 @@ def get_forward_curve_plot(fwd, date_):
     plt.show()
 
 
-def get_vol_curve( comName : str
-                 , mktDate : datetime.date) -> Dict:
+def get_vol_curve( com_name : str
+                 , mkt_date : datetime.date) -> Tuple[str, Dict]:
     """ Gets the vol curve com_name for a particular market date.
         In out example, we don't use the second parameter.
 
-    :param comName: commodity name
-    :param mktDate: datetime.date
+    :param com_name: commodity name of the commodity you want to fetch.
+    :param mkt_date: market date for the curve
+    :returns: a tuple of (commodity typ e.g. 'JWSS7', and vol curve,
+              where the vol curve is indexed by vol dates, and contains the vol parameters.
+              in case of JWSS7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
     """
 
-    volType, volDates, volCurve, volCurveWithDates = vol_hash[comName]
+    vol_type, _, _, vol_curve_with_dates = vol_hash[com_name]
 
-    return { 'vol_name'            : comName
-           , 'vol_type'            : volType
-           , 'vol_dates'           : volDates
-           , 'vol_curve'           : volCurve
-           , 'vol_curve_with_dates': volCurveWithDates }
+    return (vol_type, vol_curve_with_dates)
 
 
 def get_fwd_vol_curve_numeric_tenor( curveName : str
