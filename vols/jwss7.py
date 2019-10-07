@@ -3,9 +3,12 @@ import datetime
 import numpy as np
 import logging
 
+from typing import List, Dict
+
 from functools import lru_cache
 from tkinter   import Scale, Button, HORIZONTAL
 
+import ds
 from vols.vols import Volatility, VolatilityDrawMixin
 
 logger = logging.getLogger(__name__)
@@ -16,52 +19,63 @@ class JWSS7Volatility(Volatility):
     """
 
     @property
-    def _vol_dates(self):
-        return 'vol_dates'
+    def _vol_dates(self) -> List[datetime.date]:
+        ''' Returns the curve spine points, i.e. the points on the curve from which the curve is interpolated.
+        '''
 
-    def atm_vol(self, fwdDate : datetime.date) -> np.double:
+        return self._vol_params.keys()
+
+    def atm_vol(self, fwd_date : datetime.date) -> float:
         """ Returns the atm forward for the fwd date fwd_date.
 
-        :param fwdDate: forward date for which the ATM is constructed
+        :param fwd_date: forward date for which the ATM is constructed
         """
 
-        return self._volParams['vol_curve'][self._vol_for_date(fwdDate)][0]  # first elt is atm vol.
+        return self._vol_params[self._vol_for_date(fwd_date)][0]  # first elt is atm vol.
 
-    @lru_cache(maxsize=None)
-    def _transform_from_jwss7(self, fwdDate : datetime.date ):
+    @classmethod
+    def from_db(cls, com_name : str, mkt_date : datetime.date):
+        vol_type, vol_params = ds.get_vol_curve(com_name, mkt_date)
+        if vol_type != 'JWSS7':
+            raise RuntimeError('Fetching the wrong curve. {0} has type {1}'.format(com_name, vol_type))
+
+        return cls( com_name
+                  , mkt_date
+                  , fwd_params = ds.get_forward_curve(com_name, mkt_date)
+                  , vol_params = cls._transform_from_jwss7(vol_params) )
+
+    @staticmethod
+    def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, List]:
         """ Returns jw7 parametrization from jwss7 for particular fwd date.
 
         vol_params in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
         vol_params in jw7  : [S0, atm, A   , B    , C       , P      , alphaC   , alphaP  ]
         """
 
-        nthContract = self._vol_for_date(fwdDate)
-        volParams   = self._volParams['vol_curve'][nthContract]
+        transformed_curve = {}
+        for fwd_vol_date, vol_params_for_date in vol_curve.items():
+            sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend = vol_params_for_date
+            B = (2. * skew + put_slope) / (put_slope + call_slope)
+            A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
 
-        sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend = volParams
+            # in the form of sigma_0, A, B, C, P, alphaC, alphaP
+            transformed_curve[fwd_vol_date] = [sigma_0, A, B, call_slope / A, put_slope / A, call_bend, put_bend ]
 
-        B = (2. * skew + put_slope) / (put_slope + call_slope)
-        A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
+            return transformed_curve
 
-        return {'sigma_0': sigma_0,
-                'A'      : A,
-                'B'      : B,
-                'C'      : call_slope / A,
-                'P'      : put_slope / A,
-                'alphaC' : call_bend,
-                'alphaP' : put_bend }
+    def _vol_compute(self, fwd_date : datetime.date, normalized_strike : float) -> float:
+        """ Computes the volatility given the following parameters:
 
-    def _vol_compute(self, fwdUsed : datetime.date, z : float ) -> float:
-        """
-        Computes the volatility given the following parameters:
-
-        :param z: normalized strike
+        :param fwd_date: forward date on the vol curve.
+        :param normalized_strike: normalized strike
         """
 
-        volParams = self._transform_from_jwss7(fwdUsed)
+        nth_contract = 1 # TODO: FIX THIS HERE
+        vol_params = self._vol_params[nth_contract]  # TODO: FIX HERE
+        z = normalized_strike  # abbreviation, for simplicity
 
-        return volParams['sigma_0'] * np.sqrt(1. + volParams['A'] * np.log(volParams['B'] * np.exp(volParams['C'] * (z / (1.0 + z * z) ** (volParams['alphaC']/2))) + \
-                                                                     (1. - volParams['B']) * np.exp(- volParams['P'] * (z / (1.0 + z * z) ** (volParams['alphaP']/2)))))
+        return vol_params['sigma_0'] * np.sqrt(1. + vol_params['A'] * np.log(vol_params['B'] * np.exp(vol_params['C'] * (z / (1.0 + z * z) ** (vol_params['alphaC']/2))) +
+                                                                     (1. - vol_params['B']) * np.exp(- vol_params['P'] * (z / (1.0 + z * z) ** (vol_params['alphaP']/2)))))
 
     def implied_vol(self, fwd_date : [datetime.date, int], K : float, ttm : float) -> float:
         """ Implied vol for the fwd_date.
@@ -71,70 +85,61 @@ class JWSS7Volatility(Volatility):
         :param ttm: time to maturity
         """
 
-        volParams = self._transform_from_jwss7(fwd_date)
-
-        _, fwdValues = self._fwd_params
-
         return self._vol_compute( fwd_date
-                                , JWSS7Volatility.normalized_strike(fwdValues[fwdUsed]
+                                , JWSS7Volatility.normalized_strike(self._fwd_params.fwd_value(fwd_date)
                                                                     , np.array([K])
-                                                                    , volParams['sigma_0']
+                                                                    , self._vol_params[fwd_date] [0]  # atm vol is the first element
                                                                     , ttm) )
 
-    def local_vol(self, fwd_date : datetime.date, S : float, T : float, ttm : float) -> float:
+    def local_vol(self, fwd_date : datetime.date, T : float, S: float, ttm : float) -> float:
         """ Local volatility of the JWSS7 parametrization.
 
         :param fwd_date: forward index that we are computing the local vol of
+        :param S: value of forward at which to evaluate local vol.
         :param ttm: option time to maturity
         """
 
-        jw7Params = self._transform_from_jwss7(fwd_date)
-        sigma_0 = jw7Params['sigma_0']
-        A       = jw7Params['A']
-        B       = jw7Params['B']
-        C       = jw7Params['C']
-        P       = jw7Params['P']
-        alphaC  = jw7Params['alphaC']
-        alphaP  = jw7Params['alphaP']
+        sigma_0, A, B, C, P, alphaC, alphaP = self._vol_params(fwd_date)  # TODO: THIS DOESNT WORK, FIX LATER.
+        S_0 = self._fwd_params.fwd_value(fwd_date)
 
-        z = self.normalized_strike(S_0, S, sigma_0, ttm)  # TODO: CHECK HERE!!
+        z = self.normalized_strike(S_0, S, sigma_0, ttm)  # TODO: CHECK IF THIS IS CORRECT
         sigma = self.implied_vol(S, T)
 
-        d1 = (log(S / S_0) + sigma * sigma * ttm / 2.0) / (sigma * sqrt(ttm))
-        d2 = d1 - sigma * sqrt(ttm)
-        Xz = B * exp(C * z) + (1.0 - B) * exp(- P * z)
+        d1 = (np.log(S / S_0) + sigma * sigma * ttm / 2.0) / (sigma * np.sqrt(ttm))
+        d2 = d1 - sigma * np.sqrt(ttm)
+        Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
-        sigmaK = A / (2.0 * Xz * K * sqrt (ttm) ) / ( sqrt ( 1.0 + A * log (Xz) ) ) * \
-            (B * C * exp(C * z) - P * (1.0 - B) * exp(- P * z))
+        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / ( np.sqrt ( 1.0 + A * log (Xz) ) ) * \
+            (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
-        d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-               ( log ( S / K ) + sigma * sigma * ttm / 2.0 ) * sqrt (ttm) * sigmaK ) / \
+        d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+               ( log ( S / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-               ( log ( S / K ) - sigma * sigma * ttm / 2.0 ) * sqrt (ttm) * sigmaK ) / \
+        d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+               ( log ( S / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        denomin = (sigma_0 * sqrt(ttm) * K * Xz * sqrt(1.0 + A * log(Xz)))
-        BCexpr = (B * C * exp(C * z) - P * (1.0 - B) * exp(- P * z))
+        denomin = (sigma_0 * np.sqrt(ttm) * K * Xz * np.sqrt(1.0 + A * log(Xz)))
+        BCexpr = (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
-        sigmaKK = A / (2.0 * sqrt(ttm)) * (- A / (2.0 * denomin * K * Xz * (1.0 + A * log(Xz))) *
+        sigmaKK = A / (2.0 * np.sqrt(ttm)) * (- A / (2.0 * denomin * K * Xz * (1.0 + A * log(Xz))) *
                                            BCexpr * BCexpr - BCexpr * BCexpr / (denomin * K * Xz) +
-                                           (B * C ** 2 * exp(C * z) + P ** 2 * (1.0 - B) * exp(- P * z)) /
+                                           (B * C ** 2 * np.exp(C * z) + P ** 2 * (1.0 - B) * np.exp(- P * z)) /
                                            (denomin * K) - BCexpr *
                                            sigma_0 *
-                                           sqrt(ttm) / (denomin * K)
+                                           np.sqrt(ttm) / (denomin * K)
                                            )
 
         # derivative of z wrt t
         zt = log(K / S) / sigma_0 * (-0.5 * ttm**(- 1.5))
         sigmat = sigma_0 ** 2 / (2.0 * sigma) * A / Xz  * \
-            ( B * C * exp ( C * z) - P * (1 - B) * exp ( - P * z ) ) * \
+            ( B * C * np.exp ( C * z) - P * (1 - B) * np.exp ( - P * z ) ) * \
             zt  # derivative of sigma wrt t
 
         up_part = sigma * sigma + 2.0 * ttm * sigma * sigmat
 
-        down_part = (1.0 + K * d1 * sqrt (ttm) * sigmaK ) ** 2.0 + K * K * ttm * sigma * \
+        down_part = (1.0 + K * d1 * np.sqrt (ttm) * sigmaK ) ** 2.0 + K * K * ttm * sigma * \
                     (sigmaKK - d1 * sigmaK * sigmaK * ttm)
 
         # catching nan-s
@@ -168,23 +173,23 @@ class JWSS7Volatility(Volatility):
         sigma = self.implied_vol(S0, K, ttm)
         S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
 
-        Xz = B * exp(C * z) + (1.0 - B) * exp(- P * z)
+        Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
         d1 = (log(S0_local / K) + sigma * sigma * ttm / 2.0) / \
-            (sigma * sqrt(ttm))
-        d2 = d1 - sigma * sqrt(ttm)
+            (sigma * np.sqrt(ttm))
+        d2 = d1 - sigma * np.sqrt(ttm)
         zt = log(K / S0_local) / sigma_0 * (-0.5 * pow(ttm, - 1.5))  # z wrt t
         sigmat = sigma_0 * sigma_0 / (2.0 * sigma) * A / Xz  * \
-            ( B * C * exp ( C * z) - P * ( 1.0 - B) * exp ( - P * z ) ) * \
+            ( B * C * np.exp ( C * z) - P * ( 1.0 - B) * np.exp ( - P * z ) ) * \
             zt  # derivative of sigma wrt t
         sigma2t = 2.0 * sigma * sigmat  # derivative of sigma^2 wrt t
 
-        d1T = ((sigma2t * ttm / 2.0 + sigma * sigma / 2.0) * sigma * sqrt(ttm) -
-               ( log ( S0_local / K) + sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * sqrt (ttm) ) ) ) \
+        d1T = ((sigma2t * ttm / 2.0 + sigma * sigma / 2.0) * sigma * np.sqrt(ttm) -
+               ( log ( S0_local / K) + sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * np.sqrt (ttm) ) ) ) \
             / (sigma * sigma * ttm)
 
-        d2T = (- (sigma2t * ttm / 2.0 + sigma * sigma / 2.0) * sigma * sqrt(ttm) -
-               ( log ( S0_local / K) - sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * sqrt (ttm) ) ) ) \
+        d2T = (- (sigma2t * ttm / 2.0 + sigma * sigma / 2.0) * sigma * np.sqrt(ttm) -
+               ( log ( S0_local / K) - sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * np.sqrt (ttm) ) ) ) \
             / (sigma * sigma * ttm)
 
         return S0_local * \
@@ -210,20 +215,20 @@ class JWSS7Volatility(Volatility):
         sigma = self.implied_vol(S0, K, ttm)
         S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
         d1 = (log(S0_local / K) + sigma * sigma * ttm / 2.0) / \
-            (sigma * sqrt(ttm))
-        d2 = d1 - sigma * sqrt(ttm)
+            (sigma * np.sqrt(ttm))
+        d2 = d1 - sigma * np.sqrt(ttm)
 
-        Xz = B * exp(C * z) + (1.0 - B) * exp(- P * z)
+        Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
-        sigmaK = A / (2.0 * Xz * K * sqrt (ttm) ) / sqrt ( 1.0 + A * log (Xz) ) * \
-            (B * C * exp(C * z) - P * (1.0 - B) * exp(- P * z))
+        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / np.sqrt ( 1.0 + A * log (Xz) ) * \
+            (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
-        d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-               ( log ( S0_local / K ) + sigma * sigma * ttm / 2.0 ) * sqrt (ttm) * sigmaK ) / \
+        d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+               ( log ( S0_local / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-               ( log ( S0_local / K ) - sigma * sigma * ttm / 2.0 ) * sqrt (ttm) * sigmaK ) / \
+        d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+               ( log ( S0_local / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
         return (S0_local * scipy.stats.norm.pdf(d1) * d1K -
@@ -247,42 +252,42 @@ class JWSS7Volatility(Volatility):
         sigma = self.implied_vol(S0, K, ttm)
         S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
 
-        d1 = (log(S0 / K) + sigma * sigma * ttm / 2.0) / (sigma * sqrt(ttm))
-        d2 = d1 - sigma * sqrt(ttm)
-        Xz = B * exp(C * z) + (1.0 - B) * exp(- P * z)
+        d1 = (log(S0 / K) + sigma * sigma * ttm / 2.0) / (sigma * np.sqrt(ttm))
+        d2 = d1 - sigma * np.sqrt(ttm)
+        Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
-        sigmaK = A / (2.0 * Xz * K * sqrt (ttm) ) / ( sqrt ( 1.0 + A * log (Xz) ) ) * \
-            (B * C * exp(C * z) - P * (1.0 - B) * exp(- P * z))
+        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / ( np.sqrt ( 1.0 + A * log (Xz) ) ) * \
+            (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
-        d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-               ( log ( S0 / K ) + sigma * sigma * ttm / 2.0 ) * sqrt (ttm) * sigmaK ) / \
+        d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+               ( log ( S0 / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-               ( log ( S0 / K ) - sigma * sigma * ttm / 2.0 ) * sqrt (ttm) * sigmaK ) / \
+        d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+               ( log ( S0 / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        denomin = (sigma_0 * sqrt(ttm) * K * Xz * sqrt(1.0 + A * log(Xz)))
-        BCexpr = (B * C * exp(C * z) - P * (1.0 - B) * exp(- P * z))
+        denomin = (sigma_0 * np.sqrt(ttm) * K * Xz * np.sqrt(1.0 + A * log(Xz)))
+        BCexpr = (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
-        sigmaKK = A / (2.0 * sqrt(ttm)) * (
+        sigmaKK = A / (2.0 * np.sqrt(ttm)) * (
             - A / (2.0 * denomin * K * Xz * (1.0 + A * log(Xz))) * BCexpr * BCexpr -
             BCexpr * BCexpr / (denomin * K * Xz) +
-            (B * C * C * exp(C * z) + P * P * (1.0 - B) * exp(- P * z)) /
+            (B * C * C * np.exp(C * z) + P * P * (1.0 - B) * np.exp(- P * z)) /
             (denomin * K) -
-            BCexpr * sigma_0 * sqrt(ttm) / (denomin * K))
+            BCexpr * sigma_0 * np.sqrt(ttm) / (denomin * K))
 
-        d1KK = ((1.0 / (K * K) + sigmaK * sigmaK * ttm + sigma * ttm * sigmaKK) * sigma * sqrt(ttm) -
-                ( log ( S0 / K ) + sigma * sigma * ttm  / 2.0 ) * sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
+        d1KK = ((1.0 / (K * K) + sigmaK * sigmaK * ttm + sigma * ttm * sigmaKK) * sigma * np.sqrt(ttm) -
+                ( log ( S0 / K ) + sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
                   \
-            2.0 * ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-                   ( log ( S0_local / K ) + sigma * sigma * ttm  / 2.0 ) * sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
+            2.0 * ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+                   ( log ( S0_local / K ) + sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
             / (sigma * sigma * sigma * sigma * ttm * ttm)
 
-        d2KK = ((1.0 / (K * K) - sigmaK * sigmaK * ttm - sigma * ttm * sigmaKK) * sigma * sqrt(ttm) -
-                ( log ( S0 / K ) - sigma * sigma * ttm  / 2.0 ) * sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
-            2.0 * ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * sqrt(ttm) -
-                   ( log ( S0_local / K ) - sigma * sigma * ttm  / 2.0 ) * sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
+        d2KK = ((1.0 / (K * K) - sigmaK * sigmaK * ttm - sigma * ttm * sigmaKK) * sigma * np.sqrt(ttm) -
+                ( log ( S0 / K ) - sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
+            2.0 * ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
+                   ( log ( S0_local / K ) - sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
             / (sigma * sigma * sigma * sigma * ttm * ttm)
 
         return (S0 * normpdfD(d1) * d1K * d1K + S0_local * scipy.stats.norm.pdf(d1) * d1KK -

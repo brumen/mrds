@@ -30,7 +30,7 @@ if config.CUDA_PRESENT:
 
 import ds
 from pricers.pricers import black_greeks
-
+from forward_curve   import FwdCurve
 
 logger = logging.Logger(__name__)
 
@@ -66,14 +66,14 @@ class Volatility:
     def __init__(self
                  , com_name : str
                  , mkt_date : datetime.date
-                 , fwd_params = None
-                 , vol_params = None):
+                 , fwd_params : FwdCurve
+                 , vol_params : Dict[datetime.date, List]):
         """ Generic class for the volatility object. Most generic way of computing the volatility.
 
         :param com_name: name of the commodity to consider
         :param mkt_date: market date
-        :param fwd_params: parameters about the forward curve
-        :param vol_params: ???
+        :param fwd_params: parameters about the forward curve, in the form of FwdCurve object
+        :param vol_params: dictionary, where keys are volatility dates, and values are lists of [ATM, ....] TODO FINISH HERE.
         """
 
         self.mkt_date    = mkt_date
@@ -89,10 +89,14 @@ class Volatility:
         :param mkt_date: for which market date the vol is needed
         """
 
+        vol_type, vol_params = ds.get_vol_curve(com_name, mkt_date)
+        # if vol_type != 'JWSS7':
+        #     raise RuntimeError('Fetching the wrong curve. {0} has type {1}'.format(com_name, vol_type))
+
         return cls( com_name
                   , mkt_date
                   , fwd_params = ds.get_forward_curve(com_name, mkt_date)
-                  , vol_params = ds.get_vol_curve(com_name, mkt_date) )
+                  , vol_params = vol_params )
 
     @property
     def _vol_dates(self) -> List[datetime.date]:
@@ -150,6 +154,10 @@ class Volatility:
         """
 
         raise VolatilityException('Method implied_vol not implemented in Volatility class.')
+
+    def option_price(self, F: float, K: float, maturity : datetime.date) -> float:
+
+        return black_greeks(F, K, 0.01, self.implied_vol(TODO, K, maturity), )
 
     def delta(self, fwd_date : datetime.date, K : float, ttm : float) -> float:
         """  Computes the delta of the volatility.
