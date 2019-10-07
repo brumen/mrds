@@ -109,21 +109,21 @@ class JWSS7Volatility(Volatility):
         d2 = d1 - sigma * np.sqrt(ttm)
         Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
-        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / ( np.sqrt ( 1.0 + A * log (Xz) ) ) * \
+        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / ( np.sqrt ( 1.0 + A * np.log (Xz) ) ) * \
             (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
         d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-               ( log ( S / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
+               ( np.log ( S / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
         d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-               ( log ( S / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
+               ( np.log ( S / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        denomin = (sigma_0 * np.sqrt(ttm) * K * Xz * np.sqrt(1.0 + A * log(Xz)))
+        denomin = (sigma_0 * np.sqrt(ttm) * K * Xz * np.sqrt(1.0 + A * np.log(Xz)))
         BCexpr = (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
-        sigmaKK = A / (2.0 * np.sqrt(ttm)) * (- A / (2.0 * denomin * K * Xz * (1.0 + A * log(Xz))) *
+        sigmaKK = A / (2.0 * np.sqrt(ttm)) * (- A / (2.0 * denomin * K * Xz * (1.0 + A * np.log(Xz))) *
                                            BCexpr * BCexpr - BCexpr * BCexpr / (denomin * K * Xz) +
                                            (B * C ** 2 * np.exp(C * z) + P ** 2 * (1.0 - B) * np.exp(- P * z)) /
                                            (denomin * K) - BCexpr *
@@ -132,7 +132,7 @@ class JWSS7Volatility(Volatility):
                                            )
 
         # derivative of z wrt t
-        zt = log(K / S) / sigma_0 * (-0.5 * ttm**(- 1.5))
+        zt = np.log(K / S) / sigma_0 * (-0.5 * ttm**(- 1.5))
         sigmat = sigma_0 ** 2 / (2.0 * sigma) * A / Xz  * \
             ( B * C * np.exp ( C * z) - P * (1 - B) * np.exp ( - P * z ) ) * \
             zt  # derivative of sigma wrt t
@@ -175,21 +175,21 @@ class JWSS7Volatility(Volatility):
 
         Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
-        d1 = (log(S0_local / K) + sigma * sigma * ttm / 2.0) / \
+        d1 = (np.log(S0_local / K) + sigma * sigma * ttm / 2.0) / \
             (sigma * np.sqrt(ttm))
         d2 = d1 - sigma * np.sqrt(ttm)
-        zt = log(K / S0_local) / sigma_0 * (-0.5 * pow(ttm, - 1.5))  # z wrt t
+        zt = np.log(K / S0_local) / sigma_0 * (-0.5 * pow(ttm, - 1.5))  # z wrt t
         sigmat = sigma_0 * sigma_0 / (2.0 * sigma) * A / Xz  * \
             ( B * C * np.exp ( C * z) - P * ( 1.0 - B) * np.exp ( - P * z ) ) * \
             zt  # derivative of sigma wrt t
         sigma2t = 2.0 * sigma * sigmat  # derivative of sigma^2 wrt t
 
         d1T = ((sigma2t * ttm / 2.0 + sigma * sigma / 2.0) * sigma * np.sqrt(ttm) -
-               ( log ( S0_local / K) + sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * np.sqrt (ttm) ) ) ) \
+               ( np.log ( S0_local / K) + sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * np.sqrt (ttm) ) ) ) \
             / (sigma * sigma * ttm)
 
         d2T = (- (sigma2t * ttm / 2.0 + sigma * sigma / 2.0) * sigma * np.sqrt(ttm) -
-               ( log ( S0_local / K) - sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * np.sqrt (ttm) ) ) ) \
+               ( np.log ( S0_local / K) - sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * np.sqrt (ttm) ) ) ) \
             / (sigma * sigma * ttm)
 
         return S0_local * \
@@ -214,21 +214,21 @@ class JWSS7Volatility(Volatility):
         z = JWSS7Volatility.normalized_strike(S0, K, sigma_0, ttm)
         sigma = self.implied_vol(S0, K, ttm)
         S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
-        d1 = (log(S0_local / K) + sigma * sigma * ttm / 2.0) / \
+        d1 = (np.log(S0_local / K) + sigma * sigma * ttm / 2.0) / \
             (sigma * np.sqrt(ttm))
         d2 = d1 - sigma * np.sqrt(ttm)
 
         Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
-        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / np.sqrt ( 1.0 + A * log (Xz) ) * \
+        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / np.sqrt ( 1.0 + A * np.log (Xz) ) * \
             (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
         d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-               ( log ( S0_local / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
+               ( np.log ( S0_local / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
         d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-               ( log ( S0_local / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
+               ( np.log ( S0_local / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
         return (S0_local * scipy.stats.norm.pdf(d1) * d1K -
@@ -252,42 +252,42 @@ class JWSS7Volatility(Volatility):
         sigma = self.implied_vol(S0, K, ttm)
         S0_local = S0  # TODO: CHECK IF THIS IS REALLY NECESSARY
 
-        d1 = (log(S0 / K) + sigma * sigma * ttm / 2.0) / (sigma * np.sqrt(ttm))
+        d1 = (np.log(S0 / K) + sigma * sigma * ttm / 2.0) / (sigma * np.sqrt(ttm))
         d2 = d1 - sigma * np.sqrt(ttm)
         Xz = B * np.exp(C * z) + (1.0 - B) * np.exp(- P * z)
 
-        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / ( np.sqrt ( 1.0 + A * log (Xz) ) ) * \
+        sigmaK = A / (2.0 * Xz * K * np.sqrt (ttm) ) / ( np.sqrt ( 1.0 + A * np.log (Xz) ) ) * \
             (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
         d1K = ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-               ( log ( S0 / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
+               ( np.log ( S0 / K ) + sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
         d2K = ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-               ( log ( S0 / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
+               ( np.log ( S0 / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        denomin = (sigma_0 * np.sqrt(ttm) * K * Xz * np.sqrt(1.0 + A * log(Xz)))
+        denomin = (sigma_0 * np.sqrt(ttm) * K * Xz * np.sqrt(1.0 + A * np.log(Xz)))
         BCexpr = (B * C * np.exp(C * z) - P * (1.0 - B) * np.exp(- P * z))
 
         sigmaKK = A / (2.0 * np.sqrt(ttm)) * (
-            - A / (2.0 * denomin * K * Xz * (1.0 + A * log(Xz))) * BCexpr * BCexpr -
+            - A / (2.0 * denomin * K * Xz * (1.0 + A * np.log(Xz))) * BCexpr * BCexpr -
             BCexpr * BCexpr / (denomin * K * Xz) +
             (B * C * C * np.exp(C * z) + P * P * (1.0 - B) * np.exp(- P * z)) /
             (denomin * K) -
             BCexpr * sigma_0 * np.sqrt(ttm) / (denomin * K))
 
         d1KK = ((1.0 / (K * K) + sigmaK * sigmaK * ttm + sigma * ttm * sigmaKK) * sigma * np.sqrt(ttm) -
-                ( log ( S0 / K ) + sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
+                ( np.log ( S0 / K ) + sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
                   \
             2.0 * ((- 1.0 / K + sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-                   ( log ( S0_local / K ) + sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
+                   ( np.log ( S0_local / K ) + sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
             / (sigma * sigma * sigma * sigma * ttm * ttm)
 
         d2KK = ((1.0 / (K * K) - sigmaK * sigmaK * ttm - sigma * ttm * sigmaKK) * sigma * np.sqrt(ttm) -
-                ( log ( S0 / K ) - sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
+                ( np.log ( S0 / K ) - sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaKK ) / ( sigma * sigma * ttm) - \
             2.0 * ((- 1.0 / K - sigma * ttm * sigmaK) * sigma * np.sqrt(ttm) -
-                   ( log ( S0_local / K ) - sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
+                   ( np.log ( S0_local / K ) - sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
             / (sigma * sigma * sigma * sigma * ttm * ttm)
 
         return (S0 * normpdfD(d1) * d1K * d1K + S0_local * scipy.stats.norm.pdf(d1) * d1KK -
