@@ -5,18 +5,11 @@ import csv
 import pickle
 import numpy as np
 
-from mrds   import ComSkew
-from config import work_dir
-
 import logging
 
 logger = logging.Logger(__name__)
 
-# calibration files
-mm_calib_file_actual       = 'mobj/mm_calib.txt'
-mm_calib_multi_file_actual = 'mobj/mm_calib_multiple.txt'
-single_asset_mm_calib      = work_dir + mm_calib_file_actual
-multi_asset_mm_calib       = work_dir + mm_calib_multi_file_actual
+# TODO: REWRITE THIS MODULE TO USE REDIS DATABASE.
 
 
 def read_mm_hash(multi_single_ind):
@@ -144,29 +137,6 @@ def find_adj_tenors(com_nb,
     return adj_fwd_tenors, adj_vol_tenors
 
 
-def find_mm(com, date_, fwd, mm_hash):
-    """
-    Finds the market model for single asset.
-
-    :param com: commodity considered (WTI)
-    :type com: str, or tuple(str) for multiple commodities
-    :param date_: date considered
-    :type date_:
-    :param fwd: number of forward contracts that one needs to calibrate
-    :type fwd: int, or tuple(int)
-    :param mm_hash: hash of calibrated market models.
-    :type mm_hash: dict, where the first level are commodities, the second level are dates calibrated.
-    """
-
-    if com not in mm_hash.keys():
-        return False
-
-    if date_ not in mm_hash[com].keys():
-        return False
-
-    return False if fwd > mm_hash[com][date_] else True
-
-
 def update_mm_hash(multi_single_ind, mm_hash, new_mm):
     """
 
@@ -232,30 +202,6 @@ def mrds_calib( com
 
     return mm
 
-
-def mrds_calib_db( com_fwd
-                 , com_vol
-                 , date_
-                 , nb_fwd
-                 , mt        = True
-                 , model_ind = 'skew'
-                 , cuda_ind  = False ):
-
-    mm = ComSkew( 1, date_ )
-
-    mm.read_curve_vol_data_db(date_, 0, com_fwd, com_vol, sub_idx_rows=np.arange(nb_fwd))
-    mm.read_discount_curve_db(date_)
-    mm.read_model_config_db(0)
-    mm.set_other_params(0)
-
-    if mm.vol_surface_name_list[0] == 'ATM':
-        mm.model_skew_ln_ind = 'ln_ln'
-    mm.__kappa_sigma_rho(0)
-    if model_ind is 'skew':
-        mm.calibrate_skew_params(0)
-    mm.generate_large_corr_mat()
-
-    return mm
 
 
 def mrds_calib_multiple(com_l
