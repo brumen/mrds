@@ -13,7 +13,7 @@ CUDA_PRESENT = False
 # adding various paths
 prod_dir = '/home/brumen/work/mrds/'
 work_dir = prod_dir
-# path.append(work_dir)
+
 
 # cython params
 cython_include_dirs    = []

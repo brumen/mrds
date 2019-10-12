@@ -1,20 +1,26 @@
 # utility functions for the mrds model
 
+import datetime
 import os
 import csv
 import pickle
+import redis
 import numpy as np
-
 import logging
+
+from typing import List
+
+from config import work_dir
 
 logger = logging.Logger(__name__)
 
 # TODO: REWRITE THIS MODULE TO USE REDIS DATABASE.
 
+redis_db_loc = work_dir + '/mobj/models.rdb'
+
 
 def read_mm_hash(multi_single_ind):
-    """
-    Reads the market model hash tables from the file
+    """ Reads the market model hash tables from the file.
 
     :param  multi_single_ind: indicator to load single or multiple asset models
                               puts together a hash table of all already calibrated market models
@@ -23,8 +29,8 @@ def read_mm_hash(multi_single_ind):
                         (COM1, COM2), DATE_, (NFWD_1, NFWD_2)  for multiple assets
     """
 
-    mm_calib_file = single_asset_mm_calib if multi_single_ind is 'single' else multi_asset_mm_calib
-    logger.info('Reading prev. calibrated market models from' + mm_calib_file)
+    logger.info('Attempting to read previously calibrated market models from db {0}'.format(redis_db_loc))
+    calib_db = redis.Redis()  # TODO: FIX THIS
 
     if os.stat(mm_calib_file).st_size == 0:  # file is empty
         return {}  # empty dict
@@ -168,21 +174,17 @@ def update_mm_hash(multi_single_ind, mm_hash, new_mm):
     return mm_hash_new
 
 
-def mrds_calib( com
-              , date_
-              , nb_fwd
-              , mm_hash      = mm_hash
-              , mt           = True
-              , model_ind    = 'skew' ):
-    """
-    Calibrates the mrds object. If the model is already calibrated, it simply loads it.
+def mrds_calib( com : str
+              , mkt_date_: datetime.date
+              , fwd_dates : List[datetime.date]
+              , mt = True ):
+    """ Calibrates the mrds object or reads it from the database.
 
     :param com: commodity considered, like 'WTI', ...
-    :type com: str
-
+    :param mkt_date: market date
+    :param fwd_dates: forward dates for which the model is calibrated.
+    :param multi_thread_ind: indicator whether to use multi-threading for calibration.
     """
-
-    mobj_mm_beg = 'mobj/mm_'
 
     if find_mm(com, date_, nb_fwd, mm_hash):  # finds if the model is already calibrated.
         mm_file = work_dir + mobj_mm_beg + str(com) + '_' + str(date_) + '_' + str(mm_hash[com][date_]) + '.obj'
