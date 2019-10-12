@@ -6,7 +6,7 @@ import numpy as np
 import logging
 from scipy.optimize import linprog
 
-from typing import Dict
+from typing import Dict, List
 
 from discount import DF
 from pricers.pricers import spread_option_kirk
@@ -33,7 +33,7 @@ class Freight:
                  , travel_matrix     : Dict
                  , cost_matrix       : Dict
                  , initial_locations : Dict
-                 , time_grid
+                 , time_grid         : List[datetime.date]
                  , dcf = 365.25):
         """
         :param mkt_date: market date
@@ -47,7 +47,7 @@ class Freight:
                              where keys are location pairs (loc_1, loc_2) and values are time as fractions of
                              a year (i.e. 1. means 1 year).
         :param cost_matrix: same as travelMatrix, but refers to costs between cities.
-        :param time_grid: time grid for the problem, meaning that the  list[datetime.date]
+        :param time_grid: time grid for the problem, i.e. time discretization on the movement of tankers.
         :param dcf: day count factor, used for discounting and option evaluation.
         """
 
@@ -65,7 +65,7 @@ class Freight:
         self.__locations         = list(initial_locations.keys())  # locations considered are given in initial_locations
         self.__nb_locations      = len(self.__locations)     # number of different locations
         self.__nbs_to_locations  = {idx: loc for (idx, loc) in enumerate(self.__locations)}
-        self.__nbs_to_time_grid = {idx: timeStep for (idx, timeStep) in enumerate(self._time_grid)}
+        self.__nbs_to_time_grid = {idx: time_step for (idx, time_step) in enumerate(self._time_grid)}
         self.__nb_time_periods   = len(self._time_grid)     # length of grid = number of time periods + 1
 
         # cached values, used as properties
@@ -284,20 +284,24 @@ class Freight:
     def __freight_hedge_x(self, i : int, j : int, t : int, u : int):
         return self.freight_hedge[self._X(i, j, t, u)]
 
-    def freight_hedge_x(self, loc_1 : str, loc_2 : str, t: int, u: int):
+    def freight_hedge_x(self, loc_1 : str, loc_2 : str, start_date: datetime.date, end_date: datetime.date):
+        """ Displays the hedge for locations loc_1 and loc_2 between dates start_date and end_date.
+        """
 
         return self.__freight_hedge_x( self.__locations.index(loc_1)
                                      , self.__locations.index(loc_2)
-                                     , t, u )
+                                     , self._time_grid.index(start_date)
+                                     , self._time_grid.index(end_date) )
 
     def __freight_hedge_y(self, i, j, t, u):
         return self.freight_hedge[self._Y(i, j, t, u)]
 
-    def freight_hedge_x(self, loc_1 : str, loc_2 : str, t: int, u: int):
+    def freight_hedge_y(self, loc_1 : str, loc_2 : str, start_date: datetime.date, end_date: datetime.date):
 
-        return self.__freight_hedge_x( self.__locations.index(loc_1)
+        return self.__freight_hedge_y( self.__locations.index(loc_1)
                                      , self.__locations.index(loc_2)
-                                     , t, u )
+                                     , self._time_grid.index(start_date)
+                                     , self._time_grid.index(end_date) )
 
     def represent_hedge(self):
         """ Represents the hedge obtained from optimization.
