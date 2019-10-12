@@ -30,16 +30,16 @@ class FreightDisplay(Freight):
         ax.clear()
         fg, pos = freight_graph, freight_graph_locations
 
-        cond_moves_active = [(self.__nbs_to_locations[i], self.__nbs_to_locations[j])
-                             for i in range(self.__nb_locations)
-                             for j in range(self.__nb_locations)
-                             for u in range(time_step + 1, self.__nb_time_periods)
-                             if self.__freight_hedge_x(i, j, time_step, u) != 0.]
-        uncond_moves_active = [(self.__nbs_to_locations[i], self.__nbs_to_locations[j])
-                               for i in range(self.__nb_locations)
-                               for j in range(self.__nb_locations)
-                               for u in range(time_step + 1, self.__nb_time_periods)
-                               if self.__freight_hedge_y(i, j, time_step, u) != 0.]
+        cond_moves_active = [(location_1,location_2)
+                             for location_1 in self._locations
+                             for location_2 in self._locations
+                             for u in range(time_step + 1, self._nb_time_periods)
+                             if self.freight_hedge_x(location_1, location_2, time_step, u) != 0.]
+        uncond_moves_active = [(self._nbs_to_locations[i], self._nbs_to_locations[j])
+                               for location_1 in self._locations
+                               for location_2 in self._locations
+                               for u in range(time_step + 1, self._nb_time_periods)
+                               if self.freight_hedge_y(location_1, location_2, time_step, u) != 0.]
 
         nx.draw_networkx_labels(fg, pos=pos, labels=dict(zip(tanker_locations, tanker_locations)), font_size=16)
         nx.draw_networkx_nodes(fg, pos=pos, ax = ax, node_color= 'black', node_size=50)
@@ -59,16 +59,16 @@ class FreightDisplay(Freight):
 
         # create the graph and fill it w/ nodes.
         freight_graph    = nx.Graph()
-        [freight_graph.add_node(location) for location in self.__locations]  # add locations
+        [freight_graph.add_node(location) for location in self._locations]  # add locations
 
         # animation
         ani = FuncAnimation( figure
                            , lambda time_step: self.__update_display_movement( time_step
                                                                              , ax
-                                                                             , self.__locations
+                                                                             , self._locations
                                                                              , freight_graph
                                                                              , nx.spring_layout(freight_graph))
-                           , frames    = self.__nb_time_periods
+                           , frames    = self._nb_time_periods
                            , init_func = None
                            , interval  = 1000
                            , repeat    = True )

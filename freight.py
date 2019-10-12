@@ -62,11 +62,11 @@ class Freight:
         self._initial_locations = initial_locations  # initial locations of the portfolio
 
         # simple derived variables
-        self.__locations         = list(initial_locations.keys())  # locations considered are given in initial_locations
-        self.__nb_locations      = len(self.__locations)     # number of different locations
-        self.__nbs_to_locations  = {idx: loc for (idx, loc) in enumerate(self.__locations)}
-        self.__nbs_to_time_grid = {idx: time_step for (idx, time_step) in enumerate(self._time_grid)}
-        self.__nb_time_periods   = len(self._time_grid)     # length of grid = number of time periods + 1
+        self._locations         = list(initial_locations.keys())  # locations considered are given in initial_locations
+        self._nb_locations      = len(self._locations)     # number of different locations
+        self._nbs_to_locations  = {idx: loc for (idx, loc) in enumerate(self._locations)}
+        self._nbs_to_time_grid = {idx: time_step for (idx, time_step) in enumerate(self._time_grid)}
+        self._nb_time_periods   = len(self._time_grid)     # length of grid = number of time periods + 1
 
         # cached values, used as properties
         self.__value_vec   = None  # vector of all individual values
@@ -125,30 +125,30 @@ class Freight:
             Index corresponding to shipping from city i to city j between time t and u conditional.
         """
 
-        return i + j * self.__nb_locations + self.__nb_locations ** 2 * (self.__nb_time_periods - 1 - u + (self.__nb_time_periods * t - t * (t + 1) // 2))
+        return i + j * self._nb_locations + self._nb_locations ** 2 * (self._nb_time_periods - 1 - u + (self._nb_time_periods * t - t * (t + 1) // 2))
 
     def _Y(self, i : int, j: int, t : int, u: int) -> int:
         """ Unconditional transport variable.
         """
 
         # first line is the number of variables X
-        return self.__nb_locations ** 2 * self.__nb_time_periods * (self.__nb_time_periods - 1) // 2 \
+        return self._nb_locations ** 2 * self._nb_time_periods * (self._nb_time_periods - 1) // 2 \
                + self._X(i, j, t, u)
 
     def _N(self, i, t) -> int:
         """ Number of tankers in city i at time t. Location of the variable n_(i,t) in the vector of all variables.
         """
 
-        return self.__nb_locations ** 2 * self.__nb_time_periods * (self.__nb_time_periods - 1) \
-               + i + t * self.__nb_locations
+        return self._nb_locations ** 2 * self._nb_time_periods * (self._nb_time_periods - 1) \
+               + i + t * self._nb_locations
 
     @property
     def __nb_lp_variables(self) -> int:
         """ Number of variables for the Linear problem. (X, Y, Z, N)
         """
 
-        return self.__nb_locations ** 2 * self.__nb_time_periods * (self.__nb_time_periods - 1) \
-               + self.__nb_time_periods * self.__nb_locations
+        return self._nb_locations ** 2 * self._nb_time_periods * (self._nb_time_periods - 1) \
+               + self._nb_time_periods * self._nb_locations
 
     def __travel_allowed(self, i : int, j : int, u : int, t : int) -> bool:
         """ Is travel between i and j allowed between times u & t: t> u
@@ -157,7 +157,7 @@ class Freight:
         if i == j:  # that is always allowed
             return True
 
-        city_i, city_j = self.__nbs_to_locations[i], self.__nbs_to_locations[j]
+        city_i, city_j = self._nbs_to_locations[i], self._nbs_to_locations[j]
 
         return t - u >= self._travel_matrix[(city_i, city_j) if (city_i, city_j) in self._travel_matrix else (city_j, city_i)]
 
@@ -167,18 +167,18 @@ class Freight:
                self.__LM * x <= 0. (0. is a vector)
         """
 
-        if self.__LM:
+        if self.__LM is not None:
             return self.__LM
 
         constraints_mat = []  # constraint matrix
 
         # constraint n_{i,t} >= sum_{j,u} X(i,j,t,u) + Y(i,j,t,u)
-        for t in range(self.__nb_time_periods):
-            for i in range(self.__nb_locations):
+        for t in range(self._nb_time_periods):
+            for i in range(self._nb_locations):
                 constraints_vec = np.zeros(self.__nb_lp_variables)
                 constraints_vec[self._N(i, t)] = -1.
-                for j in range(self.__nb_locations):
-                    for u in range(t+1, self.__nb_time_periods):
+                for j in range(self._nb_locations):
+                    for u in range(t+1, self._nb_time_periods):
                         constraints_vec[self._X(i, j, t, u)] = 1.
                         constraints_vec[self._Y(i, j, t, u)] = 1.
                 constraints_mat.append(constraints_vec)
@@ -193,38 +193,38 @@ class Freight:
               EM * x = EV, EM is a matrix, EV is a vector.
         """
 
-        if self.__EM and self.__EV:
+        if self.__EM is not None and self.__EV is not None:
             return self.__EM, self.__EV
 
         equality_matrix = []
         equality_vector = []
 
         # initial setting of N: N(i,0) = initialLocation(i)
-        for i in range(self.__nb_locations):
+        for i in range(self._nb_locations):
             constraints_vec = np.zeros(self.__nb_lp_variables)
             constraints_vec[self._N(i, 0)] = 1.
-            equality_vector.append(self._initial_locations[self.__nbs_to_locations[i]])
+            equality_vector.append(self._initial_locations[self._nbs_to_locations[i]])
             equality_matrix.append(constraints_vec)
 
         # sum_i n_i,t = K 
-        for t in range(1, self.__nb_time_periods):  # t=0 already given above
+        for t in range(1, self._nb_time_periods):  # t=0 already given above
             constraints_vec = np.zeros(self.__nb_lp_variables)
-            for i in range(self.__nb_locations):
+            for i in range(self._nb_locations):
                 constraints_vec[self._N(i, t)] = 1.
             equality_vector.append(sum(self._initial_locations.values()))  # number of tankers, ships
             equality_matrix.append(constraints_vec)
 
         # constraint n_i,t = n_i,t-1 + sum_{j, u<t} (X(j, i, u, t) + Y(j,i,t,u)) - sum _{u>t-1, j} (X(i,j,t-1, u) + Y(i,j,t-1,u))
-        for t in range(1, self.__nb_time_periods):
-            for i in range(self.__nb_locations):
+        for t in range(1, self._nb_time_periods):
+            for i in range(self._nb_locations):
                 constraints_vec = np.zeros(self.__nb_lp_variables)  # constraints_vec is constraints vector
                 constraints_vec[self._N(i, t)]     =  1.
                 constraints_vec[self._N(i, t - 1)] = -1.
-                for j in range(self.__nb_locations):
+                for j in range(self._nb_locations):
                     for u in range(t):
                         constraints_vec[self._X(j, i, u, t)] = -1.
                         constraints_vec[self._Y(j, i, u, t)] = -1.
-                    for u in range(t, self.__nb_time_periods):
+                    for u in range(t, self._nb_time_periods):
                         constraints_vec[self._X(i, j, t - 1, u)] = 1.
                         constraints_vec[self._Y(i, j, t - 1, u)] = 1.
                 equality_matrix.append(constraints_vec)
@@ -245,16 +245,16 @@ class Freight:
 
         self.__value_vec = np.zeros(self.__nb_lp_variables)
 
-        for t in range(self.__nb_time_periods):  # time period
-            for i in range(self.__nb_locations):  # cities
-                for j in range(self.__nb_locations):
-                    for u in range(t+1, self.__nb_time_periods):
-                        self.__value_vec[self._X(i, j, t, u)] = - self._spread_option(self.__nbs_to_locations[i]
-                                                                                      , self.__nbs_to_locations[j]
-                                                                                      , self.__nbs_to_time_grid[t]
-                                                                                      , self.__nbs_to_time_grid[u]) if self.__travel_allowed(i, j, t, u) else self.LARGE_NUMBER
-                        self.__value_vec[self._Y(i, j, t, u)] = -(self.fwd_vol_curves(self.__nbs_to_locations[j], self.__nbs_to_time_grid[u])
-                                                                  - self.fwd_vol_curves(self.__nbs_to_locations[i], self.__nbs_to_time_grid[t])) \
+        for t in range(self._nb_time_periods):  # time period
+            for i in range(self._nb_locations):  # cities
+                for j in range(self._nb_locations):
+                    for u in range(t+1, self._nb_time_periods):
+                        self.__value_vec[self._X(i, j, t, u)] = - self._spread_option(self._nbs_to_locations[i]
+                                                                                      , self._nbs_to_locations[j]
+                                                                                      , self._nbs_to_time_grid[t]
+                                                                                      , self._nbs_to_time_grid[u]) if self.__travel_allowed(i, j, t, u) else self.LARGE_NUMBER
+                        self.__value_vec[self._Y(i, j, t, u)] = -(self.fwd_vol_curves(self._nbs_to_locations[j], self._nbs_to_time_grid[u])
+                                                                  - self.fwd_vol_curves(self._nbs_to_locations[i], self._nbs_to_time_grid[t])) \
                                                               if self.__travel_allowed(i, j, t, u) else self.LARGE_NUMBER
 
         return self.__value_vec
@@ -288,8 +288,8 @@ class Freight:
         """ Displays the hedge for locations loc_1 and loc_2 between dates start_date and end_date.
         """
 
-        return self.__freight_hedge_x( self.__locations.index(loc_1)
-                                     , self.__locations.index(loc_2)
+        return self.__freight_hedge_x( self._locations.index(loc_1)
+                                     , self._locations.index(loc_2)
                                      , self._time_grid.index(start_date)
                                      , self._time_grid.index(end_date) )
 
@@ -298,8 +298,8 @@ class Freight:
 
     def freight_hedge_y(self, loc_1 : str, loc_2 : str, start_date: datetime.date, end_date: datetime.date):
 
-        return self.__freight_hedge_y( self.__locations.index(loc_1)
-                                     , self.__locations.index(loc_2)
+        return self.__freight_hedge_y( self._locations.index(loc_1)
+                                     , self._locations.index(loc_2)
                                      , self._time_grid.index(start_date)
                                      , self._time_grid.index(end_date) )
 
@@ -309,18 +309,18 @@ class Freight:
 
         hedge = self.freight_hedge
 
-        tanker_locations = {self._time_grid[t]: {self.__nbs_to_locations[i]: hedge[self._N(i, t)] for i in range(self.__nb_locations)}
-                            for t in range(self.__nb_time_periods)}
+        tanker_locations = {self._time_grid[t]: {self._nbs_to_locations[i]: hedge[self._N(i, t)] for i in range(self._nb_locations)}
+                            for t in range(self._nb_time_periods)}
 
-        tanker_movements_conditional = {self._time_grid[t]: {self.__nbs_to_locations[i]: [(self.__nbs_to_locations[j], self._time_grid[u], hedge[self._X(i, j, t, u)])
-                                                                                          for j in range(self.__nb_locations) for u in range(t + 1, self.__nb_time_periods)]
-                                                             for i in range(self.__nb_locations)}
-                                        for t in range(self.__nb_time_periods)}
+        tanker_movements_conditional = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._X(i, j, t, u)])
+                                                                                         for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
+                                                             for i in range(self._nb_locations)}
+                                        for t in range(self._nb_time_periods)}
 
-        tanker_movements_un_conditional = {self._time_grid[t]: {self.__nbs_to_locations[i]: [(self.__nbs_to_locations[j], self._time_grid[u], hedge[self._Y(i, j, t, u)])
-                                                                                             for j in range(self.__nb_locations) for u in range(t + 1, self.__nb_time_periods)]
-                                                                for i in range(self.__nb_locations)}
-                                           for t in range(self.__nb_time_periods)}
+        tanker_movements_un_conditional = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._Y(i, j, t, u)])
+                                                                                            for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
+                                                                for i in range(self._nb_locations)}
+                                           for t in range(self._nb_time_periods)}
 
         return { 'portfolioValue': - np.sum(np.array(self._value) * np.array(hedge))  # self.valueVec is negative, cuase linprog is minimized
                , 'locations'     : tanker_locations

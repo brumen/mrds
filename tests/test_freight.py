@@ -17,26 +17,26 @@ N_init = { 'AMS': 3
          , 'LA' : 1
          , 'SHA': 8 }
 
-fwd_curves = {'AMS': np.array([95., 96., 97., 98.]),
-              'NYC': np.array([92., 93., 94., 95.]),
-              'MIA': np.array([91., 92., 93., 94.]),
-              'LA': np.array([90., 91., 95., 100.]),
-              'SHA': np.array([85., 90., 95., 100.])}
+fwd_curves = { 'AMS': np.array([95., 96., 97., 98.])
+             , 'NYC': np.array([92., 93., 94., 95.])
+             , 'MIA': np.array([91., 92., 93., 94.])
+             , 'LA' : np.array([90., 91., 95., 100.])
+             , 'SHA': np.array([85., 90., 95., 100.]) }
 
 fwd_dates = [ datetime.date(2015, 4, 1)
             , datetime.date(2015, 5, 1)
             , datetime.date(2015, 6, 1)
             , datetime.date(2015, 7, 1) ]
-fwd_dates = {'AMS': fwd_dates,
-             'NYC': fwd_dates,
-             'MIA': fwd_dates,
-             'LA' : fwd_dates,
-             'SHA': fwd_dates }
+
+fwd_dates = { 'AMS': fwd_dates
+            , 'NYC': fwd_dates
+            , 'MIA': fwd_dates
+            , 'LA' : fwd_dates
+            , 'SHA': fwd_dates }
 
 
-def fwdFunction(mktDate: datetime.date, location : str, future_date : datetime.date, dcf = 365.25, fwdVol='fwd'):
-    """
-    Sample forward/vol function.
+def fwd_function(mktDate: datetime.date, location : str, future_date : datetime.date, dcf = 365.25, fwdVol='fwd'):
+    """ Sample forward/vol function.
 
     :param:
     """
@@ -101,25 +101,25 @@ cost_mtx = {('AMS', 'NYC'): 0.1,
 class FreightTest(TestCase):
 
     def test_xyz_locations(self):
-        """
-        Tests whether the X & Y generate the correct vector indices.
+        """ Tests whether the X & Y generate the correct vector indices.
         """
 
         nbTimePeriods = 5
-        freight1 = Freight( mktDate
-                                  , fwdFunction
-                                  , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
-                                  , corr_mtx
-                                  , travel_mtx
-                                  , cost_mtx
-                                  , N_init
-                                  , [mktDate + datetime.timedelta(days=30*idx) for idx in range(0,nbTimePeriods)])
+        freight1 = Freight(mktDate
+                           , fwd_function
+                           , lambda mktDate, location, futDate: fwd_function(mktDate, location, futDate, fwdVol ='vol')
+                           , corr_mtx
+                           , travel_mtx
+                           , cost_mtx
+                           , N_init
+                           , [mktDate + datetime.timedelta(days=30*idx) for idx in range(0,nbTimePeriods)])
 
         allIndices = []
-        for i in range(freight1._nbLocations):
+        nb_locations = len(freight1._initial_locations)
+        for i in range(nb_locations):
             for t in range(nbTimePeriods):
-                allIndices.append(freight1._N(i,t))
-                for j in range(freight1._nbLocations):
+                allIndices.append(freight1._N(i, t))
+                for j in range(nb_locations):
                     for u in range(t):
                         allIndices.append(freight1._X(i, j, u, t))
                         allIndices.append(freight1._Y(i, j, u, t))
@@ -133,14 +133,14 @@ class FreightTest(TestCase):
 
         """
 
-        freight1 = Freight( mktDate
-                                  , fwdFunction
-                                  , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
-                                  , corr_mtx
-                                  , travel_mtx
-                                  , cost_mtx
-                                  , N_init
-                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
+        freight1 = Freight(mktDate
+                           , fwd_function
+                           , lambda mktDate, location, futDate: fwd_function(mktDate, location, futDate, fwdVol ='vol')
+                           , corr_mtx
+                           , travel_mtx
+                           , cost_mtx
+                           , N_init
+                           , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
         print (freight1.represent_hedge())
 
@@ -152,14 +152,14 @@ class FreightTest(TestCase):
 
         """
 
-        freight1 = FreightDisplay( mktDate
-                                 , fwdFunction
-                                 , lambda mktDate, location, futDate: fwdFunction(mktDate, location, futDate, fwdVol = 'vol')
-                                 , corr_mtx
-                                 , travel_mtx
-                                 , cost_mtx
-                                 , N_init
-                                 , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
+        freight1 = FreightDisplay(mktDate
+                                  , fwd_function
+                                  , lambda mktDate, location, futDate: fwd_function(mktDate, location, futDate, fwdVol ='vol')
+                                  , corr_mtx
+                                  , travel_mtx
+                                  , cost_mtx
+                                  , N_init
+                                  , [mktDate + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
         freight1.display_movement()
 
