@@ -3,6 +3,8 @@
 # see test_freight.py
 #
 
+import logging
+
 import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -10,54 +12,62 @@ from matplotlib.animation import FuncAnimation
 from freight import Freight
 
 
+logger = logging.getLogger(__name__)
+
+
 class FreightDisplay(Freight):
     """ Display class of the freight model.
     """
 
-    def __updateDisplayMovement(self, timeStep : int):
+    def __update_display_movement(self, time_step : int, ax, tanker_locations, freight_graph, freight_graph_locations):
+        """ Updates the display for freight movement for every time_step in all the timesteps in the freight model.
+
+        :param time_step: time step
         """
-        Updates the display for freight movement for every timeStep in all the timesteps in the freight model.
 
-        """
+        logger.info("Times: {0}".format(self._timeGrid[time_step]))
 
-        print ("Times:" + str(self._timeGrid[timeStep]))
-        self.__ax.clear()
-        fg, pos = self.__freightGraph, self.__freightGraphLayout  # abbreviations
+        ax.clear()
+        fg, pos = freight_graph, freight_graph_locations
 
-
-        condMovesActive = [(self._nbsToLocations[i], self._nbsToLocations[j])
-                           for i in range(self._nbLocations)
-                           for j in range(self._nbLocations)
-                           for u in range(timeStep+1, self._nbTimePeriods)
-                           if self.freight_hedge_x(i, j, timeStep, u) != 0.]
-        uncondMovesActive = [(self._nbsToLocations[i], self._nbsToLocations[j])
+        cond_moves_active = [(self._nbsToLocations[i], self._nbsToLocations[j])
                              for i in range(self._nbLocations)
                              for j in range(self._nbLocations)
-                             for u in range(timeStep+1, self._nbTimePeriods)
-                             if self.freight_hedge_y(i, j, timeStep, u) != 0.]
+                             for u in range(time_step + 1, self._nbTimePeriods)
+                             if self.freight_hedge_x(i, j, time_step, u) != 0.]
+        uncond_moves_active = [(self._nbsToLocations[i], self._nbsToLocations[j])
+                               for i in range(self._nbLocations)
+                               for j in range(self._nbLocations)
+                               for u in range(time_step + 1, self._nbTimePeriods)
+                               if self.freight_hedge_y(i, j, time_step, u) != 0.]
 
-        nx.draw_networkx_labels(fg, pos=pos, labels=dict(zip(self.__tankerLocations, self.__tankerLocations)), font_size=16)
-        nx.draw_networkx_nodes(fg, pos=pos, ax = self.__ax, node_color= 'black', node_size=50)
-        nx.draw_networkx_edges(fg, pos=pos, edgelist = condMovesActive  , ax=self.__ax, edge_color="blue", arrows=True)
-        nx.draw_networkx_edges(fg, pos=pos, edgelist = uncondMovesActive, ax=self.__ax, edge_color="red")
+        nx.draw_networkx_labels(fg, pos=pos, labels=dict(zip(tanker_locations, tanker_locations)), font_size=16)
+        nx.draw_networkx_nodes(fg, pos=pos, ax = ax, node_color= 'black', node_size=50)
+        nx.draw_networkx_edges(fg, pos=pos, edgelist = cond_moves_active  , ax=ax, edge_color="blue", arrows=True)
+        nx.draw_networkx_edges(fg, pos=pos, edgelist = uncond_moves_active, ax=ax, edge_color="red")
 
         # Scale plot ax
-        self.__ax.set_title('Time period {0}.'.format(timeStep))
-        self.__ax.set_xticks([])
-        self.__ax.set_yticks([])
+        ax.set_title('Time period {0}.'.format(time_step))
+        ax.set_xticks([])
+        ax.set_yticks([])
 
     def display_movement(self):
         """ Displays the movement of tankers.
         """
 
-        self.__fig, self.__ax  = plt.subplots(figsize=(6, 4))
-        self.__tankerLocations = self._locations
-        self.__freightGraph    = nx.Graph()
-        [self.__freightGraph.add_node(location) for location in self._locations]  # add locations
-        self.__freightGraphLayout = nx.spring_layout(self.__freightGraph)
+        figure, ax = plt.subplots(figsize=(6, 4))
 
-        ani = FuncAnimation( self.__fig
-                           , self.__updateDisplayMovement
+        # create the graph and fill it w/ nodes.
+        freight_graph    = nx.Graph()
+        [freight_graph.add_node(location) for location in self._locations]  # add locations
+
+        # animation
+        ani = FuncAnimation( figure
+                           , lambda time_step: self.__update_display_movement( time_step
+                                                                             , ax
+                                                                             , self._locations
+                                                                             , freight_graph
+                                                                             , nx.spring_layout(freight_graph))
                            , frames    = self._nbTimePeriods
                            , init_func = None
                            , interval  = 1000
