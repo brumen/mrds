@@ -78,8 +78,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         nb_assets              = len(self._com_fwd_curves)
 
         # initial value of the calibrated params
-        self.__C_vec = {fwd_curve.fwd_name: ComSkew._oneZeroZeroMatrix(len(fwd_curve.fwd_tenors), 3)
-                         for fwd_curve in fwd_curves }
+        self.__C_vec = None
 
         # indicator functions - whether the values are updated
         # indicator function for the sigma, kappa calibration
@@ -99,6 +98,44 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self.__market_corr_mtx = dict()  # track of the market correlation matrix
         self.__complete_corr_mtx            = None  # complete correlation matrix hash
         self.__regenerate_complete_corr_mtx = True  # indicator whether to regenerate the complete corr. mtx.
+
+    def _c_vec(self, asset : str, fwd_date : datetime.date) -> np.array:
+        """ Returns the C vector (skew vector) for the asset and forward date.
+
+        :param asset: asset for which C vector
+        :param fwd_date: forward date.
+        """
+
+        if not self.__C_vec:
+            self.__C_vec = {asset: {fwd_date: np.array([1., 0., 0.])}}  # TODO: CHECK HERE
+            return self.__C_vec[asset][fwd_date]
+
+        if asset not in self.__C_vec:
+            self.__C_vec[asset] = {fwd_date: np.array([1., 0., 0.])}
+            return self.__C_vec[asset][fwd_date]
+
+        if fwd_date not in self.__C_vec[asset]:
+            self.__C_vec[asset][fwd_date] = np.array([1., 0., 0.])
+            return self.__C_vec[asset][fwd_date]
+
+        return self.__C_vec[asset][fwd_date]
+
+    def _set_c_vec(self, asset : str, fwd_date : datetime.date, c_vec_value : np.array) -> np.array:
+        """ Sets the c_vec value.
+
+        :param asset: asset for which C vector
+        :param fwd_date: forward date.
+        :param c_vec_value: new value for c_vector
+        """
+
+        if not self.__C_vec:
+            self.__C_vec = {asset: {fwd_date: c_vec_value}}
+
+        if asset not in self.__C_vec:
+            self.__C_vec[asset] = {fwd_date: c_vec_value}
+
+        if fwd_date not in self.__C_vec[asset]:
+            self.__C_vec[asset][fwd_date] = c_vec_value
 
     def __default_factor_corr_mat_fct( self
                                      , asset_1 : str
@@ -300,7 +337,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param dcf: day-count-factor
         """
 
-        if type(sim_times) == np.ndarray:
+        if isinstance(sim_times, np.ndarray):
             return sim_times, [self.mkt_date + datetime.timedelta(int(np.round(stf * dcf)))
                                for stf in sim_times]
 
@@ -1038,16 +1075,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                   , iprint = -1 )\
                   .solve(self.__class__.NLP_SOLVER).xf
 
-    @lru_cache(maxsize=_C_VEC_CACHE)
-    def __c_vec_list( self
-                    , asset     : str
-                    , fwd_dates : List[datetime.date]
-                    , multi_thread_ind = False):
+    def __c_vec_calibrate( self
+                         , asset     : str
+                         , fwd_dates : List[datetime.date]
+                         , multi_thread_ind = True):
         """ Returns the skew parameters for asset. If done the first time, it calibrates the parameters,
             otherwise it returns the stored value.
 
-        :param asset_nb: the asset nb. to calibrate, such as 'wti'
-        :param fwd_dates: forward dates for which to calibrate C
+        :param asset: the asset to calibrate, such as 'wti'
+        :param fwd_dates: forward dates for which to calibrate
         :param multi_thread_ind: indicator whether to use multiple threads
         """
 
@@ -1210,7 +1246,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     #                c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
                     #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
                     # self.simulated_curves[asset][t_i, tenor_idx, :] = F_res
-                    c1, c2, c3 =  self.__C_vec[asset][tenor_nb, :]
+                    c1, c2, c3 =  self._c_vec(asset, tenor_nb)
                     skew_fom( fwd_curve.fwd_value(tenor_nb)
                             , X[asset][tenor_idx, :]  # delta_X
                             , 0.5 * c1
@@ -1297,15 +1333,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         #    fact_sum ... factors of the individual assets
         sim_fom = np.empty((len(tenors_list), nb_simulations))  # nb_tenors x nb_simulations
         for tenor_idx, tenor_date in enumerate(tenors_list):
-            tenor_nb = tenor_date
             t_curr = sim_times[tenor_idx]
-            F_curr = self.fwd_curves[asset][tenor_nb]
-            nb_factors = np.sum(self.nb_factors_for_asset)  # total nb. of factors
+            F_curr = self.fwd_curve_names(asset)[tenor_date]
+            nb_factors = np.sum(self.nb_factors_for_asset(asset))  # total nb. of factors
             simulated_rn = np.random.multivariate_normal( np.zeros(nb_factors)
                                                         , complete_corr_mtx
                                                         , size=nb_simulations)
             nb_factors_asset = self.nb_factors_for_asset[asset]
-            new_cov_mat = np.array([[self._var_covar_mtx(self, asset, tenor_nb, i, j, tenor_idx, sim_times)
+            new_cov_mat = np.array([[self._var_covar_mtx(self, asset, tenor_date, i, j, tenor_idx, sim_times)
                                     for j in range(nb_factors_asset)]
                                     for i in range(nb_factors_asset)])
 
@@ -1316,14 +1351,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             sims_Z = simulated_rn[:, self.__factor_positions(asset)].transpose()
             sims_Z_unit = np.dot(np.linalg.inv(old_chol), sims_Z)
             delta_X = np.sum(np.dot(new_chol, sims_Z_unit), axis=0)
-            qv = np.sum([[self._V_cross_factor(asset, factor_1, factor_2, tenor_nb, tenor_nb, 0., t_curr)
+            qv = np.sum([[self._V_cross_factor(asset, factor_1, factor_2, tenor_date, tenor_date, 0., t_curr)
                           for factor_1 in range(nb_factors_asset)]
                          for factor_2 in range(nb_factors_asset)])
 
             if model == 'ln':
                 sim_fom[tenor_idx, :] = F_curr * np.exp(delta_X - 0.5 * qv)
             else:  # skew model
-                c0, c1, c2 = self.__C_vec[asset][tenor_nb, :]
+                c0, c1, c2 = self._c_vec(asset, tenor_date)
                 # sim_fom[t_i, :] = F_curr * \
                 #                    (1. + delta_X + 0.5 * c1 * (delta_X**2 - qv) +
                 #                    c2 * (delta_X**3 - 3. * delta_X * qv) / 6. +
