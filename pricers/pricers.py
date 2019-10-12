@@ -174,7 +174,7 @@ def apo_long_f(args):
                                       t, beta, sigma_L, cp_ind)
 
 
-def black_greeks( S_0   : float
+def black_greeks_local( S_0   : float
                 , K     : float
                 , r     : float
                 , sigma : float
@@ -254,77 +254,106 @@ def black_quantlib( S_0   : float
     return (black.value(), black.delta(), black.gamma(), black.vega(), black.theta(), black.rho())
 
 
-def trivariate_spread_kirk(F_v, K, sigma_v, rho, T, DF,
-                           lu_int_b=(-20., 20.) ):
+black_greeks = black_greeks_local
+
+
+def trivariate_spread_kirk( F       : np.array
+                          , K       : float
+                          , sigma   : np.array
+                          , rho     : np.array
+                          , T       : float
+                          , DF      : float
+                          , lu_int_b=(-20., 20.) ):
+    """ Trivariate spread option based on Kirk formula.
+
+    :param F: np.array of forward prices = [F_1, F_2, F_3]
+    :param K: strike price
+    :param sigma: is a vector of sigmas [sigma_1, sigma_2, sigma_3]
+    :param rho: vector of correlations, = [rho_12, rho_13, rho_23]
+    :param T: time to maturity
+    :param DF: discount factor
+    :param lu_int_b: boundary of the integration.
     """
-    trivariate spread option based on Kirk formula
 
-      F_v = [F_1, F_2, F_3]
-      sigma_v is a vector of sigmas [sigma_1, sigma_2, sigma_3]
-      rho_v = [rho_12, rho_13, rho_23]
-
-    """
-
-    nu = sigma_v * np.sqrt(T)
+    nu = sigma * np.sqrt(T)
     mu = - 0.5 * nu ** 2  # + np.log (F_v)
     nu_1_d = nu[0] * np.sqrt(1. - rho[1]**2)
     nu_2_d = nu[1] * np.sqrt(1. - rho[2]**2)
     mu_1_d = lambda x_3: mu[0] + rho[1] * x_3 * nu[0]
     mu_2_d = lambda x_3: mu[1] + rho[2] * x_3 * nu[1]
-    k_1 = lambda x_3: K + F_v[2] * np.exp(x_3 * nu[2] + mu[2])
+    k_1 = lambda x_3: K + F[2] * np.exp(x_3 * nu[2] + mu[2])
     rho_Y1_Y2 = (rho[0] - rho[1]*rho[2])/np.sqrt(1.-rho[1]**2) / np.sqrt(1. - rho[2]**2)
     
-    kirk_integ = lambda x_3: spread_option_kirk(F_v[0] * np.exp(mu_1_d(x_3) + 0.5 * nu_1_d**2),
-                                                F_v[1] * np.exp(mu_2_d(x_3) + 0.5 * nu_2_d**2),
+    kirk_integ = lambda x_3: spread_option_kirk(F[0] * np.exp(mu_1_d(x_3) + 0.5 * nu_1_d**2),
+                                                F[1] * np.exp(mu_2_d(x_3) + 0.5 * nu_2_d**2),
                                                 k_1(x_3),
                                                 nu_1_d/np.sqrt(T),
                                                 nu_2_d/np.sqrt(T),
                                                 rho_Y1_Y2, T, DF) / \
         np.sqrt(2. * np.pi) * np.exp(-x_3**2/2.)
 
-    return scipy.integrate.quad(kirk_integ, lu_int_b[0], lu_int_b[1])[0]
+    lower_bound, upper_bound = lu_int_b
+    return scipy.integrate.quad(kirk_integ, lower_bound, upper_bound)[0]
 
 
-def trivariate_spread_exact(F_v, K, sigma_v, rho, T, DF,
-                            quad_spgrid_ind='quad',
-                            sg_level=10):
+def trivariate_spread_exact( F       : np.array
+                           , K       : float
+                           , sigma   : np.array
+                           , rho     : np.array
+                           , T       : float
+                           , DF      : float
+                           , quad_spgrid_ind = 'quad'
+                           , sg_level = 10 ):
+    """ Exact version of trivariate spread option, based on sparse grids, or scipy integration
+
+    :param F: np.array of forward prices = [F_1, F_2, F_3]
+    :param K: strike price
+    :param sigma: is a vector of sigmas [sigma_1, sigma_2, sigma_3]
+    :param rho: vector of correlations, = [rho_12, rho_13, rho_23]
+    :param T: time to maturity
+    :param DF: discount factor
+    :param quad_spgrid_ind: indicator whether to use sparse grids or numerical integration ('quad', 'spgrid')
+    :param sg_level: level of sparse grids
     """
-    exact version of trivariate spread option, based on sparse grids, or scipy integration
-    """
-    nu = sigma_v * np.sqrt(T)
+
+    nu = sigma * np.sqrt(T)
     mu = - 0.5 * nu ** 2  # + np.log (F_v)
 
     nu_1_d = nu[0] * np.sqrt(1. - rho[1]**2)
     nu_2_d = nu[1] * np.sqrt(1. - rho[2]**2)
     mu_1_d = lambda x_3: mu[0] + rho[1] * x_3 * nu[0]
     mu_2_d = lambda x_3: mu[1] + rho[2] * x_3 * nu[1]
-    k_1 = lambda x_3: K + F_v[2] * np.exp(x_3 * nu[2] + mu[2])
+    k_1 = lambda x_3: K + F[2] * np.exp(x_3 * nu[2] + mu[2])
     rho_Y1_Y2 = (rho[0] - rho[1]*rho[2])/np.sqrt(1-rho[1]**2) / np.sqrt(1. - rho[2]**2)
     # sigma_Z = np.sqrt(1. - rho_Y1_Y2**2)
     eta = lambda x_3, y_2: mu_1_d(x_3) + rho_Y1_Y2 * y_2 * nu_1_d + 0.5 * nu_1_d ** 2 * (1. - rho_Y1_Y2**2)
-    K_2 = lambda x_3, y_2: k_1(x_3) + F_v[1] * np.exp(y_2 * nu_2_d + mu_2_d(x_3))
+    K_2 = lambda x_3, y_2: k_1(x_3) + F[1] * np.exp(y_2 * nu_2_d + mu_2_d(x_3))
 
-    kirk_integ = lambda x_3, y_2: black_greeks(F_v[0] * np.exp(eta(x_3, y_2)), K_2(x_3, y_2),
-                                               - np.log(DF)/T,
-                                               nu_1_d * np.sqrt(1. - rho_Y1_Y2**2)/np.sqrt(T), T, 0)[0]
+    kirk_integ = lambda x_3, y_2: black_greeks( F[0] * np.exp(eta(x_3, y_2)), K_2(x_3, y_2)
+                                              , - np.log(DF)/T
+                                              , nu_1_d * np.sqrt(1. - rho_Y1_Y2**2)/np.sqrt(T), T, 0)[0]
     #                 / (2. * np.pi) * np.exp(-(x_3**2 + y_2 **2)/2.0)
 
     if quad_spgrid_ind == 'quad':  # in-built quadrature fct.
         return scipy.integrate.dblquad(lambda x, y: kirk_integ(x, y) * np.exp(-(x**2 + y**2)/2.), -np.inf, np.inf,
                                        lambda x: -np.inf, lambda x: np.inf,
                                        epsabs=1e-2, epsrel=1e-2)[0] / (2 * np.pi)
-    else:  # sparse grid ind
-        return sg.sg_quad(2, sg_level, lambda xy: kirk_integ(xy[0], xy[1]))
+    # sparse grid ind
+    return sg.sg_quad(2, sg_level, lambda xy: kirk_integ(xy[0], xy[1]))
 
 
-def trivariate_spread_exact_fast(F_v, K, sigma_v, rho, T, DF):
+def trivariate_spread_exact_fast( F: np.array
+                                , K: float
+                                , sigma: np.array
+                                , rho: np.array
+                                , T: float
+                                , DF: float
+                                ):
     """
     same as above except that it uses the cython version of trivariate spread function (great improvement)
     """
     return scipy.integrate.dblquad(lambda x_3, y_2:
-                                   pricers_fast.trivariate_spread_exact_integrat_fast2(x_3, y_2,
-                                                                                       F_v, K,
-                                                                                       sigma_v, rho, T, DF),
+                                   pricers_fast.trivariate_spread_exact_integrat_fast2(x_3, y_2, F, K, sigma, rho, T, DF),
                                    -np.inf, np.inf, lambda x: -np.inf, lambda x: np.inf)[0]
 
 
@@ -389,8 +418,7 @@ w_integ = w_integ1.reshape(11, 1)
 
 
 def d11_helper(params, z):
-    """ 
-    returns the value of the spread option 
+    """ returns the value of the spread option
     """
     S_1, S_2, K, sigma_1, sigma_2, rho, T, DF = params
   
@@ -412,29 +440,21 @@ def d11_helper(params, z):
     return H_1 - H_2
 
 
-def spread_option_appx(F_1, F_2, K, sigma_1, sigma_2, rho, T, DF):
+def spread_option(F_1, F_2, K, sigma_1, sigma_2, rho, T, DF, exact_appx_ind = 'appx'):
     """
     Appx valuation of spread option, expressed as numerical integration.
+    Exact version uses  scipy integration method.
 
     """
 
-    return DF * np.sum( w_integ * d11_helper([F_1, F_2, K, sigma_1, sigma_2, rho, T, DF],  p_integ * np.sqrt(2.))
-                      , axis = 0 ) / np.sqrt(np.pi)
+    if exact_appx_ind == 'appx':
+        return DF * np.sum( w_integ * d11_helper([F_1, F_2, K, sigma_1, sigma_2, rho, T, DF],  p_integ * np.sqrt(2.))
+                          , axis = 0 ) / np.sqrt(np.pi)
 
-
-def spread_option_exact(F_1, F_2, K, sigma_1, sigma_2, rho, T, DF):
-    """
-    Spread option using scipy integration method.
-
-    """
-
+    # "exact" method
     return DF * scipy.integrate.quad( lambda z: d11_helper([F_1, F_2, K, sigma_1, sigma_2, rho, T, DF], z) * np.exp(-z**2/2.) / np.sqrt(2. * np.pi)
                                     , -np.inf
                                     , np.inf )[0]
-
-
-def spread_option_kirk_zero_strike(F_1, F_2, sigma_1, sigma_2, rho, T, DF):
-    return spread_option_kirk(F_1, F_2, 0., sigma_1, sigma_2, rho, T, DF)
 
 
 def apo_wo_basket (K, sim_t_i, T, mm, fwd_idx ):

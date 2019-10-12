@@ -7,39 +7,8 @@ from typing import Dict, List, Tuple
 
 import ds_data
 from data.discount_data import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
+from vols.fwd_codes     import fwd_codes, fwd_mapping_codes, fwd_mth_codes
 
-
-# forward codes
-fwd_mth_codes = ['f', 'g', 'h',
-                 'j', 'k', 'm',
-                 'n', 'q', 'u',
-                 'v', 'x', 'z']
-
-fwd_mapping_codes = {'f': 'JAN',
-                     'g': 'FEB',
-                     'h': 'MAR',
-                     'j': 'APR',
-                     'k': 'MAY',
-                     'm': 'JUN',
-                     'n': 'JUL',
-                     'q': 'AUG',
-                     'u': 'SEP',
-                     'v': 'OCT',
-                     'x': 'NOV',
-                     'z': 'DEC' }
-
-fwd_codes = {'f': 1,
-             'g': 2,
-             'h': 3,
-             'j': 4,
-             'k': 5,
-             'm': 6,
-             'n': 7,
-             'q': 8,
-             'u': 9,
-             'v': 10,
-             'x': 11,
-             'z': 12 }
 
 # mapping of commodity names to vol parametrization
 vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals, ds_data.wti_vol_curve_dates_vals)
