@@ -72,7 +72,7 @@ class LMP:
         return res_l
 
     def compute_load_distribution(self, show_sol=False):
-        """ Computes the value of the optimization problem given gl and pl
+        """ Computes the value of the optimization problem given generation_nodes and pl
 
         :param show_sol: shows the solution
         """

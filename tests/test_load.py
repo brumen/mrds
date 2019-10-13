@@ -1,5 +1,5 @@
 import numpy as np
-import load
+from load import Load
 
 gl_compl = [(1, 100, 30), (2, 100, 35),
             (5, -150, 70), (6, -150, 50)]
@@ -16,5 +16,9 @@ gl_compl_pos = {1: np.array([0., 0.]),
                 5: np.array([2., 0.]),
                 6: np.array([2., -1.])}
 
-res_compl = load.cons_lp(6, gl_compl, p_compl)
-load.draw_network(res_compl['solution_edges'], pos=gl_compl_pos)
+
+load_obj = Load(gl_compl, p_compl)
+
+res_compl = load_obj.cons_lp()
+print(res_compl)
+load_obj.draw_network(res_compl['solution_edges'], pos=gl_compl_pos)

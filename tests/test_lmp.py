@@ -35,7 +35,7 @@ class LMPTest(TestCase):
         N = 20
         gl_3 = zip(range(1, N+1), np.random.random(N) * 100.,
                    np.random.random(N) * 50.,
-                   np.random.random(N) * 100.)  # (n, gen, load, p) , (2, 0., 100., 0.), (3, 0., 100., 0.),
+                   np.random.random(N) * 100.)  # (n, gen, load, network_struct) , (2, 0., 100., 0.), (3, 0., 100., 0.),
         pl_3 = []
         for i in range(1, N+1):
             for j in range(i+1, N+1):

@@ -151,16 +151,14 @@ def get_fwd_vol_curve_numeric_tenor( curveName : str
             fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
 
     else:
-        vol_curve_data = get_vol_curve(curveName, mktDate)
-        fwd_vol_tenors_raw = vol_curve_data['vol_dates']
-        fwd_vol_values_raw = vol_curve_data['vol_curve']
+        vol_curve_type, vol_curve_data = get_vol_curve(curveName, mktDate)
         if adj_tenors_days is not None:
             fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_tenors_days), val)
-                                   for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
+                                   for ot, val in vol_curve_data
                                    if ot - datetime.timedelta(days=adj_tenors_days) > mktDate ]
             fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
         else:
-            fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
+            fwd_vol_tenors, fwd_vol_values = list(vol_curve_data.keys()), vol_curve_data
 
     diffs = [ten_ - mktDate for ten_ in fwd_vol_tenors if ten_ > mktDate ]
     fwd_vol_tenors_numeric = np.array([elt.days for elt in diffs])/365.
@@ -172,11 +170,11 @@ def get_fwd_vol_curve_numeric_tenor( curveName : str
     return fwd_vol_tenors_numeric, fwd_vol_values_unexpired, fwd_vol_tenors_code, fwd_vol_tenors
 
 
-def read_data_matched_tenors(mktDate : datetime.date
-                             , fwd_curve_name : str
-                             , volCurveName : str
-                             , adj_fwd_tenors_days = None
-                             , adj_vol_tenors_days = None):
+def read_data_matched_tenors( mktDate : datetime.date
+                            , fwd_curve_name : str
+                            , vol_curve_name : str
+                            , adj_fwd_tenors_days = None
+                            , adj_vol_tenors_days = None):
     """ Matches the tenors of the forward and volatility curves.
 
     :param mktDate: market date for which the curves are obtained.
@@ -190,10 +188,10 @@ def read_data_matched_tenors(mktDate : datetime.date
                                         , adj_tenors_days = adj_fwd_tenors_days)
 
     option_tenors, vol_params, option_tenors_code, option_tenors_dt_orig = \
-        get_fwd_vol_curve_numeric_tenor( volCurveName
-                                       , mktDate
-                                       , fwd_vol_ind     = 'vol'
-                                       , adj_tenors_days = adj_vol_tenors_days)
+        get_fwd_vol_curve_numeric_tenor(vol_curve_name
+                                        , mktDate
+                                        , fwd_vol_ind     = 'vol'
+                                        , adj_tenors_days = adj_vol_tenors_days)
 
     # if option_tenors_dt and fwd_tenors_dt are the same, remove 1 day from option_tenors
     if fwd_tenors_dt == option_tenors_dt_orig:

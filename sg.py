@@ -8,7 +8,7 @@ import opd.opd_avx as opd_avx
 #
 # Abbreviations: 
 #   sparse_grid abbreviated with sg
-#   points ... p
+#   points ... network_struct
 #   weights ... w
 
 
