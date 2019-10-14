@@ -99,6 +99,91 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self.__complete_corr_mtx            = None  # complete correlation matrix hash
         self.__regenerate_complete_corr_mtx = True  # indicator whether to regenerate the complete corr. mtx.
 
+    @classmethod
+    def from_db(cls
+                , mkt_date   : datetime.date
+                , fwd_curves : List[str] ):
+        """ Constructs the class by reading forward and vol curves from the database.
+
+        :param mkt_date: market date
+        :param fwd_curves: list of forward curves to be read from database. (e.g. ['WTI', 'BRENT'])...
+        """
+
+        return cls( mkt_date
+                  , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
+                  , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
+
+    @property
+    def mkt_date(self) -> datetime.date:
+        return self._mktDate
+
+    @mkt_date.setter
+    def mkt_date(self, new_mkt_date : datetime.date):
+        """ Sets the new market date, updates all the curves accordingly.
+        """
+
+        self._mktDate = new_mkt_date
+        self.__mkt_date_change = True  # TODO: MAKE THE MODEL DEPENDENT ON THIS!!!
+
+    @property
+    def calc_date(self) -> datetime.date:
+        return self._calcDate
+
+    @calc_date.setter
+    def calc_date(self, new_calc_date : datetime.date):
+        """ Sets the new calculation date, updates all the curves accordingly.
+
+        :param new_calc_date: new caluclation date.
+        """
+
+        self._calcDate = new_calc_date
+
+    @property
+    def fwd_curves(self) -> List[FwdCurve]:
+        """ Curve names for the commodity curves in the model.
+        """
+
+        return self._com_fwd_curves
+
+    def fwd_curve_names(self, asset : str) -> FwdCurve:
+        """ Memoizes the forward curve names and returns the forward curve for a particular asset.
+
+        :param asset: asset for which the forward curve is computed, e.g. ('WTI')
+        """
+
+        if self.__com_curve_names:
+            return self.__com_curve_names[asset]
+
+        self.__com_curve_names = {fwd_curve.fwd_name: fwd_curve for fwd_curve in self.fwd_curves}
+        return self.__com_curve_names[asset]
+
+    @property
+    def vol_curves(self) -> List[Volatility]:
+        return self._com_vol_curves
+
+    def vol_curve_names(self, asset : str) -> Volatility:
+        """ Same as vol curves, but it produces a dictionary where keys are assets.
+
+        :param asset: asset for which vol you want to obtain (e.g. 'WTI')
+        """
+
+        if self.__vol_curve_names:
+            return self.__vol_curve_names[asset]
+
+        self.__vol_curve_names = {vol_curve.com_name: vol_curve for vol_curve in self.vol_curves}
+
+        return self.__vol_curve_names[asset]
+
+    @property
+    def black_vol_inverse_tol(self):
+        """ Tolerance for calibrating the vol matrix.
+        """
+        return self.__black_vol_inverse_tol
+
+    @black_vol_inverse_tol.setter
+    def black_vol_inverse_tol(self, new_inverse_tol):
+        self.__black_vol_inverse_tol = new_inverse_tol
+
     def _c_vec(self, asset : str, fwd_date : datetime.date) -> np.array:
         """ Returns the C vector (skew vector) for the asset and forward date.
 
@@ -183,42 +268,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return lb_ub_fact * np.ones((self.nb_factors_for_asset[asset_1], self.nb_factors_for_asset[asset_2]))
 
-    @property
-    def fwd_curves(self) -> List[FwdCurve]:
-        """ Curve names for the commodity curves in the model.
-        """
-
-        return self._com_fwd_curves
-
-    def fwd_curve_names(self, asset : str) -> FwdCurve:
-        """ Memoizes the forward curve names and returns the forward curve for a particular asset.
-
-        :param asset: asset for which the forward curve is computed, e.g. ('WTI')
-        """
-
-        if self.__com_curve_names:
-            return self.__com_curve_names[asset]
-
-        self.__com_curve_names = {fwd_curve.fwd_name: fwd_curve for fwd_curve in self.fwd_curves}
-        return self.__com_curve_names[asset]
-
-    @property
-    def vol_curves(self) -> List[Volatility]:
-        return self._com_vol_curves
-
-    def vol_curve_names(self, asset : str) -> Volatility:
-        """ Same as vol curves, but it produces a dictionary where keys are assets.
-
-        :param asset: asset for which vol you want to obtain (e.g. 'WTI')
-        """
-
-        if self.__vol_curve_names:
-            return self.__vol_curve_names[asset]
-
-        self.__vol_curve_names = {vol_curve.com_name: vol_curve for vol_curve in self.vol_curves}
-
-        return self.__vol_curve_names[asset]
-
     def _set_factor_corr_mat( self
                             , asset_1 : str
                             , asset_2 : str
@@ -277,54 +326,170 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self.__market_corr_mtx[asset_1][asset_2]
 
-    @property
-    def black_vol_inverse_tol(self):
-        """ Tolerance for calibrating the vol matrix.
-        """
-        return self.__black_vol_inverse_tol
+    @staticmethod
+    def _construct_corr(mtx_size, theta_vector):
+        """ Constructs and upper triangular matrix from a vector theta_vector, first row is from the rho matrix.
 
-    @black_vol_inverse_tol.setter
-    def black_vol_inverse_tol(self, new_inverse_tol):
-        self.__black_vol_inverse_tol = new_inverse_tol
-
-    @classmethod
-    def from_db(cls
-                , mkt_date   : datetime.date
-                , fwd_curves : List[str] ):
-        """ Constructs the class by reading forward and vol curves from the database.
-
-        :param mkt_date: market date
-        :param fwd_curves: list of forward curves to be read from database. (e.g. ['WTI', 'BRENT'])...
+        :param mtx_size: matrix size.
+        :param theta_vector:
         """
 
-        return cls( mkt_date
-                  , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
-                  , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
+        utm = np.triu(np.ones((mtx_size, mtx_size)))  # upper triangular matrix
+        utm_diag_ones = np.diag(np.diag(utm))
+        utm = utm - utm_diag_ones
+        utm[utm == 1] = theta_vector
 
-    @property
-    def mkt_date(self) -> datetime.date:
-        return self._mktDate
+        return utm + utm.transpose() + utm_diag_ones
 
-    @mkt_date.setter
-    def mkt_date(self, new_mkt_date : datetime.date):
-        """ Sets the new market date, updates all the curves accordingly.
+    def _construct_corr_asset(self, asset_nb, theta_vector):
+        return self.__class__._construct_corr(self.nb_factors_for_asset(asset_nb), theta_vector)
+
+    def __black_corr_within_curve(self
+                                  , asset: str
+                                  , fwd_date_1: datetime.date
+                                  , fwd_date_2: datetime.date) -> float:
+        """ Cumulative correlation between the fwd_date_1 and fwd_date_2 points on the forward curve.
+            up to the option time of the smallest of the two contracts
+
+        :param asset: curve asset
+        :param fwd_date_1: first contract on the curve
+        :param fwd_date_2: second contract on the curve
         """
 
-        self._mktDate = new_mkt_date
-        self.__mkt_date_change = True  # TODO: MAKE THE MODEL DEPENDENT ON THIS!!!
+        opt_mat = self.__option_tenor_for_fwd_tenor(asset,
+                                                    fwd_date_1 if fwd_date_1 <= fwd_date_2 else fwd_date_2)  # opt_mat until the smallest one
+        num_fwd_opt_date_1 = self.__numerical_dist_to_mktdate(fwd_date_1) - self.__numerical_dist_to_mktdate(opt_mat)
+        num_fwd_opt_date_2 = self.__numerical_dist_to_mktdate(fwd_date_2) - self.__numerical_dist_to_mktdate(opt_mat)
+        num_fwd_date_1 = self.__numerical_dist_to_mktdate(fwd_date_1)
+        num_fwd_date_2 = self.__numerical_dist_to_mktdate(fwd_date_2)
+        corr = self._factor_corr_mat(asset, asset)  # correlation matrix
+        kv = self._kappa_vec(asset)
+        sv = self._sigma_vec(asset)
+        nbf = self.nb_factors_for_asset(asset)
 
-    @property
-    def calc_date(self) -> datetime.date:
-        return self._calcDate
+        a = np.array([corr[factor_nb_1, factor_nb_1] * sv[factor_nb_1] * sv[factor_nb_2] *
+                      np.product(self._beta_T[asset]) *
+                      (np.exp(- kv[factor_nb_1] * num_fwd_opt_date_1 - kv[factor_nb_2] * num_fwd_opt_date_2) -
+                       np.exp(- kv[factor_nb_1] * num_fwd_date_1 - kv[factor_nb_2] * num_fwd_date_2)) /
+                      (kv[factor_nb_1] + kv[factor_nb_2])
+                      for factor_nb_1 in range(nbf)
+                      for factor_nb_2 in range(nbf)])
 
-    @calc_date.setter
-    def calc_date(self, new_calc_date : datetime.date):
-        """ Sets the new calculation date, updates all the curves accordingly.
+        # covariance divided by 2 standard deviations
+        return (np.exp(np.sum(a)) - 1.) / self.black_vol(asset, fwd_date_1, kv, sv, corr) / \
+               self.black_vol(asset, fwd_date_2, kv, sv, corr)
 
-        :param new_calc_date: new caluclation date.
+    def __black_corr_intra_curves(self
+                                  , model_corr_mtx: np.ndarray
+                                  , curve_1: str
+                                  , curve_2: str
+                                  , tenor_1: datetime.date
+                                  , tenor_2: datetime.date) -> float:
+        """ Returns the black correlation between different curves and different forward points.
+
+        :param model_corr_mtx: correlation matrix between factors of the model, same for all tenors, e.g. [2x2 matrix]
+        :param curve_1: name of the first curve
+        :param curve_2: name of second commodity curve
+        :param tenor_1: first tenor
+        :param tenor_2: second tenor
         """
 
-        self._calcDate = new_calc_date
+        t_1 = self.__option_tenor_for_fwd_tenor(curve_1, tenor_1)
+        t_2 = self.__option_tenor_for_fwd_tenor(curve_2, tenor_2)
+        opt_mat = t_1 if t_1 <= t_2 else t_2  # opt_mat until the smallest of the two tenors
+        kv1 = self._kappa_vec(curve_1)
+        kv2 = self._kappa_vec(curve_2)
+
+        bv1 = np.sqrt(self.__V_current(curve_1, tenor_1, opt_mat))  # square of integrated variance
+        bv2 = np.sqrt(self.__V_current(curve_2, tenor_2, opt_mat))
+
+        return sum([model_corr_mtx[factor_nb_1, factor_nb_2] *
+                    self._sigma_vec(curve_1)[factor_nb_1] * self._sigma_vec(curve_2)[factor_nb_2] *
+                    self._beta_T(curve_1, tenor_1) * self._beta_T(curve_2, tenor_2) *
+                    np.exp(- kv1[factor_nb_1] * self.__difference_to_market_date(tenor_1)
+                           - kv2[factor_nb_2] * self.__difference_to_market_date(tenor_2)) *
+                    (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1) /
+                    (kv1[factor_nb_1] + kv2[factor_nb_2])
+                    for factor_nb_1 in range(self.nb_factors_for_asset(curve_1))
+                    for factor_nb_2 in range(self.nb_factors_for_asset(curve_2))]) / (bv1 * bv2)
+
+    def __black_corr_intra_curves_factors(self
+                                          , model_corr_mtx
+                                          , curve_1: str
+                                          , curve_2: str
+                                          , tenor_1: datetime.date
+                                          , tenor_2: datetime.date
+                                          , factor_nb_1: int
+                                          , factor_nb_2: int
+                                          , opt_mat):
+        """  Same as function above (__black_corr_intra_curves), but the factors are exposed
+
+        :param curve_1: forward curve 1
+        :param curve_2: forward curve 2
+        :param tenor_1: tenor index for tenor on curve 1
+        :param tenor_2: tenor on curve 2
+        :param factor_nb_1: factor on curve 1
+        :param factor_nb_2: factor on curve 2
+        :param opt_mat: until what maturity this is computed TODO: WHAT DOES THIS MAKE SENSE??
+        """
+
+        kv1 = self._kappa_vec(curve_1)
+        kv2 = self._kappa_vec(curve_2)
+        sv1 = self._sigma_vec(curve_1)
+        sv2 = self._sigma_vec(curve_2)
+        bv1 = np.sqrt(self.__V_one_factor(curve_1, factor_nb_1, tenor_1, 0., opt_mat))
+        bv2 = np.sqrt(self.__V_one_factor(curve_2, factor_nb_2, tenor_2, 0., opt_mat))
+
+        return model_corr_mtx[factor_nb_1, factor_nb_2] * \
+               sv1[factor_nb_1] * sv2[factor_nb_2] * \
+               self._beta_T(curve_1, tenor_1) * self._beta_T(curve_2, tenor_2) * \
+               np.exp(- kv1[factor_nb_1] * self.__difference_to_market_date(tenor_1) - kv2[
+                   factor_nb_2] * self.__difference_to_market_date(tenor_2)) * \
+               (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1.) / \
+               (kv1[factor_nb_1] + kv2[factor_nb_2]) / (bv1 * bv2)
+
+    # TODO: CHECK IF THIS METHOD IS EVEN NEEDED.
+    def __black_corr_intra_curves_calib(self
+                                        , curve_1: str
+                                        , curve_2: str
+                                        , solver='scipy_cobyla'):
+        """ Calibrates the correlations between different curves.
+
+        :param curve_1: curve 1 to for correlation calibration.
+        :param curve_2: curve 2 for calibration.
+        :param solver: solver to use in the OpenOpt
+        """
+
+        black_corr_intra_curve_vector = lambda model_corr_mtx, curve_1, curve_2, corr_len: \
+            np.array([self.__black_corr_intra_curves(model_corr_mtx
+                                                     , curve_1
+                                                     , curve_2
+                                                     , tenor
+                                                     , tenor)
+                      for tenor in range(corr_len)])
+
+        black_corr_intra_curve_vector_optim = lambda model_corr_mtx, curve_1, curve_2, corr_len: \
+            scipy.linalg.norm(black_corr_intra_curve_vector(model_corr_mtx, curve_1, curve_2, corr_len) -
+                              self._market_corr[curve_1][curve_2])
+
+        corr_len_real = len(self._market_corr(curve_1, curve_2))
+        curve_1_nb_fact = self.nb_factors_for_asset(curve_1)
+        curve_2_nb_fact = self.nb_factors_for_asset(curve_2)
+        optim_pr = NSP(lambda corr_mtx_ravel: black_corr_intra_curve_vector_optim(
+            corr_mtx_ravel.reshape((curve_1_nb_fact, curve_2_nb_fact)),
+            curve_1, curve_2, corr_len_real),
+                       self._factor_corr_mat(curve_1, curve_2).ravel(),
+                       lb=self._factor_corr_mat(curve_1, curve_2, lb_ub_ind='lb').ravel(),
+                       ub=self._factor_corr_mat(curve_1, curve_2, lb_ub_ind='ub').ravel()) \
+            .solve(solver)
+
+        correlation_matrix = np.array(optim_pr.xf).reshape((curve_1_nb_fact, curve_2_nb_fact))
+
+        self.__factor_corr_mat_list[curve_1][curve_2] = correlation_matrix
+        self.__factor_corr_mat_list[curve_2][curve_1] = correlation_matrix
+
+        return self.__factor_corr_mat_list[curve_1][curve_2]
+
 
     def nb_factors_for_asset(self, asset : str) -> int:
         """ Number of factors per asset, placeholder perhaps for some other function.
@@ -423,24 +588,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         return self._discount_function_ql.discount(fwd_time)
-
-    @staticmethod
-    def _construct_corr(mtx_size, theta_vector):
-        """ Constructs and upper triangular matrix from a vector theta_vector, first row is from the rho matrix.
-
-        :param mtx_size: matrix size.
-        :param theta_vector:
-        """
-
-        utm = np.triu(np.ones((mtx_size, mtx_size)))  # upper triangular matrix
-        utm_diag_ones = np.diag(np.diag(utm))
-        utm = utm - utm_diag_ones
-        utm[utm == 1] = theta_vector
-
-        return utm + utm.transpose() + utm_diag_ones
-
-    def _construct_corr_asset(self, asset_nb, theta_vector):
-        return self.__class__._construct_corr(self.nb_factors_for_asset(asset_nb), theta_vector)
 
     def __difference_to_market_date(self, fwd_date : datetime.date, dcf=365.25) -> float:
         """ Computes the difference to market date given the discount factor.
@@ -730,149 +877,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return (fwd_date - self.mkt_date).days / dcf
 
-    def __black_corr_within_curve( self
-                                 , asset      : str
-                                 , fwd_date_1 : datetime.date
-                                 , fwd_date_2 : datetime.date ) -> float:
-        """ Cumulative correlation between the fwd_date_1 and fwd_date_2 points on the forward curve.
-            up to the option time of the smallest of the two contracts
-
-        :param asset: curve asset
-        :param fwd_date_1: first contract on the curve
-        :param fwd_date_2: second contract on the curve
-        """
-
-        opt_mat = self.__option_tenor_for_fwd_tenor(asset, fwd_date_1 if fwd_date_1 <= fwd_date_2 else fwd_date_2)  # opt_mat until the smallest one
-        num_fwd_opt_date_1 = self.__numerical_dist_to_mktdate(fwd_date_1) - self.__numerical_dist_to_mktdate(opt_mat)
-        num_fwd_opt_date_2 = self.__numerical_dist_to_mktdate(fwd_date_2) - self.__numerical_dist_to_mktdate(opt_mat)
-        num_fwd_date_1 = self.__numerical_dist_to_mktdate(fwd_date_1)
-        num_fwd_date_2 = self.__numerical_dist_to_mktdate(fwd_date_2)
-        corr = self._factor_corr_mat(asset, asset)  # correlation matrix
-        kv = self._kappa_vec(asset)
-        sv = self._sigma_vec(asset)
-        nbf = self.nb_factors_for_asset(asset)
-
-        a = np.array([corr[factor_nb_1, factor_nb_1] * sv[factor_nb_1] * sv[factor_nb_2] *
-                      np.product(self._beta_T[asset]) *
-                      (np.exp(- kv[factor_nb_1] * num_fwd_opt_date_1 - kv[factor_nb_2] * num_fwd_opt_date_2 ) -
-                       np.exp(- kv[factor_nb_1] * num_fwd_date_1 - kv[factor_nb_2] * num_fwd_date_2)) /
-                      (kv[factor_nb_1] + kv[factor_nb_2])
-                      for factor_nb_1 in range(nbf)
-                      for factor_nb_2 in range(nbf)])
-
-        # covariance divided by 2 standard deviations
-        return (np.exp(np.sum(a)) - 1.) / self.black_vol(asset, fwd_date_1, kv, sv, corr) / \
-               self.black_vol(asset, fwd_date_2, kv, sv, corr)
-
-    def __black_corr_intra_curves(self
-                                  , model_corr_mtx : np.ndarray
-                                  , curve_1        : str
-                                  , curve_2        : str
-                                  , tenor_1        : datetime.date
-                                  , tenor_2        : datetime.date) -> float:
-        """ Returns the black correlation between different curves and different forward points.
-
-        :param model_corr_mtx: correlation matrix between factors of the model, same for all tenors, e.g. [2x2 matrix]
-        :param curve_1: name of the first curve
-        :param curve_2: name of second commodity curve
-        :param tenor_1: first tenor
-        :param tenor_2: second tenor
-        """
-
-        t_1 = self.__option_tenor_for_fwd_tenor(curve_1, tenor_1)
-        t_2 = self.__option_tenor_for_fwd_tenor(curve_2, tenor_2)
-        opt_mat = t_1 if t_1 <= t_2 else t_2  # opt_mat until the smallest of the two tenors
-        kv1 = self._kappa_vec(curve_1)
-        kv2 = self._kappa_vec(curve_2)
-
-        bv1 = np.sqrt(self.__V_current(curve_1, tenor_1, opt_mat))  # square of integrated variance
-        bv2 = np.sqrt(self.__V_current(curve_2, tenor_2, opt_mat))
-
-        return sum([model_corr_mtx[factor_nb_1, factor_nb_2] *
-                    self._sigma_vec(curve_1)[factor_nb_1] * self._sigma_vec(curve_2)[factor_nb_2] *
-                    self._beta_T(curve_1, tenor_1) * self._beta_T(curve_2, tenor_2) *
-                    np.exp(- kv1[factor_nb_1] * self.__difference_to_market_date(tenor_1)
-                           - kv2[factor_nb_2] * self.__difference_to_market_date(tenor_2)) *
-                    (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1) /
-                    (kv1[factor_nb_1] + kv2[factor_nb_2] )
-                    for factor_nb_1 in range(self.nb_factors_for_asset(curve_1))
-                    for factor_nb_2 in range(self.nb_factors_for_asset(curve_2))]) / (bv1 * bv2)
-
-    def __black_corr_intra_curves_factors( self
-                                         , model_corr_mtx
-                                         , curve_1     : str
-                                         , curve_2     : str
-                                         , tenor_1     : datetime.date
-                                         , tenor_2     : datetime.date
-                                         , factor_nb_1 : int
-                                         , factor_nb_2 : int
-                                         , opt_mat ):
-        """  Same as function above (__black_corr_intra_curves), but the factors are exposed
-
-        :param curve_1: forward curve 1
-        :param curve_2: forward curve 2
-        :param tenor_1: tenor index for tenor on curve 1
-        :param tenor_2: tenor on curve 2
-        :param factor_nb_1: factor on curve 1
-        :param factor_nb_2: factor on curve 2
-        :param opt_mat: until what maturity this is computed TODO: WHAT DOES THIS MAKE SENSE??
-        """
-
-        kv1 = self._kappa_vec(curve_1)
-        kv2 = self._kappa_vec(curve_2)
-        sv1 = self._sigma_vec(curve_1)
-        sv2 = self._sigma_vec(curve_2)
-        bv1 = np.sqrt(self.__V_one_factor(curve_1, factor_nb_1, tenor_1, 0., opt_mat))
-        bv2 = np.sqrt(self.__V_one_factor(curve_2, factor_nb_2, tenor_2, 0., opt_mat))
-
-        return model_corr_mtx[factor_nb_1, factor_nb_2] * \
-               sv1[factor_nb_1] * sv2[factor_nb_2] * \
-               self._beta_T(curve_1, tenor_1) * self._beta_T(curve_2, tenor_2) * \
-               np.exp(- kv1[factor_nb_1] * self.__difference_to_market_date(tenor_1) - kv2[factor_nb_2] * self.__difference_to_market_date(tenor_2)) * \
-               (np.exp((kv1[factor_nb_1] + kv2[factor_nb_2]) * opt_mat) - 1.) / \
-               (kv1[factor_nb_1] + kv2[factor_nb_2]) / (bv1 * bv2)
-
-    # TODO: CHECK IF THIS METHOD IS EVEN NEEDED.
-    def __black_corr_intra_curves_calib( self
-                                       , curve_1 : str
-                                       , curve_2 : str
-                                       , solver = 'scipy_cobyla' ):
-        """ Calibrates the correlations between different curves.
-
-        :param curve_1: curve 1 to for correlation calibration.
-        :param curve_2: curve 2 for calibration.
-        :param solver: solver to use in the OpenOpt
-        """
-
-        black_corr_intra_curve_vector = lambda model_corr_mtx, curve_1, curve_2, corr_len: \
-            np.array([self.__black_corr_intra_curves(model_corr_mtx
-                                                     , curve_1
-                                                     , curve_2
-                                                     , tenor
-                                                     , tenor)
-                      for tenor in range(corr_len)])
-            
-        black_corr_intra_curve_vector_optim = lambda model_corr_mtx, curve_1, curve_2, corr_len: \
-            scipy.linalg.norm(black_corr_intra_curve_vector(model_corr_mtx, curve_1, curve_2, corr_len) -
-                              self._market_corr[curve_1][curve_2])
-
-        corr_len_real = len(self._market_corr(curve_1, curve_2))
-        curve_1_nb_fact = self.nb_factors_for_asset(curve_1)
-        curve_2_nb_fact = self.nb_factors_for_asset(curve_2)
-        optim_pr = NSP(lambda corr_mtx_ravel: black_corr_intra_curve_vector_optim(corr_mtx_ravel.reshape ((curve_1_nb_fact,curve_2_nb_fact)),
-                                                                                  curve_1, curve_2, corr_len_real),
-                       self._factor_corr_mat(curve_1, curve_2).ravel(),
-                       lb = self._factor_corr_mat(curve_1, curve_2, lb_ub_ind='lb').ravel(),
-                       ub = self._factor_corr_mat(curve_1, curve_2, lb_ub_ind='ub').ravel())\
-                      .solve(solver)
-
-        correlation_matrix = np.array(optim_pr.xf).reshape((curve_1_nb_fact, curve_2_nb_fact))
-
-        self.__factor_corr_mat_list[curve_1][curve_2] = correlation_matrix
-        self.__factor_corr_mat_list[curve_2][curve_1] = correlation_matrix
-
-        return self.__factor_corr_mat_list[curve_1][curve_2]
-
     def __deltas_to_strikes(self
                             , asset : str
                             , tenor_date     : datetime.date
@@ -1079,7 +1083,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                          for opt_price, strike, cp in zip( option_prices, strikes, cp_ind ) ] )
 
     def _opt_fct_skew( self
-                     , asset : str
+                     , asset     : str
                      , fwd_dates : List[datetime.date]):
         """ Optimization function to minimize over the fwd_dates.
 
@@ -1091,7 +1095,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # penalization level is 10000
         #    imp_vol_vec_model - self.vol_surface_list[asset][fwd_idx, :]
         return NLP( lambda C_vec: scipy.linalg.norm(self.__model_vol_surface(asset, C_vec, fwd_dates) -
-                                                    self.vol_curve_names[asset].getVolForDate(fwd_dates))
+                                                    self.vol_curve_names(asset).getVolForDate(fwd_dates))
                   , np.array([1., 0., 0.])  # TODO: THIS HAS TO BE IMPROVED
                   , iprint = -1 )\
                   .solve(self.__class__.NLP_SOLVER).xf
@@ -1211,8 +1215,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                         , simulation_times : List[datetime.date]
                         , tenor_list       : List[datetime.date]
                         , set_seed         = None) -> np.array :
-        """ Simulate all curves for desired simulation times on either cpu or cuda.
-            Simulation times have to be given.
+        """ Simulate all curves for desired simulation times.
 
         Generates a 3-dimensional array
         0-th dimension: asset
@@ -1264,11 +1267,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                                    , nb_simulations )
 
                 old_cov_mat = complete_corr_mtx[self.__factor_positions(asset), self.__factor_positions(asset)]
-                tenor_used = tenor_list[asset]
                 old_chol_inv = np.linalg.inv(np.linalg.cholesky(old_cov_mat))
                 sims_Z_unit = np.dot(old_chol_inv, simulated_rn[:, self.__factor_positions(asset)].transpose())
 
-                for tenor_idx, tenor_nb in enumerate(tenor_used):
+                # tenor_used = tenor_list[asset]  # TODO: REMOVE IN THE NEXT ITERATION
+
+                for tenor_idx, tenor_nb in enumerate(tenor_list[asset]):
                     # prepare cov mtx
                     cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, t_i, simulation_times)
                                                              for j in range(nb_factors_asset)]
