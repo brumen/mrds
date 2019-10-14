@@ -137,15 +137,17 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if fwd_date not in self.__C_vec[asset]:
             self.__C_vec[asset][fwd_date] = c_vec_value
 
-    def __default_factor_corr_mat_fct( self
-                                     , asset_1 : str
-                                     , asset_2 : str
-                                     , same_asset_corr = 0.98
-                                     , diff_asset_corr = 0.96 ):
-        """ Initial corr. matrix
+    def __default_factor_corr_mat( self
+                                 , asset_1 : str
+                                 , asset_2 : str
+                                 , same_asset_corr = 0.98
+                                 , diff_asset_corr = 0.96 ):
+        """ Default correlation matrix between asset_1 and asset_2.
 
         :param asset_1: first asset, e.g. 'WTI',
         :param asset_2: second asset, e.g. 'BRENT'
+        :param same_asset_corr: default correlation between tenors on the same curve.
+        :param diff_asset_corr: default correlation between different assets
         """
 
         if asset_1 == asset_2:
@@ -155,10 +157,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return diff_asset_corr * np.ones((self.nb_factors_for_asset(asset_1),
                                           self.nb_factors_for_asset(asset_2)))
 
-    def __default_factor_corr_mat_fct_lb_ub( self
-                                           , asset_1 : str
-                                           , asset_2 : str
-                                           , lb_ub_ind='ub' ):
+    def __default_factor_corr_mat_lb_ub( self
+                                       , asset_1 : str
+                                       , asset_2 : str
+                                       , lb_ub_ind = 'ub') -> np.ndarray:
         """ Sets the default factor correlation lower (lb) and upper (ub) bound between asset_1 and asset_2.
 
         :param asset_1: first asset for default correlation, e.g. 'WTI'
@@ -217,16 +219,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self.__vol_curve_names[asset]
 
-    def _set_factor_corr_mat(self, asset_1, asset_2, new_corr_mtx = None, lb_ub_ind=None):
-        """ Returns the factor correlation between assets 1 & 2. If new_corr_mtx is provided,
+    def _set_factor_corr_mat( self
+                            , asset_1 : str
+                            , asset_2 : str
+                            , new_corr_mtx = None
+                            , lb_ub_ind    = None ) -> np.ndarray:
+        """ Returns the factor correlation matrix between assets 1 & 2. If new_corr_mtx is provided,
             set that as the correlation matrix between them.
 
         :param asset_1: first asset to get the correlation
         :param asset_2: second asset for the correlation
         :param new_corr_mtx: new matrix if you want it to be set up.
+        :param lb_ub_ind: indicator whether upper bound or lower bound is set. Options: 'lb', 'ub'
         """
 
-        mtx_to_insert = new_corr_mtx if new_corr_mtx else (self.__default_factor_corr_mat_fct(asset_1, asset_2) if not lb_ub_ind else self.__default_factor_corr_mat_fct_lb_ub(asset_1, asset_2, lb_ub_ind=lb_ub_ind))
+        mtx_to_insert = new_corr_mtx if new_corr_mtx else (self.__default_factor_corr_mat(asset_1, asset_2) if not lb_ub_ind else self.__default_factor_corr_mat_lb_ub(asset_1, asset_2, lb_ub_ind=lb_ub_ind))
 
         if asset_1 not in self.__factor_corr_mtx:
             self.__factor_corr_mtx[asset_1] = {asset_2: mtx_to_insert}
@@ -260,7 +267,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if mkt_corr_mtx:
             logger.info('Market correlation between assets {0} and {1} overwritten with {2}'.format(asset_1, asset_2, mkt_corr_mtx))
 
-        mtx_to_insert = mkt_corr_mtx if mkt_corr_mtx else self.__default_factor_corr_mat_fct(asset_1, asset_2)
+        mtx_to_insert = mkt_corr_mtx if mkt_corr_mtx else self.__default_factor_corr_mat(asset_1, asset_2)
 
         if asset_1 not in self.__factor_corr_mtx:
             self.__market_corr_mtx[asset_1] = {asset_2: mtx_to_insert}
@@ -605,26 +612,30 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                          , kappa_vec
                                          , sigma_vec
                                          , rho_vec
-                                         , fwd_tenors_restr = None ):
+                                         , fwd_tenors = None ) -> float:
         """ Distance between model & market black volatility, used for calibration of the entire curve.
+            Produces a sqaure sum of distance elements.
 
        :param asset: asset to consider, e.g. 'WTI'
        :param kappa_vec: kappa vector to calibrate
        :param sigma_vec: sigma vector to calibrate for asset asset
        :param rho_vec: correlation _vector_ to calibrate
-       :param fwd_tenors_restr: perhaps you want to restrict the forward tenors to a pre-defined set
+       :param fwd_tenors: perhaps you want to restrict the forward tenors to a pre-defined set. If None,
+                          fwd tenors from the forward curve are used.
         """
 
-        fwd_tenors = fwd_tenors_restr if fwd_tenors_restr else self.fwd_curve_names(asset).fwd_tenors
+        # either use fwd_tenors provided, or use the fwd tenors from the fwd curve.
+        fwd_tenors_used = fwd_tenors if fwd_tenors else self.fwd_curve_names(asset).fwd_tenors
 
         model_vol = [self.black_vol( asset
+                                   , fwd_date
                                    , kappa_vec
                                    , sigma_vec
-                                   , self._construct_corr_asset(asset, rho_vec) )
-                     for fwd_date in fwd_tenors ]
+                                   , self._construct_corr_asset(asset, rho_vec))
+                     for fwd_date in fwd_tenors_used]
 
         market_vol_curve = self.vol_curve_names(asset)
-        market_vol = [market_vol_curve.atm_vol(fwd_date) for fwd_date in fwd_tenors ]
+        market_vol = [market_vol_curve.atm_vol(fwd_date) for fwd_date in fwd_tenors_used]
 
         return sum([(market_vol_elt - model_vol_elt)**2
                     for market_vol_elt, model_vol_elt in zip(market_vol, model_vol)])
@@ -678,15 +689,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self.__kappa_sigma_rho(asset).xf[nbf:(2 * nbf)]
 
-    def __factor_corr_mat_list(self, asset : str) -> np.ndarray:
-        """ Returns the calibrated correlation matrix.
+    def __factor_corr_mat(self, asset : str) -> np.ndarray:
+        """ Returns the calibrated factor correlation matrix. e.g. 2x2 matrix for asset.
 
         :param asset: asset for which the correlation is returned.
         """
 
         # calibrated rho vector
         rho_vec = self._construct_corr_asset(asset, self.__kappa_sigma_rho(asset).xf[(2 * self.nb_factors_for_asset(asset)):])
-        # transforming the rho_vec into the rho matrix TODO: CHECK HERE!!
+        # transforming the rho_vec into the rho matrix
         rho_mat_len = np.sqrt(len(rho_vec))  # this is square matrix  TODO: THIS HERE IS WRONG!!!
 
         return rho_vec.reshape((rho_mat_len, rho_mat_len))
@@ -719,7 +730,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return (fwd_date - self.mkt_date).days / dcf
 
-    def __black_corr_within_curve( self, asset : str
+    def __black_corr_within_curve( self
+                                 , asset      : str
                                  , fwd_date_1 : datetime.date
                                  , fwd_date_2 : datetime.date ) -> float:
         """ Cumulative correlation between the fwd_date_1 and fwd_date_2 points on the forward curve.
@@ -753,13 +765,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                self.black_vol(asset, fwd_date_2, kv, sv, corr)
 
     def __black_corr_intra_curves(self
-                                  , model_corr_mtx
-                                  , curve_1 : str
-                                  , curve_2 : str
-                                  , tenor_1 : datetime.date
-                                  , tenor_2 : datetime.date) -> float:
+                                  , model_corr_mtx : np.ndarray
+                                  , curve_1        : str
+                                  , curve_2        : str
+                                  , tenor_1        : datetime.date
+                                  , tenor_2        : datetime.date) -> float:
         """ Returns the black correlation between different curves and different forward points.
 
+        :param model_corr_mtx: correlation matrix between factors of the model, same for all tenors, e.g. [2x2 matrix]
         :param curve_1: name of the first curve
         :param curve_2: name of second commodity curve
         :param tenor_1: first tenor
@@ -1107,7 +1120,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def _complete_corr_mtx(self, nb_steps=300) -> np.ndarray:
         """  Generates the factor correlation matrix from a list of list of corr. matrices
-        gathered in __factor_corr_mat_list
+             gathered in __factor_corr_mat_list.
 
         :param nb_steps: number of steps to converge to the correlation matrix, maybe 30 steps is enough
         :returns: None, just sets the self.__completeCorrMat
