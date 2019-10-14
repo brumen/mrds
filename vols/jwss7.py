@@ -3,10 +3,10 @@ import datetime
 import numpy as np
 import logging
 
-from typing import List, Dict
+from scipy.stats import norm
 
-from functools import lru_cache
-from tkinter   import Scale, Button, HORIZONTAL
+from typing  import List, Dict, Tuple
+from tkinter import Scale, Button, HORIZONTAL
 
 import ds
 from vols.vols import Volatility, VolatilityDrawMixin
@@ -20,8 +20,8 @@ class JWSS7Volatility(Volatility):
 
     @property
     def _vol_dates(self) -> List[datetime.date]:
-        ''' Returns the curve spine points, i.e. the points on the curve from which the curve is interpolated.
-        '''
+        """ Returns the curve spine points, i.e. the points on the curve from which the curve is interpolated.
+        """
 
         return self._vol_params.keys()
 
@@ -45,7 +45,7 @@ class JWSS7Volatility(Volatility):
                   , vol_params = cls._transform_from_jwss7(vol_params) )
 
     @staticmethod
-    def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, List]:
+    def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, Tuple]:
         """ Returns jw7 parametrization from jwss7 for particular fwd date.
 
         vol_params in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
@@ -59,7 +59,7 @@ class JWSS7Volatility(Volatility):
             A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
 
             # in the form of sigma_0, A, B, C, P, alphaC, alphaP
-            transformed_curve[fwd_vol_date] = [sigma_0, A, B, call_slope / A, put_slope / A, call_bend, put_bend ]
+            transformed_curve[fwd_vol_date] = (sigma_0, A, B, call_slope / A, put_slope / A, call_bend, put_bend )
 
             return transformed_curve
 
@@ -160,14 +160,7 @@ class JWSS7Volatility(Volatility):
         :param ttm: time to maturity
         """
 
-        jw7Params = self._transform_from_jwss7(fwdDate)
-        sigma_0 = jw7Params['sigma_0']
-        A       = jw7Params['A']
-        B       = jw7Params['B']
-        C       = jw7Params['C']
-        P       = jw7Params['P']
-        alphaC  = jw7Params['alphaC']
-        alphaP  = jw7Params['alphaP']
+        sigma_0, A, B, C, P, alphaC, alphaP = self._transform_from_jwss7(fwdDate)
 
         z = JWSS7Volatility.normalized_strike(S0, K, sigma_0, ttm)
         sigma = self.implied_vol(S0, K, ttm)
@@ -192,24 +185,15 @@ class JWSS7Volatility(Volatility):
                ( np.log ( S0_local / K) - sigma * sigma * ttm / 2.0 ) * ( sigmat * ttm + sigma / (2.0 * np.sqrt (ttm) ) ) ) \
             / (sigma * sigma * ttm)
 
-        return S0_local * \
-            scipy.stats.norm.pdf(d1) * d1T - K * scipy.stats.norm.pdf(d2) * d2T
+        return S0_local * norm.pdf(d1) * d1T - K * norm.pdf(d2) * d2T
 
     # first derivative of (undiscounted) Black's call wrt K
-    def call_future_K(self, fwd, S0, K, ttm):
-        """
-        Derivative of a call option in this parametrization wrt strike price K.
+    def call_future_K(self, fwd_date : datetime.date, S0 : float, K : float, ttm :float):
+        """ Derivative of a call option in this parametrization wrt strike price K.
 
         """
 
-        jw7Params = self._transform_from_jwss7(fwdDate)
-        sigma_0 = jw7Params['sigma_0']
-        A       = jw7Params['A']
-        B       = jw7Params['B']
-        C       = jw7Params['C']
-        P       = jw7Params['P']
-        alphaC  = jw7Params['alphaC']
-        alphaP  = jw7Params['alphaP']
+        sigma_0, A, B, C, P, alphaC, alphaP = self._transform_from_jwss7(fwd_date)
 
         z = JWSS7Volatility.normalized_strike(S0, K, sigma_0, ttm)
         sigma = self.implied_vol(S0, K, ttm)
@@ -231,8 +215,7 @@ class JWSS7Volatility(Volatility):
                ( np.log ( S0_local / K ) - sigma * sigma * ttm / 2.0 ) * np.sqrt (ttm) * sigmaK ) / \
             (sigma * sigma * ttm)
 
-        return (S0_local * scipy.stats.norm.pdf(d1) * d1K -
-                scipy.stats.norm.cdf(d2) - K * scipy.stats.norm.pdf(d2) * d2K)
+        return S0_local * norm.pdf(d1) * d1K - norm.cdf(d2) - K * norm.pdf(d2) * d2K
 
     # second derivative wrt K of the undiscounted call
     def call_future_KK(self, fwdDate, S0, K, ttm):
@@ -290,8 +273,8 @@ class JWSS7Volatility(Volatility):
                    ( np.log ( S0_local / K ) - sigma * sigma * ttm  / 2.0 ) * np.sqrt (ttm) * sigmaK ) * sigma * ttm * sigmaK \
             / (sigma * sigma * sigma * sigma * ttm * ttm)
 
-        return (S0 * normpdfD(d1) * d1K * d1K + S0_local * scipy.stats.norm.pdf(d1) * d1KK -
-                2.0 * scipy.stats.norm.pdf(d2) * d2K - K * scipy.stats.norm.pdf(d2) * (-d2) * d2K * d2K - K * scipy.stats.norm.pdf(d2) * d2KK)
+        return (S0 * norm.pdf(d1) * d1K * d1K + S0_local * norm.pdf(d1) * d1KK -
+                2.0 * norm.pdf(d2) * d2K - K * norm.pdf(d2) * (-d2) * d2K * d2K - K * norm.pdf(d2) * d2KK)
 
     def skewed_distribution(self, fwdDate, S0, K, ttm):
         return 1. + self.call_future_K(fwdDate, S0, K, ttm)

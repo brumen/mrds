@@ -70,7 +70,7 @@ class Volatility:
         :param com_name: name of the commodity to consider
         :param mkt_date: market date
         :param fwd_params: parameters about the forward curve, in the form of FwdCurve object
-        :param vol_params: dictionary, where keys are volatility dates, and values are lists of [ATM, ....] TODO FINISH HERE.
+        :param vol_params: dictionary, where keys are volatility dates, and values are tuples of parameters (ATM, ....)
         """
 
         self.mkt_date    = mkt_date
