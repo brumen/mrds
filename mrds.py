@@ -21,11 +21,11 @@ from near_corr     import near_corr_simple
 from vols.vols     import Volatility
 from vols.vols_get import get_vol_object
 from vols.vols_basic import black_vol_inverse
-from discount      import read_discount_curve, read_discount_curve_quantlib
+
 from forward_curve import FwdCurve
 from quartic.quartic_cy import QuadRoots, CubicRoots, QuarticRoots
 from opd.opd_avx   import skew_fom
-
+from discount      import DiscountCurve
 
 logger = Logger(__name__)
 
@@ -59,7 +59,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                  , mkt_date      : datetime.date
                  , fwd_curves    : List[FwdCurve]
                  , vol_curves    : List[Volatility]
-                 , calc_date     = None):
+                 , discount_curve = None
+                 , calc_date      = None ):
 
         """ Initialization of the skew model.
 
@@ -67,14 +68,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
                      forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
         :param vol_curves: commodity vol curves, in case they are different than forward curves.
+        :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
         :param calc_date: calculation date.
         """
 
         self._mktDate          = mkt_date
-        self.__mkt_date_change = True  # indicator whether the market date has changed and everything needs to be recalculated.
         self._calcDate         = calc_date if calc_date else mkt_date
         self._com_fwd_curves   = fwd_curves
         self._com_vol_curves   = vol_curves
+        self._discount_curve   = discount_curve if discount_curve else DiscountCurve.discount_function(mkt_date)
         nb_assets              = len(self._com_fwd_curves)
 
         # initial value of the calibrated params
@@ -92,8 +94,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # hashed values
         self.__com_curve_names      = None
         self.__vol_curve_names      = None
-        self.__discount_function    = None  # has for discount function
-        self.__discount_function_ql = None  # placeholder for QuantLib discount function
         self.__factor_corr_mtx = dict()  # to keep track of the factor correlation matrices.
         self.__market_corr_mtx = dict()  # track of the market correlation matrix
         self.__complete_corr_mtx            = None  # complete correlation matrix hash
@@ -123,7 +123,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         self._mktDate = new_mkt_date
-        self.__mkt_date_change = True  # TODO: MAKE THE MODEL DEPENDENT ON THIS!!!
+
+        # TODO: All the things that should change on market date
+        for comCurves in self._com_fwd_curves:
+            comCurves.mkt_date = new_mkt_date
+
+        for volCurve in self._com_vol_curves:
+            volCurve.mkt_date = new_mkt_date
 
     @property
     def calc_date(self) -> datetime.date:
@@ -490,7 +496,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self.__factor_corr_mat_list[curve_1][curve_2]
 
-
     def nb_factors_for_asset(self, asset : str) -> int:
         """ Number of factors per asset, placeholder perhaps for some other function.
 
@@ -524,42 +529,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             sim_times_normalized = np.array(sim_times)
             return sim_times_normalized, [self.mkt_date + datetime.timedelta(int(np.round(stf * 365.))) for stf in sim_times_normalized]
 
-    def update_market_date(self, new_market_date : datetime.date) -> None:
-        """ Updates the date to the new market date, and updates the curves and vols accordingly.
-
-        :param new_market_date: new date that one wants to set.
-        """
-
-        for comCurves in self._com_fwd_curves:
-            comCurves.mkt_date = new_market_date
-
-        for volCurve in self._com_vol_curves:
-            volCurve.mkt_date = new_market_date
-
-    @property
-    def _discount_function(self):
-        """ Returns the discount function for the market date.
-        """
-
-        if self.__discount_function:
-            return self.__discount_function
-
-        self.__discount_function = read_discount_curve(self.mkt_date)
-
-        return self.__discount_function
-
-    @property
-    def _discount_function_ql(self):
-        """ Returns the Quantlib discount function for the market date.
-        """
-
-        if self.__discount_function_ql:
-            return self.__discount_function_ql
-
-        self.__discount_function_ql = read_discount_curve_quantlib(self.mkt_date)
-
-        return self.__discount_function_ql
-
     def DF( self
           , fwd_time : [float, datetime.date]
           , dcf = 365.25 ):
@@ -578,16 +547,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         else:
             raise ComSkewError('fwd_time given in function DF is not of form [float, datetime.date]')
 
-        return scipy.interpolate.splev(time_diff, self._discount_function)
-
-    def DF_ql(self, fwd_time :[datetime.date, float], dcf = 365.25 ):
-        """ Discount from self.mkt_date to t
-
-        :param fwd_time: future time to discount to. can be '20140101', ...
-        :param dcf: day-count factor.
-        """
-
-        return self._discount_function_ql.discount(fwd_time)
+        return self._discount_curve(time_diff)
 
     def __difference_to_market_date(self, fwd_date : datetime.date, dcf=365.25) -> float:
         """ Computes the difference to market date given the discount factor.
