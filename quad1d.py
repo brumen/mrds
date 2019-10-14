@@ -15,7 +15,7 @@ def gh_pw(n : int):
 
     abbreviation:
        gh ... Gauss-Hermite
-       p ... points (abscissas)
+       network_struct ... points (abscissas)
        w ... weights
 
     :param n: level of gauss-hermite integration
