@@ -22,11 +22,10 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import tkinter as tk
 
-if config.CUDA_PRESENT:
-    import pycuda.autoinit  # this needs to be here.
-    from pycuda.gpuarray import to_gpu, GPUArray
-    from pycuda.compiler import SourceModule
-
+from pycuda.compiler import SourceModule
+from pycuda.gpuarray import to_gpu, GPUArray
+# if config.CUDA_PRESENT:
+#     import pycuda.autoinit  # this needs to be here.
 
 import ds
 from pricers.pricers import black_greeks
@@ -36,9 +35,7 @@ logger = logging.Logger(__name__)
 
 
 def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
-    """
-    Array with forwards and vol params
-
+    """ Array with forwards and vol params.
     """
 
     fvm = ds.read_data_matched_tenors(date_, fwd_name, vol_name)

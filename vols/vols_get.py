@@ -14,8 +14,7 @@ def get_vol_object(com_name : str, mkt_date : datetime.date) -> Volatility:
 
     :param com_name: commodity name for the vol object
     :param mkt_date: market date
-    :param
-
+    :returns: volatility object for commodity & market date.
     """
 
     logger.info('Getting volatility for commodity {0}'.format(com_name))
