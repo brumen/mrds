@@ -217,7 +217,7 @@ class TollingModelLattice(object):
             d1 is a matrix, on which d1 is computed
             """
             z_op = (np.sqrt(op / F_OP) + 0.5 * sigma_OP ** 2 * t) / (sigma_OP * np.sqrt(t))  # number
-            # z_p = (np.log(p/F_P) + 0.5 * sigma_P**2 * t) / (sigma_P * np.sqrt(t) )
+            # z_p = (np.log(network_struct/F_P) + 0.5 * sigma_P**2 * t) / (sigma_P * np.sqrt(t) )
             # v = (z_p - rho * z_op) / sqrt(1. - rho**2)
             d1 = (np.log(p_dash / F_P) + 0.5 * sigma_P ** 2 * (t + delta_t) -
                   np.sqrt(1. - rho ** 2) * sigma_P * np.sqrt(t) * v -

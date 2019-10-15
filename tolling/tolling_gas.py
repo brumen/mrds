@@ -1,8 +1,5 @@
-# front office tolling model 
-# see the front office doc. for other things 
+# Tolling model
 
-# File defines:
-import config
 import numpy as np
 import multiprocessing
 import ctypes
@@ -10,10 +7,8 @@ import ctypes
 # my modules
 import lattice
 from cond_prob import transition_mtx_ln_blocks_fast, transition_mtx_ln_blocks_fast_internal
-import sg # sparse grids for fast integration
+import sg
 from pricers import cdf_vec, bvnd
-if config.CUDA_PRESENT:
-    import pycuda.gpuarray as gpa
 
 # multi-threading version of tensor product
 tens_fast_mt_raw = ctypes.CDLL("/home/brumen/workspace/mrds/tp.so").tensor_prod_2
@@ -206,7 +201,7 @@ class tolling_model_lattice_gas():
            , delta_t ):
         """
         transition prob of (p_dash, g_dash | op, g)
-        v replaces p via equation (that can be given
+        v replaces network_struct via equation (that can be given
         """
 
         F_1, F_2, F_3 = F_123
@@ -217,7 +212,7 @@ class tolling_model_lattice_gas():
         sigma_cond = 1. - (rho_12**2 - 2 * rho_12 * rho_13 * rho_23 + rho_13**2) \
             / (1. - rho_23**2)
 
-        # d1 = (np.log(p/F_1) + 0.5 * sigma_1**2 * t) / (sigma_1 * np.sqrt(t))
+        # d1 = (np.log(network_struct/F_1) + 0.5 * sigma_1**2 * t) / (sigma_1 * np.sqrt(t))
         d2 = (np.log(op/F_2) + 0.5 * sigma_2**2 * t) / (sigma_2 * np.sqrt(t))
         d3 = (np.log(g/F_3) + 0.5 * sigma_3**2 * t) / (sigma_3 * np.sqrt(t))
 
