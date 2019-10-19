@@ -1,7 +1,7 @@
 # Tolling model
 import config
 
-from typing import List, Tuple
+from typing import List, Tuple, Union, Dict
 
 import datetime
 import numpy as np
@@ -20,7 +20,7 @@ if config.CUDA_PRESENT:
 class TollingModel:
 
     def __init__(self
-                 , calcDate   : datetime.date
+                 , calc_date   : datetime.date
                  , toll_start : datetime.date
                  , toll_end   : datetime.date
                  , nb_sim
@@ -31,22 +31,23 @@ class TollingModel:
                  , hours_partition
                  , hours_partition_names
                  , cash_vols
-                 , powerPlantParams
+                 , power_plant_params
                  , cash_vols_overwrite    = False
                  , adj_fwd_tenors_days    = None
                  , adj_vol_tenors_days    = None
                  , cash_fwd_tenors_days   = None
                  , cash_vol_tenors_days   = None
                  , manual_adj             = None
-                 , cash_corr_adj          = None):
+                 , cash_corr_adj          = None
+                 , cuda_ind               = False ):
         """
         Path per path tolling model. The optimal bounday is a function of the shadow costs
         and other parameters.
 
-        :param calcDate: calculation date of the tolling model.
+        :param calc_date: calculation date of the tolling model.
         :param toll_start: Start of the tolling deal.
         :param toll_end: End of the tolling deal
-        :param powerPlantParams: parameters of the power plant used for dispatch. This should have the
+        :param power_plant_params: parameters of the power plant used for dispatch. This should have the
                                  following fields:  they are of different types
                                    hrAtMax,
                                    hrAtMin,
@@ -72,14 +73,12 @@ class TollingModel:
                                    rampDownCost,
                                    rampUpHorizon,
                                    rampDownHorizon
-
-
         """
 
-        self.powerPlantParams      = powerPlantParams
+        self.powerPlantParams      = power_plant_params
         self.nb_sim      = nb_sim
-        self.nb_days     = powerPlantParams.nb_days
-        self.calc_date    = calcDate
+        self.nb_days     = power_plant_params.nb_days
+        self.calc_date    = calc_date
         self.toll_start  = toll_start
         self.toll_end    = toll_end
         self.power_blocks_names = power_blocks_names
@@ -98,7 +97,7 @@ class TollingModel:
         self.cash_vols = cash_vols
         self.cash_vols_overwrite = cash_vols_overwrite
 
-        self.cuda_ind = False  # TODO: FIX THIS
+        self.cuda_ind = cuda_ind
 
         if self.fuel_idx_name is not 'FIXED':
             fixed_monthly_val = None
@@ -107,9 +106,7 @@ class TollingModel:
 
         # tolling support vectors
         self.days_toll, self.days_d_toll, self.days_diff_toll, self.days_diff_l_toll = \
-            self.power_models.generate_days_vecs(self.hours_partition
-                                                 , self.days_partition
-                                                 , cuda_ind = self.cuda_ind)
+            self.power_models.generate_days_vecs(self.hours_partition, self.days_partition)
 
         # for usage w/ this class
         self.__power_spot_model = None
@@ -119,7 +116,6 @@ class TollingModel:
     @property
     def power_gas_blocks(self) -> List[str]:
         """ Constructs the power and gas blocks used in the model.
-
         """
 
         if self.__power_gas_blocks:
@@ -139,25 +135,25 @@ class TollingModel:
         if self.__power_spot_model:
             return self.__power_spot_model
 
-        return self.tolling_power_fuel_process(self.calc_date,
-                                               self.toll_start, self.toll_end,
-                                               nb_sim,
-                                               self.days_partition,
-                                               self.power_blocks_names,
-                                               self.hours_partition,
-                                               self.fuel_idx_name,
-                                               self.cash_vols,
-                                               self.nb_days,
-                                               fixed_monthly       = fixed_monthly_val,
-                                               cash_vols_overwrite = self.cash_vols_overwrite,
-                                               parallel            = True,
-                                               adj_fwd_tenors_days = self.adj_fwd_tenors_days,
-                                               adj_vol_tenors_days = self.adj_vol_tenors_days,
-                                               cash_fwd_tenors_days=self.cash_fwd_tenors_days,
-                                               cash_vol_tenors_days=self.cash_vol_tenors_days,
-                                               manual_adj=self.manual_adj,
-                                               cash_corr_adj=self.cash_corr_adj,
-                                               cuda_ind=self.cuda_ind)
+        return self._power_fuel_process(self.calc_date,
+                                        self.toll_start, self.toll_end,
+                                        nb_sim,
+                                        self.days_partition,
+                                        self.power_blocks_names,
+                                        self.hours_partition,
+                                        self.fuel_idx_name,
+                                        self.cash_vols,
+                                        self.nb_days,
+                                        fixed_monthly       = fixed_monthly_val,
+                                        cash_vols_overwrite = self.cash_vols_overwrite,
+                                        parallel            = True,
+                                        adj_fwd_tenors_days = self.adj_fwd_tenors_days,
+                                        adj_vol_tenors_days = self.adj_vol_tenors_days,
+                                        cash_fwd_tenors_days=self.cash_fwd_tenors_days,
+                                        cash_vol_tenors_days=self.cash_vol_tenors_days,
+                                        manual_adj=self.manual_adj,
+                                        cash_corr_adj=self.cash_corr_adj,
+                                        cuda_ind=self.cuda_ind)
 
     @power_spot_model.setter
     def power_spot_model(self, newPowerSpotModel):
@@ -194,21 +190,20 @@ class TollingModel:
 
         return np.array(blocks_seq, dtype=np.int32), blocks_name_seq
 
-    def tolling_power_fuel_process( self
-                                  , nb_sim             : int
-                                  , days_partition
-                                  , power_blocks_names : List[List[str]]
-                                  , hours_partition    : List[List[int]]
-                                  , fuel_idx_name      : str
-                                  , cash_vols
-                                  , nb_days            : int
-                                  , fixed_monthly        = None
-                                  , cash_vols_overwrite  = False
-                                  , parallel             = False
-                                  , cash_fwd_tenors_days = None
-                                  , cash_vol_tenors_days = None
-                                  , manual_adj           = None
-                                  , cuda_ind             = False ):
+    def _power_fuel_process(self
+                            , nb_sim             : int
+                            , days_partition
+                            , power_blocks_names : List[List[str]]
+                            , hours_partition    : List[List[int]]
+                            , fuel_idx_name      : str
+                            , cash_vols
+                            , nb_days            : int
+                            , fixed_monthly        = None
+                            , cash_vols_overwrite  = False
+                            , parallel             = False
+                            , cash_fwd_tenors_days = None
+                            , cash_vol_tenors_days = None
+                            , manual_adj           = None):
         """ Simulate spot prices in the tolling model, by blocks.
 
         :param nb_sim: nb. simulations
@@ -251,12 +246,13 @@ class TollingModel:
                     adj_fwd_tenors, adj_vol_tenors = mrds.find_adj_tenors(pg_idx, cash_fwd_tenors_days,
                                                                           cash_vol_tenors_days)
                     fwd_vol_tenors_numeric, fwd_vol_values_unexpired, fwd_vol_tenors_code, \
-                    fwd_vol_tenors = ds.get_fwd_vol_curve_numeric_tenor(hour_cv, self.calc_date, self.calc_date,
-                                                                        fwd_vol_ind='vol',
-                                                                        adj_fwd_tenors_days=adj_fwd_tenors,
-                                                                        adj_vol_tenors_days=adj_vol_tenors)
-                    cash_vol_write = np.array(fwd_vol_values_unexpired[:(nb_fwds + 1)],
-                                              dtype=np.double)
+                    fwd_vol_tenors = ds.get_fwd_vol_curve_numeric_tenor( hour_cv
+                                                                       , self.calc_date
+                                                                       , self.calc_date
+                                                                       , fwd_vol_ind         = 'vol'
+                                                                       , adj_fwd_tenors_days = adj_fwd_tenors
+                                                                       , adj_vol_tenors_days = adj_vol_tenors )
+                    cash_vol_write = np.array(fwd_vol_values_unexpired[:(nb_fwds + 1)], dtype=np.double)
                     self.power_models.set_cash_vols(pg_idx, cash_vol_write)
                 else:
                     self.power_models.set_cash_vols(pg_idx, cash_vols)
@@ -273,23 +269,23 @@ class TollingModel:
         power_models.set_cash_vols(power_gas_block_idx[fuel_idx_name], cash_vols_fuel)
         if manual_adj is not None:
             exec(manual_adj)
-        return self.tolling_power_fuel_process_reduced( nb_sim,
-                                                  days_partition,
-                                                  hours_partition,
-                                                  fuel_idx_name,
-                                                  power_blocks_names,
-                                                  power_models,
-                                                  power_gas_block_idx,
-                                                  nb_days,
-                                                  fixed_monthly=fixed_monthly,
-                                                  parallel=parallel ), power_gas_block_idx
+        return self._power_fuel_process_reduced(nb_sim,
+                                                days_partition,
+                                                hours_partition,
+                                                fuel_idx_name,
+                                                power_blocks_names,
+                                                power_models,
+                                                power_gas_block_idx,
+                                                nb_days,
+                                                fixed_monthly=fixed_monthly,
+                                                parallel=parallel), power_gas_block_idx
 
-    def tolling_power_fuel_process_reduced( self
-                                          , nb_sim
-                                          , fuel_idx_name
-                                          , power_bl_names
-                                          , power_models
-                                          , power_gas_block_idx ):
+    def _power_fuel_process_reduced(self
+                                    , nb_sim
+                                    , fuel_idx_name
+                                    , power_bl_names
+                                    , power_models
+                                    , power_gas_block_idx):
 
         fwd_tenors_dt = power_models.forward_tenors_dt_list[0]
         tenors_chosen    = range(max(np.sum([ft < self.toll_start for ft in fwd_tenors_dt]) - 1, 0)
@@ -427,17 +423,16 @@ class TollingModel:
 
         startup[self.dispatch_mode](cs, self.powerPlantParams)
 
-    def forced_startup(self
-                       , cs
-                       , powerPrices
-                       , fuelPrices
-                       , dv=None
-                       , dispatch_mode='cmg' ):
-        """ Try to force power plant to start
+    def _forced_startup(self
+                        , cs
+                        , power_prices
+                        , fuel_prices
+                        , dv            = None):
+        """ Try to force power plant to start.
 
         :param cs: current state object
-        :param powerPrices: power prices
-        :param fuelPrices: fuel prices TODO: HERE THE TYPE
+        :param power_prices: vector of power prices
+        :param fuel_prices: vector of fuel prices TODO: HERE THE TYPE
         :param dispatch_mode: which dispatch to follow
         :param ci: cuda indicator (True or False)
         """
@@ -445,16 +440,16 @@ class TollingModel:
         dispatch_mode = self.dispatch_mode
 
         if dispatch_mode == 'mrg':
-            decision_1 = powerPrices - self.powerPlantParams['hrAtMax'] * fuelPrices
+            decision_1 = power_prices - self.powerPlantParams['hrAtMax'] * fuel_prices
             cs.force_start = 2 * (decision_1 > dv[1]) + (decision_1 > dv[0]) & (decision_1 < dv[1])
         elif dispatch_mode == 'peak_only':
             cs.force_start.fill(2 * (cs.block_name == 'peak'))
         elif dispatch_mode == 'offpeak_only':
             cs.force_start.fill(2 * (cs.block_name != 'peak'))
 
-    def shut_start_dispatch(self, cs):
-        """
-
+    def _shut_start_dispatch(self, cs : Dict) -> None:
+        """ Indicator function if the power plant can shut down. The condition is if hours_run is bigger
+            than the minimum runtime. Replaces the 'can_shut' part of the current state dictionary with the new state.
         """
 
         if not self.cuda_ind:
@@ -462,16 +457,20 @@ class TollingModel:
         else:
             cs['can_shut'] = cuda_ops.comp_array_number(cs['hours_run'], self.powerPlantParams['minRunTime'], op='larger', dtype='int32')
 
-    def _peak_only_shutdown(self, cs):
+    def _peak_only_shutdown(self, cs : Dict) -> None:
+        """
+
+        """
+
         cnd_2 = cs['block_name'] != 'peak'
         cnd_3 = cs['hours_run'] >= self.powerPlantParams['minRunTime']
+
         if not self.cuda_ind:
             cs.can_shut = cnd_2 & cnd_3
         else:
-            cnd_3_int = cnd_3.astype(np.int32)  # TODO: THIS IS BAD Here!!!!
-            cuda_ops.min_int_two(cnd_2, cnd_3_int, cs.can_shut)
+            cuda_ops.min_int_two(cnd_2, cnd_3.astype(np.int32), cs.can_shut)
 
-    def _offpeak_only_shutdown(self, cs):
+    def _offpeak_only_shutdown(self, cs : Dict) -> None:
 
         cnd_2 = cs['block_name'] == 'peak'
         cnd_3 = cs['hours_run']  >= self.powerPlantParams['minRunTime']
@@ -481,7 +480,7 @@ class TollingModel:
         else:
             cuda_ops.min_int_two(cnd_2, cnd_3, cs['can_shut'])
 
-    def shutdown_decision(self, cs):
+    def _shutdown_decision(self, cs : Dict) -> None:
         """ Decision whether it is sensible to shut down
 
         :param cs: current state, cs.can_shut is filled by this routine
@@ -489,26 +488,30 @@ class TollingModel:
 
         """
 
-        { 'cmg'         : self.shut_start_dispatch
+        { 'cmg'         : self._shut_start_dispatch
         , 'peak_only'   : self._peak_only_shutdown
         , 'offpeak_only': self._offpeak_only_shutdown}[self.dispatch_mode](cs, self.powerPlantParams)
 
-    def forced_shutdown(self, cs, pp, fp, dv=None):
-        """
-        decision to forcefully shut down, can take 3 outcomes: 2, 1, 0
+    def _forced_shutdown(self
+                         , cs : Dict
+                         , power_prices : Union[np.ndarray, gpa.GPUArray]
+                         , fuel_prices  : Union[np.ndarray, gpa.GPUArray]
+                         , dv = None):
+        """ Decision to forcefully shut down, can take 3 outcomes: 2, 1, 0
+
         """
 
         dispatch_mode = self.dispatch_mode
 
         if dispatch_mode == 'mrg':
-            decision_1 = pp - self.powerPlantParams['hrAtMax'] * fp
+            decision_1 = power_prices - self.powerPlantParams['hrAtMax'] * fuel_prices
             cs.force_shut = 2 * (decision_1 < dv[3]) + (decision_1 > dv[2]) & (decision_1 < dv[3])
         elif dispatch_mode == 'peak_only':
             cs.force_shut.fill(2 * (cs.block_name != 'peak'))
         elif dispatch_mode == 'offpeak_only':
             cs.force_shut.fill(2 * (cs.block_name != 'offpeak'))
 
-    def set_other_params( self, cs, pl ):
+    def _set_other_params(self, cs : Dict, pl : int):
         """ Set up the cs.force_ and cs.can_ parameters
 
         :param cs: current state vector
@@ -555,40 +558,40 @@ class TollingModel:
 
     def _block_dispatch(self
                         , spot_idx
-                        , powerPrices
-                        , fuelPrices
-                        , startupSPin
-                        , cs     : dict
+                        , power_prices : Union[np.ndarray, gpa.GPUArray]
+                        , fuel_prices  : Union[np.ndarray, gpa.GPUArray]
+                        , startup_shadow_price
+                        , cs      : Dict
                         , nb_sims : int
-                        , opdDispatchFct):
+                        , opd_dispatch_fct):
         """ Dispatch in a single block, changes the current state as appropriate.
 
-        :param cs: current state.
+        :param cs: current state, a dictionary of various elements
         :param nb_sims: number of simulations
-        :param opdDispatchFct: function for one-period dispatch algorithm
+        :param opd_dispatch_fct: function for one-period dispatch algorithm
         """
 
-        opdDispatchFct(spot_idx
-                       , powerPrices
-                       , fuelPrices
-                       , self.powerPlantParams
-                       , startupSPin
-                       , cs['state']
-                       , cs['hours_in_state']
-                       , cs['generation']
-                       , cs['total_starts']
-                       , cs['hours_shut']
-                       , cs['hours_run']
-                       , cs['global_starts']
-                       , cs['can_start']
-                       , cs['can_shut']
-                       , cs['force_start']
-                       , cs['force_shut']
-                       , cs['hours_block']
-                       , cs['df']
-                       , nb_sims
-                       , cf_per_path_tmp
-                       , cs)
+        opd_dispatch_fct(spot_idx
+                         , power_prices
+                         , fuel_prices
+                         , self.powerPlantParams
+                         , startup_shadow_price
+                         , cs['state']
+                         , cs['hours_in_state']
+                         , cs['generation']
+                         , cs['total_starts']
+                         , cs['hours_shut']
+                         , cs['hours_run']
+                         , cs['global_starts']
+                         , cs['can_start']
+                         , cs['can_shut']
+                         , cs['force_start']
+                         , cs['force_shut']
+                         , cs['hours_block']
+                         , cs['df']
+                         , nb_sims
+                         , cf_per_path_tmp
+                         , cs)
 
     def dispatch_month( self
                       , m : int
@@ -611,7 +614,7 @@ class TollingModel:
         cf_per_path        = np_gpa.zeros(pl, dtype=floatType)  # cumulative cash flows
 
         cs = {'dispatch_mode':  self.dispatch_mode}
-        self.set_other_params(cs, pl)
+        self._set_other_params(cs, pl)
         cs['df'] = 1.
 
         # one period dispatch function
@@ -633,15 +636,15 @@ class TollingModel:
             else:
                 startup_sp_in = 0.
 
-            self.powerPlantParams['startupSPin'] = startup_sp_in
+            self.powerPlantParams['startup_shadow_price'] = startup_sp_in
 
             # the reason why first are overwritten is that they change very often
             self.startup_decision (cs, self.powerPlantParams)
-            self.shutdown_decision(cs, self.powerPlantParams)
+            self._shutdown_decision(cs, self.powerPlantParams)
 
             # the following updates cs.force_shut, cs.force_start
-            self.forced_startup (cs, power_prices, fuel_prices, dv)
-            self.forced_shutdown(cs, power_prices, fuel_prices, dv)
+            self._forced_startup (cs, power_prices, fuel_prices, dv)
+            self._forced_shutdown(cs, power_prices, fuel_prices, dv)
 
             # dispatch for a block.
             self._block_dispatch(spot_idx
@@ -656,9 +659,8 @@ class TollingModel:
 
         return self.power_models._discount_discount[m] * cf_per_path
 
-    def dispatchAll(self, dispatch_mode='cmg'):
-        """
-        Dispatches the algorithm for all months
+    def dispatch(self):
+        """ Compute dispatch for all months in the model.
 
         """
 
@@ -668,33 +670,33 @@ class TollingModel:
                                                                                           self.nb_days,
                                                                                           self.hours_partition_names)
 
-        dispatchResult = {}
+        dispatch_result = {}
         for m in months_to_compute:
-            ps, fs = self.generate_spots(m)
-            dispatchResult[m] = self.dispatch_month( m
+            power_spots, fuel_spots = self.generate_spots(m)
+            dispatch_result[m] = self.dispatch_month( m
                                                    , conseq_hours
                                                    , conseq_block_names
                                                    , self.nb_sim
-                                                   , ps
-                                                   , fs )
+                                                   , power_spots
+                                                   , fuel_spots )
 
         if not self.cuda_ind:
-            dispatch_res_months = {m: np.mean(dispatchResult[m]) for m in months_to_compute}
+            dispatch_res_months = {m: np.mean(dispatch_result[m]) for m in months_to_compute}
         else:
-            dispatch_res_months = {m: gpa.sum(dispatchResult[m])/dispatchResult[m].size for m in months_to_compute}
+            dispatch_res_months = {m: gpa.sum(dispatch_result[m])/dispatch_result[m].size for m in months_to_compute}
 
         return { 'cashflow_by_month': dispatch_res_months
                , 'cashflow_total'   : sum(dispatch_res_months.values()) }
 
     def resimulate_prices(self):
-        resimulating = self.tolling_power_fuel_process_reduced(self.toll_start, self.toll_end,
-                                                          self.nb_sim,
-                                                          self.days_partition,
-                                                          self.hours_partition,
-                                                          self.fuel_idx_name,
-                                                          self.power_blocks_names,
-                                                          self.power_models,
-                                                          self.power_gas_block_idx,
-                                                          self.nb_days)
+        resimulating = self._power_fuel_process_reduced(self.toll_start, self.toll_end,
+                                                        self.nb_sim,
+                                                        self.days_partition,
+                                                        self.hours_partition,
+                                                        self.fuel_idx_name,
+                                                        self.power_blocks_names,
+                                                        self.power_models,
+                                                        self.power_gas_block_idx,
+                                                        self.nb_days)
         self.power_spots = resimulating['power_spot']
         self.fuel_spots  = resimulating['fuel_spot']
