@@ -149,19 +149,20 @@ class Load:
                , 'solution_edges': zip(self.__network_struct, solution_pres)}
 
     @staticmethod
-    def draw_network(sol_edges : List[Tuple], pos = None):
+    def draw_network(sol_edges : List[Tuple], pos = None, cutoff_value=1.):
         """ Draws the transmission network graph.
 
         :param sol_edges: edges of the graph to display in the form
                           (node1, node2, capacity, capacity_cost)
+        :param pos:
+        :param cutoff_value: the value below which the edge is not shown
         """
 
         nodes = set([n1 for (n1, n2, cap, cap_cost), p_sol in sol_edges] +
                     [n2 for (n1, n2, cap, cap_cost), p_sol in sol_edges])
         edges = [(n1, n2) for (n1, n2, cap, cap_cost), p_sol in sol_edges
-                 if np.abs(p_sol) > 1.]
-        labels = ["%.2f" % p_sol for (n1, n2, cap, cap_cost), p_sol in sol_edges
-                  if np.abs(p_sol) > 1.]
+                 if np.abs(p_sol) > cutoff_value]
+        labels = ["%.2f" % p_sol for _, p_sol in sol_edges if np.abs(p_sol) > cutoff_value]
 
         g = nx.Graph()
         for node in nodes:
@@ -169,12 +170,8 @@ class Load:
         for edge_start, edge_end in edges:
             g.add_edge(edge_start, edge_end)
 
-        edge_labels = dict(zip(g.edges(), labels))
-        if pos is None:
-            pos_used = nx.shell_layout(g)
-        else:
-            pos_used = pos
+        pos_used = nx.shell_layout(g) if pos is None else pos
 
         nx.draw(g, pos_used)
-        nx.draw_networkx_edge_labels(g, pos_used, edge_labels=edge_labels)
+        nx.draw_networkx_edge_labels(g, pos_used, edge_labels=dict(zip(g.edges(), labels)))
         plt.show()
