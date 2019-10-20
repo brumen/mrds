@@ -248,10 +248,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return diff_asset_corr * np.ones((self.nb_factors_for_asset(asset_1),
                                           self.nb_factors_for_asset(asset_2)))
 
-    def __default_factor_corr_mat_lb_ub( self
-                                       , asset_1 : str
-                                       , asset_2 : str
-                                       , lb_ub_ind = 'ub') -> np.ndarray:
+    def __factor_corr_mat_lb_ub(self
+                                , asset_1 : str
+                                , asset_2 : str
+                                , lb_ub_ind = 'ub') -> np.ndarray:
         """ Sets the default factor correlation lower (lb) and upper (ub) bound between asset_1 and asset_2.
 
         :param asset_1: first asset for default correlation, e.g. 'WTI'
@@ -274,11 +274,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return lb_ub_fact * np.ones((self.nb_factors_for_asset[asset_1], self.nb_factors_for_asset[asset_2]))
 
-    def _set_factor_corr_mat( self
-                            , asset_1 : str
-                            , asset_2 : str
-                            , new_corr_mtx = None
-                            , lb_ub_ind    = None ) -> np.ndarray:
+    def _factor_corr_mat(self
+                         , asset_1 : str
+                         , asset_2 : str
+                         , new_corr_mtx = None
+                         , lb_ub_ind    = None) -> np.ndarray:
         """ Returns the factor correlation matrix between assets 1 & 2. If new_corr_mtx is provided,
             set that as the correlation matrix between them.
 
@@ -288,7 +288,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param lb_ub_ind: indicator whether upper bound or lower bound is set. Options: 'lb', 'ub'
         """
 
-        mtx_to_insert = new_corr_mtx if new_corr_mtx else (self.__default_factor_corr_mat(asset_1, asset_2) if not lb_ub_ind else self.__default_factor_corr_mat_lb_ub(asset_1, asset_2, lb_ub_ind=lb_ub_ind))
+        mtx_to_insert = new_corr_mtx if new_corr_mtx else (self.__default_factor_corr_mat(asset_1, asset_2) if not lb_ub_ind else self.__factor_corr_mat_lb_ub(asset_1, asset_2, lb_ub_ind=lb_ub_ind))
 
         if asset_1 not in self.__factor_corr_mtx:
             self.__factor_corr_mtx[asset_1] = {asset_2: mtx_to_insert}
@@ -298,18 +298,30 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self.__factor_corr_mtx[asset_1][asset_2]
 
-    def _factor_corr_mat(self, asset_1 : str, asset_2 : str, lb_ub_ind = None):
-        """ Gets the factor correlation matrix between assets 1 and 2.
+    def __factor_corr_mat_multiple(self, assets : List[str]) -> np.ndarray:
+        """ Returns the factor correlation matrix for all assets in assets
 
-        :param asset_1: first asset, e.g. 'WTI'
-        :param asset_2: second asset, e.g. 'BRENT'
-        :param lb_ub_ind: lower bound/upper bound indicator
+        :param assets: list of assets for which the correlation should be returned.
+        :returns: a complete correlation matrix for these assets
         """
 
-        if not lb_ub_ind:
-            return self.__factor_corr_mtx['mid'][asset_1][asset_2]
+        # first determine the size of the matrix
+        nb_factors_by_asset = [self.nb_factors_for_asset(asset) for asset in assets]
+        total_nb_factors = sum(nb_factors_by_asset)
 
-        return self.__factor_corr_mtx[lb_ub_ind][asset_1][asset_2]
+        total_corr_mat = np.empty((total_nb_factors, total_nb_factors))
+        # now set the individual matrices
+        for asset_1 in assets:
+            for asset_2 in assets:
+                asset_1_in_list = assets.index(asset_1)
+                asset_2_in_list = assets.index(asset_2)
+                start_ind_1 = sum(nb_factors_by_asset[:asset_1_in_list])
+                end_ind_1   = start_ind_1 + nb_factors_by_asset[asset_1_in_list]
+                start_ind_2 = sum(nb_factors_by_asset[:asset_2_in_list])
+                end_ind_2   = start_ind_2 + nb_factors_by_asset[asset_2_in_list]
+                total_corr_mat[start_ind_1:end_ind_1, start_ind_2:end_ind_2] = self._factor_corr_mat(asset_1, asset_2)
+
+        return total_corr_mat
 
     def _market_corr(self, asset_1 : str, asset_2 : str, mkt_corr_mtx = None):  # TODO: THIS NEEDS TO BE CHANGED HERE
         """ Returns the market correlation, if mkt_corr_mtx is not provided.
@@ -1169,8 +1181,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                             , corr_mtx
                                             , size = nb_simulations )
 
-    def simulate_curves(self
-                        , asset            : str
+    def simulate_curves( self
+                        , assets           : List[str]
                         , nb_simulations   : int
                         , simulation_times : List[datetime.date]
                         , tenor_list       : List[datetime.date]
@@ -1183,7 +1195,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         2-nd dimension: curve
         3-rd dimension: repeats of the curve
 
-        :param asset: asset for which to simulate.
+        :param assets: list of assets for which to simulate
         :param nb_simulations: self. explanatory
         :param simulation_times: simulation times for the forwards.
         :param tenor_list: list of tenors which to simulate
@@ -1192,48 +1204,44 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         np.random.seed(set_seed)
-
         simulated_curves = {}
         fwd_c_col = {}
 
-        # TODO: OPTIMIZE THIS IF ONLY 1 CURVE NEEDS TO BE SIMULATED.
-        # com_curve = self.fwd_curve_names(asset)
-        for com_curve in self.fwd_curves:
-            com_curve_name = com_curve.fwd_name
-            simulated_curves[com_curve_name] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))  #  if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
-            fwd_c_col[com_curve_name] = com_curve.fwd_value(tenor_list)
-            simulated_curves[com_curve_name][0, :, :] = fwd_c_col[com_curve_name]
+        for com_curve in assets:
+            com_fwd_curve = self.fwd_curve_names(com_curve)
+            simulated_curves[com_curve] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))  #  if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
+            fwd_c_col[com_curve] = com_fwd_curve.fwd_value(tenor_list)
+            simulated_curves[com_curve][0, :, :] = fwd_c_col[com_curve]
 
         # X and X_prev are simulated factors
-        X = []
-        X_prev = []
-        for com_curve in self.fwd_curves:
-            X_mat_shape = (len(fwd_c_col[com_curve.fwd_name]), nb_simulations)
-            X.append(np.zeros(X_mat_shape))
-            X_prev.append(np.empty(X_mat_shape))
+        X = {}
+        X_prev = {}
+        # for com_curve in assets:  # self.fwd_curves:
+        for asset in assets:
+            X_mat_shape = (len(fwd_c_col[asset]), nb_simulations)
+            X[asset] = np.zeros(X_mat_shape)
+            X_prev[asset] = np.empty(X_mat_shape)
 
         # looping over time steps
         #   simulates ln process, basis for skew as well
         #   t_i ... idx of sim_time
         #   fact_sum ... factors of the individual assets
-        nb_time_steps = len(simulation_times)
-        complete_corr_mtx = self._complete_corr_mtx()
         for t_i, t_value in enumerate(simulation_times):
-            for fwd_curve in self.fwd_curves:
-                asset = fwd_curve.fwd_name
-                nb_factors_asset = self.nb_factors_for_asset(asset)
-                simulated_rn = self.__class__.__simulate_std_normal( nb_factors_asset
-                                                                   , complete_corr_mtx
-                                                                   , nb_simulations )
 
-                old_cov_mat = complete_corr_mtx[self.__factor_positions(asset), self.__factor_positions(asset)]
-                old_chol_inv = np.linalg.inv(np.linalg.cholesky(old_cov_mat))
-                sims_Z_unit = np.dot(old_chol_inv, simulated_rn[:, self.__factor_positions(asset)].transpose())
+            nb_factors_by_asset = [self.nb_factors_for_asset(asset) for asset in assets]
+            total_nb_factors = sum(nb_factors_by_asset)
 
-                # tenor_used = tenor_list[asset]  # TODO: REMOVE IN THE NEXT ITERATION
+            factor_corr_mat = self.__factor_corr_mat_multiple(assets)
+            simulated_rn    = self.__class__.__simulate_std_normal( total_nb_factors, factor_corr_mat, nb_simulations )
 
-                for tenor_idx, tenor_nb in enumerate(tenor_list[asset]):
+            old_cov_mat = factor_corr_mat
+            old_chol_inv = np.linalg.inv(np.linalg.cholesky(old_cov_mat))
+            sims_Z_unit = np.dot(old_chol_inv, simulated_rn.transpose())  # TODO: CHECK HERE
+
+            for asset in assets:
+                for tenor_idx, tenor_nb in enumerate(tenor_list):
                     # prepare cov mtx
+                    nb_factors_asset = self.nb_factors_for_asset(asset)
                     cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, t_i, simulation_times)
                                                              for j in range(nb_factors_asset)]
                                                             for i in range(nb_factors_asset)]))
@@ -1258,7 +1266,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
                     # self.simulated_curves[asset][t_i, tenor_idx, :] = F_res
                     c1, c2, c3 =  self._c_vec(asset, tenor_nb)
-                    skew_fom( fwd_curve.fwd_value(tenor_nb)
+                    skew_fom( self.fwd_curve_names(asset).fwd_value(tenor_nb)
                             , X[asset][tenor_idx, :]  # delta_X
                             , 0.5 * c1
                             , qv  # V_u, quadratic variation
