@@ -44,24 +44,18 @@ class LMP:
         :param node_nb: node to search.
         """
 
-        res_l = []
-        for node_1, node_2, c_12 in self.pl:
-            if node_2 == node_nb:
-                res_l.append(node_1)
-
-        return res_l
+        return [node_1 for node_1, node_2, _ in self.pl if node_2 == node_nb ]
 
     def __find_outgoing(self, node_nb):
         """ Find incoming nodes into node_nb
+
+        :param node_nb: node to search.
         """
 
-        res_l = []
-        for node_1, node_2, c_12 in self.pl:
-            if node_1 == node_nb:
-                res_l.append(node_2)
-        return res_l
+        return [node_2 for node_1, node_2, _ in self.pl if node_1 == node_nb ]
 
     def __find_connected(self, node_nb):
+
         res_l = []
         for node_1, node_2, c_12 in self.pl:
             if node_1 == node_nb:
