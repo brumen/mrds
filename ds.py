@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 
 from typing import Dict, List, Tuple
 
-import ds_data
+from data import ds_data
 from data.discount_data import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
-from vols.fwd_codes     import fwd_codes, fwd_mapping_codes, fwd_mth_codes
+from vols.fwd_codes     import fwd_mth_codes
 
 
 # mapping of commodity names to vol parametrization
@@ -19,7 +19,7 @@ vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vo
            , 'NG_MICHCON_GD-PEAK': ('ATM', ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals)
            , 'NG_MICHCON_CASHVOL': ('ATM', ds_data.ng_michcon_cv_vol_dates, ds_data.ng_michcon_cv_vol_vals)
            , 'PJMW-OFFPEAK_CV'   : ('ATM', ds_data.pjm_offpeak_cv_vol_dates, ds_data.pjm_offpeak_cv_vol_vals)
-           , 'PJMW-PEAK_CV'      : ('ATM', ds_data.pjm_peak_cv_vol_dates, ds_data.pjm_peak_cv_vol_vals) }
+           , 'PJMW-PEAK_CV'      : ('ATM', ds_data.pjm_peak_cv_vol_dates, ds_data.pjm_peak_cv_vol_vals)}
 
 
 def brentCurve():

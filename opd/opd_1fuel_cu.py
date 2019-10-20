@@ -2,9 +2,7 @@
 
 import os
 
-import pycuda.autoinit
 from pycuda.compiler import SourceModule
-import pycuda.gpuarray as gpa
 
 from config import work_dir, opd1FuelComplete
 
@@ -15,10 +13,10 @@ def getOpdHeader(floatType = 'double', intType = 'int'):
     This kernel is used in the following way:
 
     opd_kernel(np.intc(0)  # block number
-           , gpa.to_gpu(powerPrices).astype(float_type)  # FLOAT_TYPE *power prices
-           , gpa.to_gpu(fuelPrices).astype(float_type)  # FLOAT_TYPE *fuel prices
+           , gpa.to_gpu(power_prices).astype(float_type)  # FLOAT_TYPE *power prices
+           , gpa.to_gpu(fuel_prices).astype(float_type)  # FLOAT_TYPE *fuel prices
            , gpa.to_gpu(np.array(sampleParams)).astype(float_type)  # FLOAT_TYPE * opdParams,
-           , gpa.to_gpu(startupSPin).astype(float_type)  # FLOAT_TYPE * startupSPin,
+           , gpa.to_gpu(startup_shadow_price).astype(float_type)  # FLOAT_TYPE * startup_shadow_price,
            , gpa.to_gpu(stateState).astype(np.bool)  # bool * state_state,
            , gpa.to_gpu(hoursInState).astype(np.intc)  # int * state_hoursInState,
            , gpa.to_gpu(stateGeneration).astype(float_type)  # FLOAT_TYPE * state_Generation,

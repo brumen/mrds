@@ -591,7 +591,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         kappa_vec_row = kappa_vec.reshape((1, nb_factors))
         kappa_vec_col = kappa_vec.reshape((nb_factors, 1))
 
-        cross_1 = self._beta_T(asset, [fwd_date_2]) ** 2 * sigma_vec_row * corr_matrix * sigma_vec_col
+        # TODO: CHECK HOW TO INCORPORATE BETA_T BACK!!!
+        #cross_1 = self._beta_T(asset, [fwd_date_2]) ** 2 * sigma_vec_row * corr_matrix * sigma_vec_col
+        cross_1 = sigma_vec_row * corr_matrix * sigma_vec_col
         cross_2 = kappa_vec_row + kappa_vec_col
 
         time_to_fwd_date_1 = self.__difference_to_market_date(fwd_date_1)
@@ -617,7 +619,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         kappa = self._kappa_vec(asset)[factor_nb]
         sigma = self._sigma_vec(asset)[factor_nb]
-        beta  = self._beta_T(asset, fwd_date)
+        beta  = self._beta_T(asset, [fwd_date])[0]  # number, not vector
 
         if kappa == 0.:
             return beta**2 * sigma**2 * (t_1 - t_0)
@@ -627,7 +629,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                (np.exp(2. * kappa * t_1) - np.exp(2. * kappa * t_0))
 
     def _V_cross_factor(self
-                        , asset_nb : str
+                        , asset    : str
                         , factor_1 : int
                         , factor_2 : int
                         , fwd_date_1 : datetime.date
@@ -645,17 +647,19 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param t_1: integrated vol end time (float)
         """
 
-        kappa_1 = self._kappa_vec(asset_nb)[factor_1]
-        kappa_2 = self._kappa_vec(asset_nb)[factor_2]
+        kappa_1 = self._kappa_vec(asset)[factor_1]
+        kappa_2 = self._kappa_vec(asset)[factor_2]
         kappa_12 = kappa_1 + kappa_2
-        sigma_1 = self._sigma_vec(asset_nb)[factor_1]
-        sigma_2 = self._sigma_vec(asset_nb)[factor_2]
-        rho_12 = self._factor_corr_mat(asset_nb, asset_nb)[factor_1, factor_2]
-        beta_1 = self._beta_T(asset_nb, fwd_date_1)
-        beta_2 = self._beta_T(asset_nb, fwd_date_2)
+        sigma_1 = self._sigma_vec(asset)[factor_1]
+        sigma_2 = self._sigma_vec(asset)[factor_2]
+        rho_12 = self._factor_corr_mat(asset, asset)[factor_1, factor_2]
+        beta_1 = self._beta_T(asset, [fwd_date_1])[0]  # one forward date
+        beta_2 = self._beta_T(asset, [fwd_date_2])[0]
 
         if kappa_12 == 0.:
             return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 * (t_1 - t_0)
+
+        T_2 = 2.  # TODO: THIS IS BOGUS, DONT KNOW WHAT TO INSERT HERE
 
         return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 / kappa_12 * \
                (np.exp(-kappa_1 * (self.__difference_to_market_date(fwd_date_1) - t_1) - kappa_2 * (T_2-t_1)) -
@@ -1151,8 +1155,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
     def _var_covar_mtx( self
                       , asset_nb : str
                       , fwd_idx
-                      , i
-                      , j
+                      , i  : int
+                      , j  : int
                       , t_idx
                       , sim_times ):
         """ Generate covar mtx, part of LN simulation, used in simulate_curves.
@@ -1213,7 +1217,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             com_fwd_curve = self.fwd_curve_names(com_curve)
             simulated_curves[com_curve] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))  #  if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
             fwd_c_col[com_curve] = com_fwd_curve.fwd_value(tenor_list)
-            simulated_curves[com_curve][0, :, :] = fwd_c_col[com_curve]
+            simulated_curves[com_curve][0, :, :] = np.array(fwd_c_col[com_curve]).reshape((len(tenor_list), 1))
 
         # X and X_prev are simulated factors
         X = {}
@@ -1247,7 +1251,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, t_i, simulation_times)
                                                              for j in range(nb_factors_asset)]
                                                             for i in range(nb_factors_asset)]))
-
                     delta_X = np.sum(np.dot(cov_chol, sims_Z_unit), axis=0)
                     # quadratic variation of delta_X, also q_v = V_u
                     qv = np.sum([[self._V_cross_factor( asset
