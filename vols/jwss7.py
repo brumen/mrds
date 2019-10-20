@@ -7,6 +7,7 @@ from scipy.stats import norm
 
 from typing  import List, Dict, Tuple
 from tkinter import Scale, Button, HORIZONTAL
+from scipy.interpolate import splev, splrep
 
 import ds
 from vols.vols import Volatility, VolatilityDrawMixin
@@ -18,6 +19,25 @@ class JWSS7Volatility(Volatility):
     """ Jump-wing parametrization.
     """
 
+    INTERPOLATION_DEGREE = 2
+
+    def __init__( self
+                , com_name : str
+                , mkt_date : datetime.date
+                , fwd_params
+                , vol_params
+                , dcf = 365.25 ):
+        """ JWSS7 volatility init. the same as the volatility init, w/ some specific properties.
+        All parameters are the same as in Volatility class, except for the following:
+
+        :param dcf: day-count factor,
+        """
+
+        super().__init__(com_name, mkt_date, fwd_params, vol_params)
+        self.__dcf = dcf
+
+        self.__atm_vol_curve_interp = None
+
     @property
     def _vol_dates(self) -> List[datetime.date]:
         """ Returns the curve spine points, i.e. the points on the curve from which the curve is interpolated.
@@ -25,13 +45,34 @@ class JWSS7Volatility(Volatility):
 
         return self._vol_params.keys()
 
+    @property
+    def __atm_vol_curve(self):
+        """ Constructs the ATM vol curve
+
+        Returns the object returned from splrep, to be used for splev.
+        """
+
+        if self.__atm_vol_curve_interp:
+            return self.__atm_vol_curve_interp
+
+        vol_dates = [(x - self.mkt_date).days / self.__dcf for x in self._vol_dates]
+        atm_vols  = [x[0] for x in self._vol_params.values()]
+
+        vol_dates_values = sorted(zip(vol_dates, atm_vols), key=lambda vol_date_val: vol_date_val[0])
+
+        self.__atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
+                                            , [x[1] for x in vol_dates_values]
+                                            , k=self.INTERPOLATION_DEGREE )
+
+        return self.__atm_vol_curve_interp
+
     def atm_vol(self, fwd_date : datetime.date) -> float:
         """ Returns the atm forward for the fwd date fwd_date.
 
         :param fwd_date: forward date for which the ATM is constructed
         """
 
-        return self._vol_params[self._vol_for_date(fwd_date)][0]  # first elt is atm vol.
+        return splev((fwd_date - self.mkt_date).days / self.__dcf, self.__atm_vol_curve )
 
     @classmethod
     def from_db(cls, com_name : str, mkt_date : datetime.date):
@@ -42,7 +83,8 @@ class JWSS7Volatility(Volatility):
         return cls( com_name
                   , mkt_date
                   , fwd_params = ds.get_forward_curve(com_name, mkt_date)
-                  , vol_params = cls._transform_from_jwss7(vol_params) )
+                  , vol_params = vol_params)  # TODO: FIX THE LINE BELOW.
+               #vol_params = cls._transform_from_jwss7(vol_params) )
 
     @staticmethod
     def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, Tuple]:
