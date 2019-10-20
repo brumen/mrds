@@ -162,7 +162,7 @@ class Load:
                     [n2 for (n1, n2, cap, cap_cost), p_sol in sol_edges])
         edges = [(n1, n2) for (n1, n2, cap, cap_cost), p_sol in sol_edges
                  if np.abs(p_sol) > cutoff_value]
-        labels = ["%.2f" % p_sol for _, p_sol in sol_edges if np.abs(p_sol) > cutoff_value]
+        labels = ['{:.2f}'.format(p_sol) for _, p_sol in sol_edges if np.abs(p_sol) > cutoff_value]
 
         g = nx.Graph()
         for node in nodes:

@@ -71,14 +71,12 @@ class LMP:
 
         return res_l
 
-    def compute_load_distribution(self, show_sol=False):
-        """ Computes the value of the optimization problem given generation_nodes and pl
-
-        :param show_sol: shows the solution
+    def compute_load_distribution(self):
+        """ Computes the value of the optimization problem given generation_nodes and pl.
         """
 
         nb_nodes = len(self.gl)
-        nb_lines = len(self.pl) # each line counted 2x
+        nb_lines = len(self.pl)  # each line counted 2x
         nb_vars = nb_nodes + nb_lines
 
         A_ineq = []
@@ -115,39 +113,43 @@ class LMP:
         opt_vec[:nb_nodes] = np.array([p for (node_nb, gen, load, p) in self.gl])
 
         if A_eq:  # linprog cannon handle empty matrices
-            problem = linprog( opt_vec
-                             , A_ub = np.array(A_ineq)
-                             , b_ub = np.array(b_ineq)
-                             , A_eq = A_eq
-                             , b_eq = b_eq
-                             , bounds = list(zip(lb, ub)) )
-        else:
-            problem = linprog( opt_vec
-                             , A_ub = np.array(A_ineq)
-                             , b_ub = np.array(b_ineq)
-                             , bounds=list(zip(lb, ub)) )
+            return linprog( opt_vec
+                          , A_ub = np.array(A_ineq)
+                          , b_ub = np.array(b_ineq)
+                          , A_eq = A_eq
+                          , b_eq = b_eq
+                          , bounds = list(zip(lb, ub)) )
 
+        return linprog( opt_vec
+                      , A_ub = np.array(A_ineq)
+                      , b_ub = np.array(b_ineq)
+                      , bounds=list(zip(lb, ub)) )
+
+    def show_lmp(self):
+        """ Prints out the result of optimization.
+        """
+
+        problem = self.compute_load_distribution()
+        nb_nodes = len(self.gl)
         sol_v = problem.x
-        if show_sol:
-            # bus generation: first nb_nodes
-            print("Bus: ", sol_v[:nb_nodes])
-            for line_idx, (node_1, node_2, c) in enumerate(self.pl):
-                print("Line", (node_1, node_2), "transm:", sol_v[nb_nodes + line_idx])
 
-        return problem.fun
+        # bus generation: first nb_nodes
+        print('Bus: {0}'.format(sol_v[:nb_nodes]))
+        for line_idx, (node_1, node_2, c) in enumerate(self.pl):
+            print('Line {0}, {1}, transm: {2}'.format(node_1, node_2, sol_v[nb_nodes + line_idx]))
 
     def compute_lmp(self, show_sol=False):
         """ Compute locational marginal pricing.
 
         """
 
-        comp_basic = self.compute_load_distribution(show_sol=show_sol)
+        comp_basic = self.compute_load_distribution().fun  # value of the optimization function
         lmp = np.empty(len(self.gl))
 
         for node_nb, generation, load, gen_price in self.gl:
             gl_orig = copy.deepcopy(self.gl[node_nb-1])
             self.gl[node_nb-1] = (node_nb, generation, load + 1., gen_price)
-            new_value = self.compute_load_distribution(show_sol=show_sol)
+            new_value = self.compute_load_distribution().fun
             self.gl[node_nb-1] = gl_orig
             lmp[node_nb-1] = new_value - comp_basic
 
