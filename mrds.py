@@ -266,13 +266,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         lb_ub_fact = -0.999 if lb_ub_ind is 'lb' else 0.999
 
         if asset_1 == asset_2:
-            tmp_1 = np.ones((self.nb_factors_for_asset[asset_1], self.nb_factors_for_asset[asset_1]))
+            tmp_1 = np.ones((self.nb_factors_for_asset(asset_1), self.nb_factors_for_asset(asset_1)))
             tmp_ut = np.triu(tmp_1, 1)
             tmp_lt = np.tril(tmp_1, -1)
             return tmp_1 - tmp_ut * 0.001 - tmp_lt * 0.001 if lb_ub_ind is 'ub'else \
                 tmp_1 - tmp_ut * 1.999 - tmp_lt * 1.999
 
-        return lb_ub_fact * np.ones((self.nb_factors_for_asset[asset_1], self.nb_factors_for_asset[asset_2]))
+        return lb_ub_fact * np.ones((self.nb_factors_for_asset(asset_1), self.nb_factors_for_asset(asset_2)))
 
     def _factor_corr_mat(self
                          , asset_1 : str
@@ -821,7 +821,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return rho_vec.reshape((rho_mat_len, rho_mat_len))
 
-    @lru_cache(maxsize=_BETA_T_CACHE_SIZE)
+    # TODO: HERE SHOULD BE CHANGED TO ADD THIS CACHE
+    # @lru_cache(maxsize=_BETA_T_CACHE_SIZE)
     def _beta_T(self
                 , asset : str
                 , tenors = None):
@@ -1170,8 +1171,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
     @staticmethod
     def __simulate_std_normal( nb_factors     : int
                              , corr_mtx       : np.array
-                             , nb_simulations : int ):
-        """ Simulates the standard normal random variables with specified correlation
+                             , nb_simulations : int ) -> np.ndarray:
+        """ Simulates the standard normal random variables with specified correlations, and returns the
+        matrix of size (nb_factors x nb_correlations)  # TODO: CHECK IF THIS IS NOT REVERSED.
 
         :param corr_mtx: correlation matrix, a nb_factors x nb_factors matrix.
         :param nb_simulations: number of simulations from the factors.
@@ -1258,6 +1260,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                   for factor_1 in range(nb_factors_asset)]
                                  for factor_2 in range(nb_factors_asset)])
 
+                    # replacing old w/ new and generating new
                     X_prev[asset][tenor_idx, :] = X[asset][tenor_idx, :]
                     X[asset][tenor_idx, :] = X_prev[asset][tenor_idx, :] + delta_X
 
