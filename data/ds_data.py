@@ -1,6 +1,8 @@
 # raw data for file ds.py
 # ONLY USED DATE POSSIBLE: 20150401
-import numpy as np, datetime as dt, calendar
+import numpy    as np
+import datetime as dt
+import calendar
 
 # WTI
 wti_curve_dates = [dt.date(2015, 4, 21),
