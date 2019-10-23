@@ -5,20 +5,21 @@
 
 
 /*
-   computes P_m * G_m + H_m  (where P_m tensor, G_m, H_m matrices)
+  computes P_m * G_m + H_m  (where P_m tensor, G_m, H_m matrices)
 */
 __global__ void tensor_P_m (float *P_m, float *G_m, float *H_m, float *res_m ) {
 
-   int res_idx = threadIdx.x + blockIdx.x * blockDim.x ; /* block index, goes over simulations */
-   int ind1, ind2;
-   int nb_r = lattice_size;
-   int nb_c = lattice_size;
+  int res_idx = threadIdx.x + blockIdx.x * blockDim.x ; /* block index, goes over simulations */
+  int ind1, ind2;
+  int nb_r = lattice_size;
+  int nb_c = lattice_size;
 
-   res_m[res_idx] = 0.0; /* initial value */
-   for (ind1=0; ind1< nb_r ; ind1 = ind1 + 1)
-      for (ind2=0; ind2 < nb_c; ind2 = ind2 + 1)
-        res_m[res_idx] +=  P_m[res_idx* nb_r * nb_c + ind1 * nb_c + ind2 ] * G_m[ind1 * nb_c + ind2];
-   res_m[res_idx] += H_m[res_idx];
+  res_m[res_idx] = 0.;
+
+  for (ind1=0; ind1< nb_r ; ind1 = ind1 + 1)
+    for (ind2=0; ind2 < nb_c; ind2 = ind2 + 1)
+      res_m[res_idx] +=  P_m[res_idx* nb_r * nb_c + ind1 * nb_c + ind2 ] * G_m[ind1 * nb_c + ind2];
+  res_m[res_idx] += H_m[res_idx];
 }
 
 /*
@@ -99,7 +100,7 @@ __global__ void tensor_P_m_alt2 (float *P_m, float *G_m, float *H_m, float *res_
   __shared__ float G_m_shared[32][32];
   __shared__ float res_m_pr[32]; /* partially reduced result */
   int block_idx = blockIdx.x * lattice_size + blockIdx.y ; /* block index */
-  int thread_idx = threadIdx.x; 
+  int thread_idx = threadIdx.x;
 
   int lat_sq = lattice_size * lattice_size;
 
@@ -115,14 +116,14 @@ __global__ void tensor_P_m_alt2 (float *P_m, float *G_m, float *H_m, float *res_
       pos = i * 32 * lattice_size + j * 32 + thread_idx;
 
       res_m_pr[thread_idx] = 0.;
-      for (k=0; (k<32) 
-	     && ( j * 32 + thread_idx < lattice_size ) /* horizontal condition */
-	     && ( i * 32 + k < lattice_size ) /* vertical condition */
-	     ; k++) {
-	/* P_m_shared[k][thread_idx] = P_m[ block_idx * lat_sq + pos + k * lattice_size ];
-	   G_m_shared[k][thread_idx] = G_m[ pos + k * lattice_size ];
-	*/
-	res_m_pr[thread_idx] += P_m[ block_idx * lat_sq + pos + k * lattice_size ] * G_m[ pos + k * lattice_size ];
+      for (k=0; (k<32)
+             && ( j * 32 + thread_idx < lattice_size ) /* horizontal condition */
+             && ( i * 32 + k < lattice_size ) /* vertical condition */
+             ; k++) {
+        /* P_m_shared[k][thread_idx] = P_m[ block_idx * lat_sq + pos + k * lattice_size ];
+           G_m_shared[k][thread_idx] = G_m[ pos + k * lattice_size ];
+        */
+        res_m_pr[thread_idx] += P_m[ block_idx * lat_sq + pos + k * lattice_size ] * G_m[ pos + k * lattice_size ];
       }
 
       /* partial reduction */
@@ -132,9 +133,9 @@ __global__ void tensor_P_m_alt2 (float *P_m, float *G_m, float *H_m, float *res_
       /* 	     && ( i * 32 + k < lattice_size ) /\* vertical condition *\/ */
       /* 	     ; k++) */
       /* 	res_m_pr[thread_idx] += P_m_shared[k][thread_idx] * G_m_shared[k][thread_idx]; */
-      
+
       __syncthreads();
-      
+
       if (threadIdx.x == 0) { /* just the first thread sums the elts */
       	sum = 0.;
       	for (k=0; (k<32) && ( j * 32 + k < lattice_size ); k++) /* horizontal condtion */
@@ -143,8 +144,8 @@ __global__ void tensor_P_m_alt2 (float *P_m, float *G_m, float *H_m, float *res_
       }
 
       /* reduction step, this is how it is supposed to be  */
-      /* for (k=0; k<32; k++) 
-	 atomicAdd( &sum2, sum); */ 
+      /* for (k=0; k<32; k++)
+         atomicAdd( &sum2, sum); */
 
       /* MISSING MISSING MISSING */
       /* res_m[block_idx] += H_m[block_idx]; */
@@ -155,9 +156,9 @@ __global__ void tensor_P_m_alt2 (float *P_m, float *G_m, float *H_m, float *res_
 
 
 
-/* 
-   tensor version of cumsum function 
-   LOTS OF IMPROVEMENT NECESSARY, SHARED MEMORY NEEDS TO BE USED
+/*
+  tensor version of cumsum function
+  LOTS OF IMPROVEMENT NECESSARY, SHARED MEMORY NEEDS TO BE USED
 */
 __global__ void tensor_cumsum(float *dest, float *src, int stride) {
 
@@ -166,8 +167,8 @@ __global__ void tensor_cumsum(float *dest, float *src, int stride) {
   int n;
 
   for(n = 0; n < stride; n++) {
-     tmp += src[ n + stride * i ];
-     dest[ n + stride * i ] = tmp;
+    tmp += src[ n + stride * i ];
+    dest[ n + stride * i ] = tmp;
   }
 
 }
