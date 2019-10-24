@@ -1,35 +1,36 @@
 #define SMALL_EPS 1e-5
 #define DOUBLE_TYPE
+
 #ifdef DOUBLE_TYPE
-#define FLOAT_TYPE double
+    #define FLOAT_TYPE double
 #else
-#define FLOAT_TYPE float
+    #define FLOAT_TYPE float
 #endif
 
-__global__ void opd_kernel(int block_nb,
+__global__ void opd_kernel(int     block_nb,
                            double *powerPrice,
                            double *fuelPrice,
                            double *opdParams,
                            double *startupSPin,
-                           bool *state_state,
-                           int *state_hoursInState,
+                           bool   *state_state,
+                           int    *state_hoursInState,
                            double *state_Generation,
-                           int *state_TotalStarts,
-                           int *state_hoursShut,
-                           int *state_hoursRun,
-                           int *state_globalStarts,
-                           bool *dc_canStart,
-                           bool *dc_canShut,
-                           int *dc_forceStart,
-                           int *dc_forceShut,
-                           int hours_in_block,
-                           double df,
-                           int nb_paths,
+                           int    *state_TotalStarts,
+                           int    *state_hoursShut,
+                           int    *state_hoursRun,
+                           int    *state_globalStarts,
+                           bool   *dc_canStart,
+                           bool   *dc_canShut,
+                           int    *dc_forceStart,
+                           int    *dc_forceShut,
+                           int     hours_in_block,
+                           double  df,
+                           int     nb_paths,
                            unsigned long n) {
 
   unsigned tid = threadIdx.x;
   unsigned total_threads = gridDim.x*blockDim.x;
-  unsigned cta_start = blockDim.x*blockIdx.x;
+  unsigned cta_start = blockDim.x * blockIdx.x;
   unsigned i;
 
   // parameters
@@ -134,23 +135,23 @@ __global__ void opd_kernel(int block_nb,
       bool starts_tmp     = curr_state_tmp & not_state_state;  // curr_state > state_state[i]
       bool shuts_tmp      = not_curr_state & state_state[i];
 
-      FLOAT_TYPE startup_cost = (is_cold_start & starts_tmp) * (fixedStartupCostCold + fuelPrice[i] * startFuelCold) +
-        (is_not_cold_start & starts_tmp) * (fixedStartupCost + fuelPrice[i] * startFuel);
+      //FLOAT_TYPE startup_cost = (is_cold_start & starts_tmp) * (fixedStartupCostCold + fuelPrice[i] * startFuelCold) +
+      //  (is_not_cold_start & starts_tmp) * (fixedStartupCost + fuelPrice[i] * startFuel);
 
-      bool ramp_cost_up_ind = (!starts_tmp) & (generation_change > SMALL_EPS);
-      bool ramp_cost_dn_ind = (!shuts_tmp) & (generation_change < - SMALL_EPS);
-      FLOAT_TYPE ramp_cost = ramp_cost_up_ind * rampUpCost + ramp_cost_dn_ind * rampDownCost;
+      //bool ramp_cost_up_ind = (!starts_tmp) & (generation_change > SMALL_EPS);
+      //bool ramp_cost_dn_ind = (!shuts_tmp) & (generation_change < - SMALL_EPS);
+      // FLOAT_TYPE ramp_cost = ramp_cost_up_ind * rampUpCost + ramp_cost_dn_ind * rampDownCost;
       // cashflow
-      FLOAT_TYPE cashflow = revenue - (fuel_cost + variable_cost + startup_cost + ramp_cost);
+      // FLOAT_TYPE cashflow = revenue - (fuel_cost + variable_cost + startup_cost + ramp_cost);
 
       // new states
       state_hoursInState[i] = state_hoursInState[i] * (!state_change) + hours_in_block;
-      state_Generation[i] = curr_generation_tmp;
-      state_TotalStarts[i] = state_TotalStarts[i] + starts_tmp;
-      state_hoursShut[i] = not_curr_state * (state_hoursShut[i] + hours_in_block);
-      state_hoursRun[i] = curr_state_tmp * (state_hoursRun[i] + hours_in_block);
+      state_Generation[i]   = curr_generation_tmp;
+      state_TotalStarts[i]  = state_TotalStarts[i] + starts_tmp;
+      state_hoursShut[i]    = not_curr_state * (state_hoursShut[i] + hours_in_block);
+      state_hoursRun[i]     = curr_state_tmp * (state_hoursRun[i] + hours_in_block);
       state_globalStarts[i] = state_globalStarts[i] + starts_tmp;
-      state_state[i] = curr_state_tmp;
+      state_state[i]        = curr_state_tmp;
 
     }
 }

@@ -4,13 +4,12 @@ import os
 
 from pycuda.compiler import SourceModule
 
-from config import work_dir, opd1FuelComplete
+from config import work_dir, opd_1_fuel_cuda_code
 
 
-def getOpdHeader(floatType = 'double', intType = 'int'):
-    """
-    Returns the one period dispatch (OPD) function called opd_kernel.
-    This kernel is used in the following way:
+def get_opd_module(float_type ='double', int_type ='int'):
+    """ Returns the one period dispatch (OPD) function called opd_kernel.
+        This kernel is used in the following way:
 
     opd_kernel(np.intc(0)  # block number
            , gpa.to_gpu(power_prices).astype(float_type)  # FLOAT_TYPE *power prices
@@ -34,11 +33,9 @@ def getOpdHeader(floatType = 'double', intType = 'int'):
            , block=(100, 1, 1)
            , grid=(100, 1))
 
-    :param floatType: type of float used on the GPU (default double)
-    :param intType: type of int used on the GPU (default int)
-
+    :param float_type: type of float used on the GPU (default double)
+    :param int_type: type of int used on the GPU (default int)
     """
 
-    with open(os.path.join(work_dir, 'opd', opd1FuelComplete), 'r') as opdComplete:
-        return SourceModule( opdComplete.read().replace('FLOAT_TYPE', floatType))\
-                           .get_function('opd_kernel')
+    with open(os.path.join(work_dir, 'opd', opd_1_fuel_cuda_code), 'r') as opd_complete:
+        return SourceModule(opd_complete.read().replace('FLOAT_TYPE', float_type)).get_function('opd_kernel')

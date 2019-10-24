@@ -256,9 +256,7 @@ void sel_double2_internal(double *x1,
                                      , _MM_SHUFFLE2(0,0));
     reg x1_avx    = mloa(x1+idx);
 
-    msto(res+idx, _mm256_xor_pd(x1_avx
-                                , _mm256_and_pd(sel_avx
-                                                ,_mm256_xor_pd(mloa(x2+idx), x1_avx););
+    msto(res+idx, _mm256_xor_pd(x1_avx, _mm256_and_pd(sel_avx,_mm256_xor_pd(mloa(x2+idx), x1_avx))));
   }
 }
 

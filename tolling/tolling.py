@@ -7,14 +7,14 @@ import datetime
 import numpy as np
 import mrds
 import ds
-import opd.opd_1fuel as opd_1fuel
+# TODO: THIS FROM IS WRONG!!!
+from tolling import opd as opd_1fuel, opd as opd_1fuel_cu
 
 from mrds import ComSkew
 
 if config.CUDA_PRESENT:
     import pycuda.gpuarray as gpa
-    import cuda.cuda_ops as cuda_ops
-    import opd.opd_1fuel_cu as opd_1fuel_cu
+    import cuda.cuda_ops   as cuda_ops
 
 
 class TollingModel:
@@ -40,9 +40,8 @@ class TollingModel:
                  , manual_adj             = None
                  , cash_corr_adj          = None
                  , cuda_ind               = False ):
-        """
-        Path per path tolling model. The optimal bounday is a function of the shadow costs
-        and other parameters.
+        """ Path per path tolling model. The optimal bounday is a function of the shadow costs
+            and other parameters.
 
         :param calc_date: calculation date of the tolling model.
         :param toll_start: Start of the tolling deal.
@@ -128,37 +127,6 @@ class TollingModel:
 
         self.__power_gas_blocks = list(power_gas_blocks)
         return self.__power_gas_blocks
-
-    @property
-    def __power_spot_model(self):
-        """ Constructs the object, on par w/ ComSkew model for all power/fuel processes.
-        """
-
-        if self.__power_spot_model_used:
-            return self.__power_spot_model_used
-
-        self.__power_spot_model_used = self._power_fuel_process( self.calc_date
-                                       , self.toll_start
-                                       , self.toll_end
-                                       , nb_sim
-                                       , self.days_partition
-                                       , self.power_blocks_names
-                                       , self.hours_partition,
-                                        self.fuel_idx_name,
-                                        self.cash_vols,
-                                        self.nb_days,
-                                        fixed_monthly       = fixed_monthly_val,
-                                        cash_vols_overwrite = self.cash_vols_overwrite,
-                                        parallel            = True,
-                                        adj_fwd_tenors_days = self.adj_fwd_tenors_days,
-                                        adj_vol_tenors_days = self.adj_vol_tenors_days,
-                                        cash_fwd_tenors_days=self.cash_fwd_tenors_days,
-                                        cash_vol_tenors_days=self.cash_vol_tenors_days,
-                                        manual_adj=self.manual_adj,
-                                        cash_corr_adj=self.cash_corr_adj,
-                                        cuda_ind=self.cuda_ind)
-
-        return self.__power_spot_model_used
 
     @staticmethod
     def construct_consequitive_hours( days_partition        : List[List[int]]

@@ -1,6 +1,9 @@
-import config
+# one period tolling dispatch
+
 import numpy as np
-import opd_avx
+
+from tolling.opd import add4
+
 SMALL_EPS = 1e-5
 
 
@@ -53,8 +56,8 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
                    tmp_vars):
     """
     computes one period optimization,
-    :param pp: power prices (on device)
-    :param fp: fuel prices (on device)
+    :param power_prices: power prices (on device)
+    :param fuel_prices: fuel prices (on device)
     :param cuda_ind: indicator whether to do the computation on CUDA
     """
     # unpacking of params
@@ -69,19 +72,17 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
         ramp_up_sp_in, ramp_down_sp_in, \
         ramp_up_cost, ramp_down_cost, ramp_up_horizon, ramp_down_horizon = params
 
-    state_state = state_state_i.astype(bool)
-
     # marginal cost at max
-    optimal_marginal_cost_at_max = (fp + add_fuel_cost) * hr_at_max + VC
-    optimal_marginal_cost_at_min = (fp + add_fuel_cost) * hr_at_min + VC
+    optimal_marginal_cost_at_max = (fuel_prices + add_fuel_cost) * hr_at_max + VC
+    optimal_marginal_cost_at_min = (fuel_prices + add_fuel_cost) * hr_at_min + VC
 
     # ramping costs
     generation_smaller_maxcap = state_generation < max_cap
     ramp_up_to_max_cost = generation_smaller_maxcap * (ramp_up_sp_in + ramp_up_cost / (max_cap * ramp_up_horizon))
     generation_larger_mindisp = state_generation > min_disp
     ramp_down_to_min_cost = generation_larger_mindisp * (ramp_down_sp_in + ramp_down_cost / min_disp / ramp_down_horizon)
-    run_at_min_index = max_cap * (pp - optimal_marginal_cost_at_max - ramp_up_to_max_cost) < \
-        min_disp * (pp - optimal_marginal_cost_at_min - ramp_down_to_min_cost)
+    run_at_min_index = max_cap * (power_prices - optimal_marginal_cost_at_max - ramp_up_to_max_cost) < \
+        min_disp * (power_prices - optimal_marginal_cost_at_min - ramp_down_to_min_cost)
     not_run_at_min_index = ~run_at_min_index
 
     # compute total startup costs
@@ -92,15 +93,15 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
         is_not_cold_start * (fixed_startup_cost + start_fuel * fp)
 
     startup_sp = startup_sp_in + fixed_and_fuel_startup_cost / (startup_horizon * max_cap)
-    startup_profit_v = pp - optimal_marginal_cost_at_max - startup_sp > 0.
+    startup_profit_v = power_prices - optimal_marginal_cost_at_max - startup_sp > 0.
 
     is_startup_profitable = startup_profit_v
     do_startup = dc_can_start * ((dc_force_start == 2) |
                                 (is_startup_profitable & (dc_force_start == 1)))
 
     # compute shutdown
-    actual_gen_profit = run_at_min_index * (pp - optimal_marginal_cost_at_min) * min_disp + \
-        not_run_at_min_index * (pp - optimal_marginal_cost_at_max) * max_cap
+    actual_gen_profit = run_at_min_index * (power_prices - optimal_marginal_cost_at_min) * min_disp + \
+        not_run_at_min_index * (power_prices - optimal_marginal_cost_at_max) * max_cap
     shutdown_gen_profit = shutdown_horizon * actual_gen_profit
     shut_cost_sp = shutdown_horizon * shutdown_sp_in * max_cap
     is_shutdown_profitable = shutdown_gen_profit < - (fixed_and_fuel_startup_cost + shut_cost_sp)
@@ -117,17 +118,16 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
     ramping_adjustment = (0.5 / (ramp_rate * hours_in_block)) * np.abs(generation_change) * generation_change
     curr_generation -= ramping_adjustment
     curr_energy = curr_generation * hours_in_block
-    revenue = curr_energy * pp
+    revenue = curr_energy * power_prices
     variable_cost = VC * curr_energy
     actual_heat_rate = run_at_min_index * hr_at_min + not_run_at_min_index * hr_at_max
-    fuel_cost = curr_energy * (fp + add_fuel_cost) * actual_heat_rate
 
     not_curr_state = ~curr_state
     starts = curr_state & not_state_state  # curr_state > state_state
     shuts = not_curr_state & state_state
 
-    startup_cost = (is_cold_start & starts) * (fixed_startup_cost_cold + fp * start_fuel_cold) + \
-                   (is_not_cold_start & starts) * (fixed_startup_cost + fp * start_fuel)
+    startup_cost = (is_cold_start & starts) * (fixed_startup_cost_cold + fuel_prices * start_fuel_cold) + \
+                   (is_not_cold_start & starts) * (fixed_startup_cost + fuel_prices * start_fuel)
 
     ramp_cost_up_ind = (~starts) & (generation_change > SMALL_EPS)
     ramp_cost_dn_ind = (~shuts) & (generation_change < - SMALL_EPS)
@@ -137,8 +137,9 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
     # totalCost = fuel_cost + variable_cost + startup_cost + ramp_cost
     # cashflow = revenue - totalCost
     # cashflow_per_path[:] = cashflow
-    opd_avx.add4(revenue, fuel_cost, variable_cost, startup_cost, ramp_cost, cashflow_per_path,
-                 nb_paths)
+    add4( revenue
+        , curr_energy * (fuel_prices + add_fuel_cost) * actual_heat_rate  # fuel costs
+        , variable_cost, startup_cost, ramp_cost, cashflow_per_path, nb_paths)
 
     # new unit state
     nus_hours_in_state[:] = state_hours_in_state * (~state_change) + hours_in_block
