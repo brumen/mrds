@@ -127,45 +127,44 @@ def get_vol_curve( com_name : str
     return (vol_type, vol_curve_with_dates)
 
 
-def get_fwd_vol_curve_numeric_tenor( curveName : str
-                                   , mktDate   : datetime.date
+def get_fwd_vol_curve_numeric_tenor( curve_name : str
+                                   , mkt_date   : datetime.date
                                    , fwd_vol_ind     = 'fwd'
                                    , adj_tenors_days = None ):
     """ Gets the raw forward or vol curve name.
 
-    :param curveName: forward or vol curve name.
-    :param mktDate: market date.
+    :param curve_name: forward or vol curve name.
+    :param mkt_date: market date.
     :param fwd_vol_ind: indicator of forward or vol curve
     :param adj_tenors_days: integer, to adjust the number of days in the forward/vol curve.
-
     """
 
     if fwd_vol_ind is 'fwd':
-        fwd_vol_tenors_raw, fwd_vol_values_raw = get_forward_curve(curveName, mktDate)
+        fwd_vol_tenors_raw, fwd_vol_values_raw = get_forward_curve(curve_name, mkt_date)
         if adj_tenors_days is not None:
             fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_tenors_days), val)
                                    for ot, val in zip(fwd_vol_tenors_raw, fwd_vol_values_raw)
-                                   if ot - datetime.timedelta(days=adj_tenors_days) > mktDate ]
+                                   if ot - datetime.timedelta(days=adj_tenors_days) > mkt_date]
             fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
         else:
             fwd_vol_tenors, fwd_vol_values = fwd_vol_tenors_raw, fwd_vol_values_raw
 
     else:
-        vol_curve_type, vol_curve_data = get_vol_curve(curveName, mktDate)
+        vol_curve_type, vol_curve_data = get_vol_curve(curve_name, mkt_date)
         if adj_tenors_days is not None:
             fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_tenors_days), val)
                                    for ot, val in vol_curve_data
-                                   if ot - datetime.timedelta(days=adj_tenors_days) > mktDate ]
+                                   if ot - datetime.timedelta(days=adj_tenors_days) > mkt_date]
             fwd_vol_tenors, fwd_vol_values = zip(*fwd_vol_tenors_vals)
         else:
             fwd_vol_tenors, fwd_vol_values = list(vol_curve_data.keys()), vol_curve_data
 
-    diffs = [ten_ - mktDate for ten_ in fwd_vol_tenors if ten_ > mktDate ]
+    diffs = [ten_ - mkt_date for ten_ in fwd_vol_tenors if ten_ > mkt_date]
     fwd_vol_tenors_numeric = np.array([elt.days for elt in diffs])/365.
-    fwd_vol_tenors_code = [(fwt.month, fwt.year) for fwt in fwd_vol_tenors if fwt > mktDate ]
+    fwd_vol_tenors_code = [(fwt.month, fwt.year) for fwt in fwd_vol_tenors if fwt > mkt_date]
     fwd_vol_values_unexpired = np.array([fwd_vol_vals for fwt, fwd_vol_vals
                                          in zip(fwd_vol_tenors, fwd_vol_values)
-                                         if fwt > mktDate])
+                                         if fwt > mkt_date])
 
     return fwd_vol_tenors_numeric, fwd_vol_values_unexpired, fwd_vol_tenors_code, fwd_vol_tenors
 
