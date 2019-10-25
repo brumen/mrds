@@ -3,6 +3,7 @@
 import numpy as np
 import multiprocessing
 import ctypes
+import logging
 
 # my modules
 import lattice
@@ -12,6 +13,8 @@ from pricers import cdf_vec, bvnd
 
 # multi-threading version of tensor product
 tens_fast_mt_raw = ctypes.CDLL("/home/brumen/workspace/mrds/tp.so").tensor_prod_2
+
+logger = logging.getLogger(__name__)
 
 
 def tens_fast_mt(P_m, H_m, G_m, res_m):
@@ -30,19 +33,22 @@ def step_wrap(arg, **kwarg):
     return tolling_model_MRD.step(*arg, **kwarg)
 
 
-class tolling_model_lattice_gas():
+class TollingModelLatticeGas:
+    """ Backward induction algorithm on the lattice
     """
-    # backward induction algorithm on the lattice
-    # params: parameters, which contain 
-    #   .cuda ... indicator whether CUDA is present or not 
-    #   .F0 ... forward price
-    #   .K  ... cost of running a PP for that month 
-    #   .sigma_F ... forward vol
-    #   .sigma_C ... cash vol 
-    #   .SC ... fixed startup costs 
 
-    """
-    def __init__(self, params, blocks, debug_ind=False, sg_level=15):
+    def __init__(self, params, blocks, nb_months, sg_level=15):
+        """
+            # params: parameters, which contain
+        #   .cuda ... indicator whether CUDA is present or not
+        #   .F0 ... forward price
+        #   .K  ... cost of running a PP for that month
+        #   .sigma_F ... forward vol
+        #   .sigma_C ... cash vol
+        #   .SC ... fixed startup costs
+        """
+
+        self.nb_months = nb_months
         self.cuda = params.cuda
         self.tolling_fast = params.tolling_fast # using the fast tensor routine from tolling_fast.pyx
         self.tolling_fast_mt = params.tolling_fast_mt # using raw multi-threading 
@@ -238,8 +244,8 @@ class tolling_model_lattice_gas():
                  , delta_t
                  , sg_level=15 ):
 
-        weights = np.array(sg.sg_w(1, sg_level)) # row vector
-        xs      = np.array(sg.sg_p(1, sg_level)).flatten() # row vector
+        weights = np.array(sg.sg_w(1, sg_level))  # row vector
+        xs      = np.array(sg.sg_p(1, sg_level)).flatten()  # row vector
 
         g_v = self.p_t( xs * np.sqrt(2.)
                       , p_dash
@@ -318,12 +324,11 @@ class tolling_model_lattice_gas():
 
             return P_m_tmp
 
-    def transit_val(self, P_m, H_m, G_m):
-        """
-        transition value of tolling:
-          P_m ... transition matrix (or tensor)
-          H_m ... next value of tolling given the lattice
-          G_m ... running profit 
+    def transit_val(self, P_m, H_m, curr_profit_m):
+        """ Transition value of tolling:
+        :param P_m: transition matrix (or tensor)
+        :param H_m: next value of tolling given the lattice
+        :param curr_profit_m: running profit
         """
 
         res_m = self._zeroPP()
@@ -332,19 +337,18 @@ class tolling_model_lattice_gas():
             power_lattice_size, gas_lattice_size = P_m.shape[0:2]
             for P_curr_idx in range(power_lattice_size):
                 for G_curr_idx in range(gas_lattice_size):
-                    if type(G_m) == np.ndarray:
-                        profit_curr = G_m[P_curr_idx, G_curr_idx]
+                    if isinstance(curr_profit_m, np.ndarray):
+                        profit_curr = curr_profit_m[P_curr_idx, G_curr_idx]
                     else:  # const. profit (such as shutdown costs)
-                        profit_curr = G_m
+                        profit_curr = curr_profit_m
                     res_m[P_curr_idx, G_curr_idx] = np.sum(P_m[P_curr_idx, G_curr_idx, :, :] * H_m) + profit_curr
         else:
-            res_m = np.dot(P_m, H_m) + G_m
+            res_m = np.dot(P_m, H_m) + curr_profit_m
 
         return res_m
 
     def construct_hours(self):
-        """
-        construct the hours from the blocks structure
+        """ Construct the hours from the blocks structure
         """
 
         days = np.array([0.])
@@ -465,8 +469,7 @@ class tolling_model_lattice_gas():
                 self.step_cuda(0, Dt)
 
     def all_one_steps_mt(self):
-        """
-        mult-ithreading version of the step function
+        """ mult-ithreading version of the step function
         """
 
         nb_cores = multiprocessing.cpu_count()
@@ -490,22 +493,24 @@ class tolling_model_lattice_gas():
 
     def multiple_steps(self, nb_blocks):
         for block_nb in range(nb_blocks - 1, -1, -1):  # walking over blocks
-            print ("Block ", block_nb, "of", nb_blocks)
+            logger.info("Block {0} of {1}".format(block_nb, nb_blocks))
             self.all_one_steps(block_nb)
             self.overwrite_next_w_curr()
 
-    def tolling_value(self):
-        """
-        compute the tolling value from partial tolls for the given month
+    def tolling_value(self, month):
+        """ compute the tolling value from partial tolls for the given month
+
+        :param month: month for which the tolling is to be computed.
         """
 
-        self.multiple_steps(self.nb_steps) # do the steps within the month
+        self.multiple_steps(self.nb_steps)  # do the steps within the month
+
         if not self.cuda:
             # compute average over the values here self.work_pp_curr[0]
             F_init = self.lattice_seq[0]
             F_0_init = self.market_seq[0]["fwd"]
             sigma_F_init = self.market_seq[0]["sigma_F"]
-            T_m_init = self.blocks.Tm
+            T_m_init = self.blocks[month].Tm
 
             cdf_Tm = cdf_vec((np.log(F_init / F_0_init ) + 0.5 * sigma_F_init ** 2 * T_m_init ) /
                              (sigma_F_init * np.sqrt(T_m_init)))
@@ -517,33 +522,11 @@ class tolling_model_lattice_gas():
                                         self.idle_pp_curr[0])
             return np.sum(pdf_Tm * best_strategy)
 
-        else:
-            curr_mtx = self.work_pp_curr[0].get()
-            return curr_mtx[self.lattice_size / 2, self.lattice_size / 2]
-
-
-class tolling_model_lattice_gas_all():
-    """
-        summing over all the months in the previous model
-
-    """
-    def __init__(self, params, blocks, nb_months):
-        """
-        params ... same format as for TollingModelLattice
-        market ... market_v.Fv = vector of forward prices
-                   market_v.sigma_Fv ... vec. of vols
-                   market_v.sigma_Cv ... vec. of cash vols
-        blocks ... structure of the blocks
-        """
-
-        self.params = params
-        self.nb_months = nb_months
-        self.blocks = blocks # list of block objects
+        # cuda version.
+        return self.work_pp_curr[0].get()[self.lattice_size / 2, self.lattice_size / 2]
 
     def compute_val(self):
-        self.total_val = 0.
-        for m in range(self.nb_months):
-            tm_curr = tolling_model_lattice_gas(self.params, self.blocks[m])
-            tm_curr_val = tm_curr.tolling_value()
-            self.total_val += tm_curr_val
-        return self.total_val
+        """ Compute the total tolling value using the lattice model.
+        """
+
+        return sum([self.tolling_value(month) for month in range(self.nb_months)])

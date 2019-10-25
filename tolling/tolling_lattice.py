@@ -313,7 +313,7 @@ class TollingModelLattice(object):
         transition value of tolling:
           P_m ... transition matrix (or tensor)
           H_m ... next value of tolling
-          G_m ... running profit
+          curr_profit_m ... running profit
         """
         res_m = self.zero_pp()  # this is set by itself to cuda or no cuda
 
