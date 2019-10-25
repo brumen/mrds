@@ -1,0 +1,168 @@
+%%
+%% Malliavin derivatives in a path-dependent setting (content part).
+%%
+
+\subsection {The Delta}
+\label {path_dep_delta}
+
+We will consider only the case where the payoff is of the form 
+\begin {eqnarray*}
+  \Pi = \E \left( B(T) \Phi ( F ( T/2) , F(T) ) \right), 
+\end {eqnarray*}
+i.e. it depends only on one time point before maturity and 
+the dynamics of the process $F$ is given in equation (\ref{F_basic}) above. 
+%
+We introduce the process 
+\begin {eqnarray*}
+  G(T) = F (T/2) = F_0 \exp \left( - \frac 1 2 \int_0^{T/2} \sigma(t)^2 \dd t + \int_0^{T/2} \sigma (t) \dd W(t) 
+  \right) .
+\end {eqnarray*}
+We can rewrite $G(T)$ in the following manner 
+\begin {eqnarray*}
+  G(T) = F_0 \exp \left( 
+  - \frac 1 2 \int_0^T \frac {\sigma (t/2)^2} {2} \dd t + \int_0^T \sigma (t) 1 (t < T/2) \dd W (t) .
+  \right) 
+\end {eqnarray*}
+
+Differentiating with respect to $F_0$ gives us 
+\begin {eqnarray*}
+  \enojni {\Pi} {F_0} & = & \E ( \Phi_1 (G_T, F_T) \enojni {G_T} {F_0} + \Phi_2 (G_T, F_T) \enojni {F_T} {F_0} ) 
+  \\
+  & = &  \E \left( \Phi_1 (G_T, F_T) \frac {G_T}{F_0} + \Phi_2 (G_T, F_T) \frac {F_T}{F_0} \right) 
+\end {eqnarray*}
+In order to compute the Malliavin derivative of Computing the Malliavin derivatives gives us 
+\begin {eqnarray*}
+  \mall_s \Phi ( G(T), F(T) ) & = & \Phi_1 \mall _s G(T) + \Phi_2 \mall_s F(T) 
+  \\
+  & = & \Phi_1 G(T) \sigma (s) 1 (s < T/2) + \Phi_2 F(T) \sigma(s)
+\end {eqnarray*}
+Integrating wrt $s$ from $0$ to $T$ gives us 
+\begin {eqnarray*}
+  \int_0^T \mall_s \Phi ( G(T), F(T) ) \dd s = ( \Phi_1 G(T) + \Phi_2 F(T) ) 
+  \int_0^T \sigma (s) ( 1 + 1 (s < T/2) ) \dd s 
+\end {eqnarray*}
+By the Malliavin-Skorohod duality we have 
+\begin {eqnarray*}
+  \E ( \Phi_1 G(T) + \Phi_2 F(T) ) & = & \frac 1 {v(T)} 
+  \E \left[ \int_0^T \mall_s \Phi ( G(T), F(T) ) \dd s \right] 
+  \\
+  & = & \frac 1 {v(T)} \E \left[ \Phi (G(T), F(T)) W(T) \right] 
+\end {eqnarray*}
+where 
+\begin {eqnarray*}
+  v(T) = \int_0^T \sigma (s) ( 1 + 1 (s < T/2) ) \dd s .
+\end {eqnarray*}
+Putting all together we get that 
+\begin {eqnarray*}
+  \enojni {\Pi} {F_0} = \frac {1} {F_0 v(T)} \E [ B(T) \Phi (G(T), F(T)) W(T) ]
+\end {eqnarray*}
+
+{\it Example.} If $\sigma$ is constant the last expression reduces to 
+\begin {eqnarray*}
+  \enojni {\Pi} {F_0} = \frac {1} {F_0 \sigma \frac {3 T} {2} } \E [ B(T) \Phi (G(T), F(T)) W(T) ]
+\end {eqnarray*}
+
+
+
+\subsection {The Gamma}
+\label {path_dep_gamma}
+
+We need to compute the second derivative which amounts to 
+\begin {eqnarray*}
+  \dvojni {\Pi} {F_0} & = & \enojni { } {F_0} 
+  \frac 1 {F_0 v(T)} \E \left( B(T) \Phi (G(T), F(T)) W(T) \right) 
+  \\
+  & = & - \frac 1 {F_0^2 v(T) } \E ( B(T) \Phi W(T) ) + 
+  \frac 1 {F_0 v(T) } \E \left[ 
+    B(T) \left( \Phi_1 \frac {G(T)} {F_0} + \Phi_2 \frac {F(T) } {F_0} \right) W(T) 
+  \right]
+\end {eqnarray*}
+Applying the Malliavin derivative to $\Phi W(T)$ we get 
+\begin {eqnarray*}
+  \mall_s ( \Phi W(T) ) & = & \Phi + ( \mall_s \Phi ) W(T) 
+  \\
+  & = & \Phi + W(T) ( \Phi_1 G(T) \sigma (s) 1 ( s < T/2) + \Phi_2 F(T) \sigma(s) ) 
+\end {eqnarray*}
+while averaging the last expression wrt $s$ over $[0,T]$ we get 
+\begin {eqnarray*}
+  \frac 1 T \int_0^T \mall_s (\Phi W(T) ) \dd s = \Phi + \frac 1 T W(T) 
+  ( \Phi_1 G(T) + \Phi_2 F(T) ) v(T) .
+\end {eqnarray*}
+Taking the expectations we get 
+\begin {eqnarray*}
+  \E \left[ ( \Phi_1 G(T) + \Phi_2 F(T) ) W(T) \right] = 
+  \frac 1 {v(T)} \E \left( \int_0^T \mall_s ( \Phi W(T) ) \dd s \right) - \frac T {v(T)} \E (\Phi ).
+\end {eqnarray*}
+The final result for the computation of gamma is then 
+\begin {eqnarray*}
+  \Gamma & = & - \frac {1} {F_0^2 v(T)} \E ( B(T) \Phi W(T) ) + 
+  \frac 1 {F_0^2 v(T)} \left\{ 
+  \frac 1 {v(T)} \E (B(T) \Phi W(T)^2 ) - \frac {T} {v(T)} \E ( B(T) \Phi ) 
+  \right\}
+\end {eqnarray*}
+
+
+\subsection {The Vega}
+\label {path_dep_vega}
+
+We want to compute 
+\begin {eqnarray}
+  \enojni {\Pi} {\sigma} = \E \left[ 
+    B(T) \Phi_1 G(T) \left( - \sigma \frac T 2 + W (T/2) \right)
+    + B(T) \Phi_2 F(T) ( - \sigma T + W (T) ) 
+    \right] .
+  \label {path_dep_vega_original}
+\end {eqnarray}
+We now compute the following Malliavin derivatives:
+\begin {eqnarray*}
+  \mall_s \Phi \left( \frac {G(T)}{2}, F(T) \right) = 
+  \Phi_1 \frac {G(T)} 2 \sigma (s) 1 (s < T/2) + 
+  \Phi_2 F(T) \sigma (s) 
+\end {eqnarray*}
+and therefore 
+\begin {eqnarray*}
+  \E \left( \Phi_1 \frac {G(T)} 2 + \Phi_2 F(T) \right) = \frac 1 {v(T)} 
+  \E \left[ \Phi \left( \frac {G(T)} 2, F(T) \right) \right] .
+\end {eqnarray*}
+This handles the first part of the equation (\ref{path_dep_vega_original}). 
+To handle the second part we first compute 
+\begin {eqnarray*}
+  \mall_s \Phi ( G(T) W(T/2) , F(T) ) & = &
+  \Phi_1 G(T) 1 (s < T/2) + \Phi_1 W(T/2) G(T) \sigma (s) 1 (s < T/2) + 
+  \Phi_2 F(T) \sigma (s) 
+  \\
+  \mall_s \Phi ( G(T) , F(T) W(T) ) & = &
+  \Phi_1 G(T) \sigma (s) 1 (s < T/2) + \Phi_2 ( F(T) \sigma (s) W(T) + F(T) ) 
+\end {eqnarray*}
+Therefore 
+\begin {eqnarray*}
+  \E ( \Phi ( G(T) W(T/2) , F(T) ) W(T) & = & 
+  \E ( ( \Phi_1 G(T) + \Phi_2 F(T) ) \frac 1 {u(T)} + \E ( \Phi_1 G(T) W(T/2) )
+  \\
+  \E \left( \int_0^T \mall_s \Phi ( G(T) , W(T) F(T) ) \dd s \right) & = &
+  \E ( \Phi (G(T), W(T) F(T) ) W(T) ) 
+  \\
+  & = & 
+  \E ( \Phi_1 G(T) + \Phi_2 F(T) ) \Psi (T) + 
+  \E ( \Phi_2 F(T) W(T) ) \int_0^T \sigma (s) \dd s 
+\end {eqnarray*}
+where 
+\begin {eqnarray*}
+  u(T) & = & \int_0^T (1(s < T/2) + \sigma (s) ) \dd s = \frac T 2 + \int_0^T \sigma (s) \dd s 
+  \\
+  \Psi (T) & = & \int_0^T ( \sigma (s) 1 (s < T/2) + 1 ) \dd s . 
+\end {eqnarray*}
+%%
+%%
+In order to compute the vega we have to compute the following expectations:
+\begin {eqnarray*} 
+  & \E ( B(T) \Phi (T) ) 
+  \\
+  & \E ( B(T) \Phi (T) W(T) ) 
+  \\
+  & \E ( B(T) \Phi ( G(T) W(T/2) , F(T) ) W(T) ) 
+  \\
+  & \E ( B(T) \Phi ( G(T), F(T) W(T) ) W(T) ) 
+\end {eqnarray*}
+
+

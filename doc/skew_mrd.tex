@@ -1,0 +1,793 @@
+\documentclass[12pt]{article}
+
+\input {packages.tex} %% packages included in the documentation
+\input {preambule.tex} %% other commands
+\input {pagesetting.tex} %% page sizes 
+
+
+\title{{\bf MRD skew model for commodity prices}}
+\author{Gorazd Brumen}
+\date{First Version: July 28, 2010 
+  \vskip 1mm
+  This Version: \today
+}
+
+
+
+\begin{document}
+\maketitle
+
+\section {Model specification}
+
+The {\it log-normal model} that the MRD proposes is given as follows. 
+Let $\{ X_i \}_{i=1}^n$ be $n$ factors defined as 
+\begin {eqnarray*}
+  dX_i (t,T) = e^{-\kappa_i  (T - t) } \sigma_i \beta (T) \dd W_i 
+\end {eqnarray*}
+and the correlation between individual Wiener processes being 
+\begin {eqnarray*}
+  \langle W_i (t), W_j (t) \rangle = \rho_{ij} t .
+\end {eqnarray*}
+We define 
+\begin {eqnarray}
+  X(t,T) = \sum_{i=1}^n X_i (t,T).
+  \label {factors}
+\end {eqnarray}
+The log-normal model for the evolution of the $T$-futures contract 
+is defined as 
+\begin {eqnarray}
+  \frac {\dd F(t,T)} {F(t,T)} = \dd X(t,T).
+  \label {F_lognormal}
+\end {eqnarray}
+
+
+%% SKEW MODEL
+\noindent
+The {\bf skew model} is built upon the log-normal model and is defined as
+\begin {eqnarray}
+  F(t,T) & = & F(0,T) \cdot [ 1 + X(t,T) + \frac 1 2 C_1 (T) (X(t,T)^2 - V(t,T)) 
+  \nonumber
+  \\
+  &  & \quad + 
+  \frac 1 {3!} C_2 (T) (X^3 (t,T) - 3 X(t,T) V(t,T)) 
+  \nonumber
+  \\
+  &  & \qquad + 
+  \frac 1 {4!} C_3 (T) (X^4(t,T) - 6 V(t,T) X^2 (t,T) + 3 V^2 (t,T) ]
+  \label {skew_model_eq}
+\end {eqnarray}
+where we have denoted by $V(t,T) = \E( X(t,T)^2 ) = 
+\int_0^t \dd \langle X(t,T) \rangle  $. 
+We check the martingale property by computing the differential of 
+\begin {eqnarray}
+  \dd F(t,T) & = & F(0,T) [ \dd X(t,T) + 
+    \frac 1 2 \cdot 2 C_1 (T) X(t,T) \dd X(t,T) 
+    \nonumber
+    \\
+    &  & \quad 
+    + \frac 1 6 C_2 (T) \{ 3 X^2 (t,T) \dd X(t,T) + 3 X(t,T) \dd V(t,T) 
+    \nonumber
+    \\
+    &  & \qquad 
+    - 3 V(t,T) \dd X(t,T) - 3 X(t,T) \dd V(t,T) \}
+    \nonumber
+    \\
+    &  & \quad 
+    + \frac 1 {24} C_3 (T) \{ 4 X^3 (t,T) \dd X(t,T) + 6 X^2 (t,T) \dd V(t,T) 
+    \nonumber
+    \\
+    &  & \qquad 
+    - 6 X^2 (t,T) \dd V(t,T) - 12 V(t,T) X(t,T) \dd X(t,T)  
+    \nonumber
+    \\
+    &  & \qquad 
+    - 6 V(t,T) \dd V(t,T) + 6 V(t,T) \dd V(t,T) \} ]
+  )
+  \nonumber
+  \\
+  & = & 
+  F(0,T) [ \dd X(t,T) + C_1 (T) X(t,T) \dd X(t,T) 
+  \nonumber
+  \\
+  &  & \quad 
+  + \frac 3 6 C_2 (T) ( X^2 (t,T) - V(t,T) ) \dd X(t,T) 
+  \nonumber
+  \\
+  &  & \quad 
+  + \frac 1 {24} C_3 (T) ( 4 X^3 (t,T) - 12 V(t,T) X(t,T) ) \dd X(t,T) ]
+  \label {F_skew_diff}
+\end {eqnarray}
+proving that the process $F(t,T)$ is martingale since $X$ is a martingale 
+and $\dd F$ does not have a drift. The last equation can also be written 
+as 
+\begin {eqnarray}
+  \dd F(t,T) & = & F(0,T) g(t,X(t,T)) \dd X(t,T),
+\end {eqnarray}
+where 
+\begin {eqnarray*}
+  g(t,X(t,T)) & = &  1 + C_1 (T) X(t,T) + 
+  \frac 1 2  C_2 (T) ( X^2 (t,T) - V(t,T) ) 
+  \\
+  &  & \quad +
+  \frac 1 6 C_3 (T) ( X^3(t,T) - 3 V(t,T) X(t,T) ) 
+\end {eqnarray*}
+
+
+%
+% MULTI-ASSET 
+%
+\noindent 
+A multi-asset version of the model is given as 
+\begin {eqnarray*}
+  \frac { \dd F^j (t,T_i) } {F^j (t,T_i) } 
+  = 
+  \dd X^j (t,T) ,
+\end {eqnarray*}
+where each $X^j$ has the structure (\ref{F_lognormal}) and the 
+market factors for every asset are correlated. 
+The intuition for the skew model (\ref{skew_model_eq}) comes as an extension 
+of the log-normal model (\ref{F_lognormal}) as the first-order Taylor expansion of 
+\begin {eqnarray*}
+  F(t,T) & = & F(0,T) \cdot \exp \left( 
+  - \frac 1 2 V(t,T) + X(t,T)
+  \right)
+  \\
+  & \approx & 
+  F(0,T) ( 1 + X(t,T) - \frac 1 2 V(t,T) )
+\end {eqnarray*}
+shows.
+
+
+\section {Model calibration}
+\label {section_model_calibration}
+
+\subsection {Calibration of ATM volatility}
+\label {atm_calib}
+
+The at-the-money options for different tenors are 
+used to calibrate the model for $\{ \kappa_i, \sigma_i, \rho_{i,j} \}_{i,j=1}^n $. 
+In order to calibrate the at-the-money parameters we have to compute the ATM volatility. 
+The integrated volatility from $t$ to $T$ is therefore given by 
+\begin {eqnarray*} 
+  \sigma_{ATM}^2 = \frac 1 {T-t} 
+  \sum _{i=1}^n &  & \! \! \! \! \! \! \int_t^T e^{-2 \kappa_i (T_k - t) } \sigma_i^2 \beta (T_k)^2 \dd s 
+  + \sum _{i\ne j}^n \int_t^T (e^{ (\kappa_i + \kappa_j) (T_k - t) } \sigma_i \sigma_j \beta (T_k)^2 
+  \rho_{i,j} \dd s 
+  \\
+  & = & \sum_{i=1}^n \sigma_i^2 \beta(T_k)^2 \frac {  e^{-2 \kappa_i (T_k - T)} - e^{-2\kappa_i (T_k - t) } } 
+    { 2 \kappa_i }  + 
+    \\
+    &  & \quad \sum_{i\ne j}^n \sigma_i \sigma_j \beta(T_k)^2 \rho_{ij} 
+    \frac { e^{-(\kappa_i + \kappa_j ) (T_k - T)} - e^{-(\kappa_i + \kappa_j)(T_k - t) } } 
+          {\kappa_i + \kappa_j } 
+\end {eqnarray*} 
+%
+In practice we calibrate the parameters $\{ \kappa_i, \sigma_i, \rho_{i,j} \}_{i,j=1}^n $ 
+first and then set the parameter $\beta (T_i)$ so that the ATM volatility is matched 
+perfectly (which can always be achieved). 
+\vskip 3mm
+\noindent 
+We can vectorize the computation of $\sigma^2 (T_k, T, t)$ by first writing it in a form 
+\begin {eqnarray*} 
+  \sigma_{ATM}^2 = 
+  \sum_{i, j}^n \sigma_i \sigma_j \beta(T_k)^2 \rho_{ij} 
+    \frac { e^{-(\kappa_i + \kappa_j ) (T_k - T)} - e^{-(\kappa_i + \kappa_j)(T_k - t) } } 
+          {\kappa_i + \kappa_j } 
+\end {eqnarray*} 
+We first construct matrices 
+\begin{eqnarray*}
+  \podcc {\sigma}_1 = \left[ \begin{array}{cccc}
+      \sigma_1 & \sigma_1 & \ldots & \sigma_1 
+      \\
+      \vdots & \ddots & & \vdots 
+      \\
+      \sigma_n & \sigma_n & \ldots & \sigma_n
+    \end{array} 
+  \right]
+  = \left[ \begin{array}{c}
+      \sigma_1 
+      \\
+      \vdots 
+      \\
+      \sigma_n 
+    \end{array} 
+  \right]
+  \cdot 
+  \left[ 1, 1, \ldots , 1 \right]
+\end{eqnarray*}
+and 
+\begin{eqnarray*}
+  \podcc {\sigma}_2 = \left[ \begin{array}{cccc}
+      \sigma_1 & \sigma_2 & \ldots & \sigma_n 
+      \\
+      \vdots & \ddots & & \vdots 
+      \\
+      \sigma_1 & \sigma_2 & \ldots & \sigma_n
+    \end{array} 
+  \right]
+  = \left[ \begin{array}{c}
+      1
+      \\
+      \vdots 
+      \\
+      1
+    \end{array} 
+  \right]
+  \cdot 
+  \left[ \sigma_1, \sigma_2, \ldots , \sigma_n \right]
+\end{eqnarray*}
+and similarly the matrices $\podcc {\kappa}_1$ and $\podcc {\kappa}_2$. 
+Therefore the $\sigma_{ATM}$ we can write as 
+\begin{eqnarray*}
+  \podcc {\sigma}_1 \cdot \podcc {\rho} \cdot \podcc {\sigma}_2  \cdot 
+  \frac { e^{- (\podcc {\kappa}_1 + \podcc {\kappa}_2 ) (T_k - T)  } - e^{- (\podcc {\kappa}_1 + \podcc {\kappa}_2 ) T_k } }
+    {\podcc {\kappa}_1 + \podcc {\kappa}_2 } 
+\end{eqnarray*}
+The case for all tenors can be realized using tensor algebra INSERT HERE. 
+
+\vskip 5mm
+%
+\noindent
+Let us assume that we are given a series of ATM option prices $C_k$ for tenor times $T_k$. From the call option prices $C_k$ we extract 
+\begin{eqnarray*}
+  C_k = B(0,T_k) \cdot F(0,T_k) ( N(d_1) - N(d_2) ),
+\end{eqnarray*}
+where $d_1$ and $d_2$ are standard expressions. From here we extract the ATM volatilities 
+as 
+\begin {eqnarray}
+  N(d_1) - N(d_2) & = & \frac { C_k } { B(0,T_k) \cdot F(0,T_k) } 
+  \nonumber
+  \\
+  N\left( \frac {\sigma \sqrt {T}} 2 \right) 
+  - N \left( - \frac {\sigma \sqrt {T} } {2} \right) 
+  & = & \frac { C_k } { B(0,T_k) \cdot F(0,T_k) } 
+  \nonumber
+  \\
+  2 N \left( \frac {\sigma \sqrt {T}} 2 \right) - 1 & & 
+  \frac { C_k } { B(0,T_k) \cdot F(0,T_k) } 
+  \nonumber
+  \\
+  \sigma_k & = & \frac 2 { \sqrt {T_k} } N^{-1} 
+  \left( 
+  \frac {1 + \frac {C_k} {B(0,T_k) F(0,T_k)}} {2}
+  \right)
+  \label {implied_vol}
+\end {eqnarray}
+Once we have the empirical ATM vol $\sigma_k^e $ for tenor $T_k$ 
+we perform the optimization 
+\begin {eqnarray*}
+  \min_{\kappa_i, \sigma_i, \rho_{i,j} } \sum_{k} (\sigma_k^e  - 
+  \sigma_k (\kappa_i, \sigma_i, \rho_{ij} ) )^2 
+\end {eqnarray*}
+For $2$ factor model the optimization is a function of $6$ parameters: 
+$\sigma_1, \sigma_2$, $ \kappa_1, \kappa_2 $ and $\rho_{1,2}$. 
+
+
+
+\subsection {Calibration of intra-curve correlation parameters}
+\label {correlation_calibration_section}
+
+First we estimate the correlation between the individual tenors of the 
+same asset. We do the analysis for $2$ fators only. General analysis with 
+$n$ factors is straightforward. Let $\rho$ be the correlation between 
+$W_1$ and $W_2$. We start by writing 
+\begin {eqnarray*}
+  F(t,T_1) & = & F(0,T_1) \exp \left[
+    - \frac 1 2 \int_0^t \dd \langle X\rangle (\podcc {\rho }, u) + \int_0^t \dd X 
+    (\podcc { \rho}, u)
+    \right]
+  \\
+  F(t,T_2) & = & F(0,T_2) \exp \left[
+    - \frac 1 2 \int_0^t \dd \langle X \rangle ( \podcc { \rho }, u) + 
+    \int_0^t \dd X ( \podcc {\rho} , d)
+    \right]
+\end {eqnarray*}
+We first compute the covariance by 
+\begin {eqnarray*}
+  \textrm {cov} (F (t,T_1), F(t,T_2) ) & = & 
+  F (0,T_1) F(0,T_2) \E \left[ 
+    \exp \left( 
+    - \frac 1 2 \int_0^t \dd \langle X \rangle (\rho, u) + 
+    \dd \langle X \rangle ( \podcc {\rho}, u) 
+    \right. \right.
+    \\
+    &  & \quad \left. \left.
+    + \int_0^t \dd X ( \podcc { \rho }, u)
+    + \int_0^t \dd X ( \podcc {\rho}, u)
+    \right) - 1
+    \right]
+\end {eqnarray*}
+The covariance is therefore (ommiting the $F(0,T_1) F(0,T_2)$ and $-1$)
+\begin {eqnarray*}
+  \exp &  & \left\{ \beta(T_1) \beta(T_2) \left[
+    \int_0^t \sigma_1 \sigma_1  e^{ -\kappa_1 (T_1 + T_2 - 2s) } \dd s
+    + 
+    \int_0^t \sigma_2 \sigma_2 e^{ -\kappa_2 (T_1 + T_2 - 2s) } \dd s
+    \right. \right.
+    \\
+    &  & 
+    \quad + 
+    \rho \cdot 
+    \int_0^t \sigma_1 \sigma_2 e^{ -\kappa_1 (T_1 - s) - \kappa_2 (T_2 - s) } \dd s
+    \\
+    &  & \left. \left. \quad 
+    +
+    \rho \cdot 
+    \int_0^t \sigma_1 \sigma_2 e^{ -\kappa_1 (T_2 - s) - \kappa_2 (T_1 - s) } \dd s
+    \right] \right\}
+\end {eqnarray*}
+This last equation can be computed explicitly as the exponential of 
+\begin {eqnarray*}
+  &  & 
+   \beta(T_1) \beta(T_2) \left[ \sigma_1 \sigma_1\frac {e^{ -\kappa_1 (T_1 + T_2 - 2t) } - 
+    e^{ -\kappa_1 (T_1 + T_2) } } {2\kappa_1 } \right.
+  \\
+  & & 
+  \quad + 
+  \sigma_2 \sigma_2 \frac { e^{ -\kappa_2 (T_1 + T_2 - 2t) } - 
+    \exp { - \kappa_2 (T_1 + T_2) } } 
+        { 2 \kappa_2} 
+  \\
+  &  & 
+  \quad +
+  \rho \cdot 
+  \sigma_1 \sigma_2 \frac { 
+    e^{ -\kappa_1 (T_1 - t) - \kappa_2 (T_2 - t) } - e^{- \kappa_1 T_1 - \kappa_2 T_2 } } 
+        {\kappa_1 + \kappa_2 } 
+  \\
+  &  & \left.
+  \quad +
+  \rho \cdot 
+  \sigma_1 \sigma_2 \frac {
+    e^{ -\kappa_1 (T_2 - t) - \kappa_2 (T_1 - t) } - e^{- \kappa_1 T_2 - \kappa_2 T_1 } } 
+        {\kappa_1 + \kappa_2} \right]
+\end {eqnarray*}
+
+
+
+\subsection {Calibration of between-curves correlation parameters}
+\label {between_curves_correlation_calibration_section}
+
+The computation of correlation between $\textrm {cov} (F^k (t,T_i), F^l (t,T_j))$ is 
+computed in a similar fashion as in Section \ref {correlation_calibration_section} 
+by first computing the integrated covariance between the two assets: 
+\begin {eqnarray}
+  \textrm {int. cov} = G^{k,l}_{i,j}, 
+\end {eqnarray}
+where 
+\begin {eqnarray*}
+  G^{k,l}_{i,j} = \sum_{n,m} G^{k,l}_{i,j,n,m} .
+\end {eqnarray*}
+The notation is the following: 
+\begin {itemize}
+\item $n,m$ refers to factors.
+\item $i,j$ refers to the future tenors. 
+\item $k,l$ refers to individual commodity assets.
+\end {itemize}
+and 
+\begin {eqnarray*}
+  G^{k,l}_{i,j,n,m}  & = & \rho ^{k,l}_{n, m} \beta^k (T_i) \beta^l (T_j) \int_0^t \left( \sigma_n^k \sigma_m^l 
+  \exp( - \kappa^k_n (T_i - s) - \kappa^l _m (T_j - s) \right) \dd s
+  \\
+  & = & \rho ^{k,l}_{n, m} \beta^k (T_i) \beta^l (T_j) \sigma_n^k \sigma_m^l 
+  \exp (-\kappa^k_n T_i - \kappa^l_m T_j ) 
+  \frac { e^{(\kappa^k_n + \kappa^l_m) t} - 1} 
+        {\kappa^k_n + \kappa^l_m}
+\end {eqnarray*}
+%
+This expression is never used, but we need to efficiently compute it (to form sums over some dimensions).
+
+In order to compute correlations we first compute 
+\begin{eqnarray*}
+  \E [ X^k (T,T) X^l (T,T) ] & = & G^{k,l}_{T,T}
+  \\
+  \E [ X^k (T,T) ( X^l (T,T))^2 ] & = & G^{k,l}_{T,T} \E ( (X^k (T,T) )^3 ) = 0
+  \\
+  \E [ X^k (T,T) ( X^l (T,T))^3 ] & = & G^{k,l}_{T,T} \E ( (X^k (T,T) )^4 ) 
+  \\
+  & = & G^{k,l}_{T,T} \cdot 3 [ V^k (T,T) ]^2 
+  \\
+  \E [ ( X^k (T,T) )^2 ( X^l (T,T))^2 ] & = & ( G^{k,l}_{T,T})^2 \cdot 3 (V^k (T,T))^2
+  \\
+  \E [ ( X^k (T,T) )^2 ( X^l (T,T))^4 ] & = & ( G^{k,l}_{T,T})^2 \E ( (X^k (T,T))^6 ) 
+  \\
+  & = & ( G^{k,l}_{T,T})^2 \cdot 15 (V^k (T,T))^3 
+  \\
+  \E [ ( X^k (T,T) )^4 ( X^l (T,T))^4 ] & = & ( G^{k,l}_{T,T})^4 \E ( (X^k (T,T))^8 ) 
+  \\
+  & = & ( G^{k,l}_{T,T})^4 \cdot 105 (V^k (T,T))^4
+\end{eqnarray*}
+We now adopt the notation of Section \ref{skew_calib} below, namely 
+\begin{eqnarray*}
+  F^k(T,T) = a_0^k (T) + a_1^k (T) X^k (T,T) + a_2^k (T) (X^k (T,T))^2 + 
+  a_3^k (T) (X^k (T,T))^3 + a_4^k (T) (X^k (T,T))^4 
+\end{eqnarray*}
+to compute the correlation (for convenience sake we write 
+$a_i^k$ for $a_i^k (T)$ and $V^k $ for $V^k (T,T)$)
+\begin{eqnarray*}
+  \E [F^k (T,T) F^l (T,T)] & = & a_0^k  a_0^l  
+  + a_0^k a_2^l V^l + a_2^k a_0^l V^k   
+  \\
+  &  & \quad 
+  + a_0^k a_4^l \cdot 3 (V^l)^2 + a_4^k a_0^l \cdot 3 ( V^k )^2 
+  \\
+  &  & \quad 
+  + a_1^k  a_1^l  G^{k,l}_{T,T}  
+  \\
+  &  & \quad 
+  + a_1^k  a_3^l  G^{k,l}_{T,T} V^l  + a_3^k  a_1^l  G^{k,l}_{T,T} V^k  
+  \\
+  &  & \quad 
+  + a_2^k  a_2^l  (G^{k,l}_{T,T} )^2 \cdot 3 ( V^k)^2 
+  \\
+  &  & \quad 
+  + a_2^k  a_4^l  (G^{k,l}_{T,T} )^2 \cdot 15 ( V^k)^3  + 
+  a_4^k  a_2^l  (G^{k,l}_{T,T} )^2 \cdot 15 ( V^l)^3 
+  \\
+  &  & \quad 
+  + a_4^k  a_4^l  (G^{k,l}_{T,T} )^4 \cdot 105 ( V^k)^4 
+\end{eqnarray*}
+%
+In practice we are usually given only one correlation number between two assets. In this case 
+we match all correlations $\textrm {corr} (F^k (t, T_i), F^l (t, T_j)) $ for all tenors 
+$T_i$ and $T_j$ to that number. 
+
+
+Once we match the correlation to for individual factors we compose a large correlation matrix INSERT WHAT THAT MIGHT ME. 
+
+
+
+\subsection {Calibration of skew parameters $C_1(T),C_2(T),C_3(T)$}
+\label {skew_calib}
+
+In order to calibrate the skew parameters we have to compute 
+the value of the option given the model (\ref{skew_model_eq}). 
+We write: 
+\begin {eqnarray*}
+  F(t,T) = a_0 (T) + a_1 (T) X(t,T) + a_2 (T) X^2 (t,T) + 
+  a_3 (T) X^3 (t,T) + a_4 (T) X^4 (t,T) 
+\end {eqnarray*}
+where parameters $a_1(T), a_2(T), a_3(T), a_4(T)$ are given by 
+\begin {eqnarray*}
+  a_0 (T) & = & F(0,T) ( 1 - \frac 1 2 C_1 (T) V(t,T)+ \frac 1 8 C_3 (T) V^2 (t,T) )
+  \\
+  a_1 (T) & = & F(0,T) ( 1 - \frac 1 2 C_2 (T) V(t,T) )
+  \\
+  a_2 (T) & = & F(0,T) ( \frac 1 2 C_1 (T)- \frac 1 4 C_3 (T) V(t,T) )
+  \\
+  a_3 (T) & = & \frac 1 6 F(0,T) C_2 (T)
+  \\
+  a_4 (T) & = & \frac 1 {24} F(0,T) C_3 (T)
+\end {eqnarray*}
+We can now compute the call option value 
+\begin {eqnarray*}
+  Call & = & B(0,t) \E ( (F(t,T) - K )_+ )
+  \\
+  & = & B(0,t) \E ( (a_0(T) - K + a_1 (T) X(t,T) + 
+  a_2 (T) X(t,T)^2 + a_3 (T) X(t,T)^3 + a_4 (T) X(t,T)^4  
+  )_+ )
+  \\
+  & = & B(0,t) \E ( p(X)_+ )
+\end {eqnarray*}
+where $K$ is the option strike, $B(0,t)$ is the discount 
+factor for the period $[0,t] $, $X(t,T) \sim N(0, \sigma^2 (t,T) =V(t,T))$ and 
+$p$ is the fourth order polynomial given above. 
+We differentiate between the following cases: 
+\begin {enumerate}
+\item $p$ has no real roots. Then the value of the european call 
+  option is either $0$ ($C_3 (T) < 0)$) or 
+  \begin {eqnarray*}
+    Call & = & B(0,t) \E ( p(X) )
+    \\
+    & = & B(0,t) (a_0(T) - K + a_2 (T) V(t,T) + 3 a_4 (T) V^2 (t,T) )
+  \end {eqnarray*}
+
+\item Polynomial $p$ equation has $1$ root - this is essentially idential 
+  to the case of $0$ roots above. 
+
+\item Polynomial $p$ has $2$ roots $r_1 < r_2$. We denote by 
+  \begin {eqnarray*}
+    p_i = \E ( N^i \cdot 1(N<s_1) ) + \E (N^i \cdot 1(N>s_2) )
+  \end {eqnarray*}
+  for which explicit formulas exist. 
+  Then we compute 
+  \begin {eqnarray*}
+    Call /B(0,t) & = & \E ( 
+    ( (a_0(T) - K) + a_1 (T) X(t,T) + a_2 (T) X^2(t,T) 
+    \\
+    &  & \quad 
+    + a_3(T) X^3 (t,T) + a_4 (T) X^4 (t,T) ) 
+    \cdot 
+    \\
+    &  & \quad ( 1(X/\sigma(t,T) < r_1 / \sigma (t,T) = s_1 ) + 
+    1 ( X/ \sigma(t,T) > r_2 / \sigma (t,T) = s_2 ) )
+    \\
+    & = & (a_0(T) - K) N(s_1) + a_1 (T) \sigma(t,T) p_1 
+    \\ 
+    &  & \quad + a_2 (T) V(t,T) p_2 
+    + a_3 (T) V(t,T) \sigma (t,T) p_3 
+    \\
+    &  & \quad 
+    + a_4 (T) V(t,T)^2 p_4 
+  \end {eqnarray*}
+  
+\item Polynomial $p$ has $3$ roots. This is essentially the same as 
+  the previous case. 
+
+\item Polynomial $p$ has $4$ roots $r_1 < r_2 < r_3 < r_4$. In this case 
+  the indicator function is given by 
+  \begin {eqnarray*}
+    1(X < r_1) + 1 ( r_2 < X < r_3 ) + 1 (X > r_4 )
+  \end {eqnarray*}
+  in case $a_4 (T) > 0$ and the integration is over $3$ intervals 
+  $(-\infty , r_1] $, $[r_2, r_3]$ and $ [r_4, \infty )$.
+      In case $a_4 (T) <0$ the integration is over $2$ intervals 
+      $[r_1,r_2]$ and $[r_3, r_4]$. 
+
+\end {enumerate}
+
+
+
+
+
+
+We choose a maturity of the option contract $T_k$. 
+For that maturity we have several options with different 
+strikes $K_l$. The quoted vols for these options are 
+$\sigma_k ^e (K_l) $ obtained using equation (\ref{implied_vol}). 
+We choose the $3$ parameters $C_1 (T_k), C_2 (T_k), C_3 (T_k) $ 
+so that the we minimize the sum 
+\begin {eqnarray*}
+  \min_{C_1(T_k),C_2(T_k),C_3(T_k)} \sum_l 
+  (\sigma_k^e (K_l) - \sigma_k (C_1,C_2,C_3,K_l))^2 
+\end {eqnarray*}
+where $K_l$ are the option strikes.
+
+\subsection {Model inputs} 
+\label {section_input_params}
+
+The inputs to the model are:
+\begin {itemize}
+\item Initial forward curve for every asset that we are considering 
+  $F(0,T)$. 
+
+\item ATM volatilities $\sigma_{ATM} $ for every asset and for 
+  different tenors.
+
+\item Volatility surface, i.e. the function $\sigma (T,K)$. This can 
+  come out of the parametrization of the surface obtained from 
+  some parametric form. 
+
+\end {itemize}
+
+
+
+
+\section {Model Simulation}
+\label {model_simulation}
+
+
+To simulate the model we use the Euler scheme and equation 
+(\ref{F_skew_diff}), i.e. 
+\begin {eqnarray*}
+  \Delta F (t, T) & = & F(0,T) \{ 
+  1 + C_1 (T) X(t,T) + 
+  \frac 1 2 C_2 (T) ( X^2 (t,T) - V(t,T) ) 
+  \\
+  &  & \quad + 
+  \frac 1 6 C_3 (T) ( X^3(t,T) - 3 V(t,T) X(t,T) ) 
+  \} \Delta X(t,T) 
+\end {eqnarray*}
+where we have 
+\begin {eqnarray*}
+  \Delta X(t,T) & = & \sum_{i=1}^n \Delta X_i (t,T) 
+  \\
+  \Delta X_i (t,T) & = & \sigma_i \beta (T) e^{-\kappa_i (T-t)} \Delta W_i 
+\end {eqnarray*}
+
+We assume that there are $n$ factors and $K$ tenors. We would like to simulate $N$ 
+Monte-Carlo simulations. 
+
+We write the tenor factors in a vector:
+\begin {eqnarray*}
+  \left[ 
+    \begin {array} {ccc}
+      \Delta X^1 (t,T_1) & \ldots & \Delta X^N (t,T_1)
+      \\
+      \Delta X^1 (t,T_2) & \ldots & \Delta X^N (t,T_2)
+      \\
+      \vdots & \vdots & \vdots 
+      \\
+      \Delta X^1 (t,T_K) & \ldots & \Delta X^N (t,T_K)
+    \end {array}
+    \right]
+  & = &
+  \left[
+    \begin {array} {ccc}
+      \sigma_1 \beta (T_1) e^{-\kappa_1 (T_1-t)} & \ldots & \sigma_n \beta (T_1) e^{-\kappa_n (T_1-t)} 
+      \\
+      \sigma_1 \beta (T_2) e^{-\kappa_1 (T_2-t)} & \ldots & \sigma_n \beta (T_2) e^{-\kappa_n (T_2-t)} 
+      \\
+      \vdots & \vdots & \vdots 
+      \\
+      \sigma_1 \beta (T_K) e^{-\kappa_1 (T_K-t)} & \ldots & \sigma_n \beta (T_K) e^{-\kappa_n (T_K-t)} 
+    \end {array}
+    \right]
+  \cdot 
+  \left[
+    \begin {array} {ccc}
+      \Delta W_1^1 & \ldots & \Delta W_1^N
+      \\
+      \Delta W_2^1 & \ldots & \Delta W_2^N
+      \\
+      \vdots & \vdots 
+      \\
+      \Delta W_n^1 & \ldots & \Delta W_n^N
+    \end {array}
+    \right]
+  \\
+  & = & 
+  \left[
+    \begin {array} {c}
+      \beta (T_1) 
+      \\
+      \vdots 
+      \\
+      \beta (T_k)
+    \end {array}
+    \right]
+  \odot 
+  \exp \left( 
+  - 
+  \left[
+    \begin {array} {c}
+      T_1 - t
+      \\
+      \vdots 
+      \\
+      T_K - t
+    \end {array}
+    \right]
+  \cdot 
+  \left[
+    \begin {array} {ccc}
+      \kappa_1 & \ldots & \kappa_1
+    \end {array}
+    \right]
+  \right) 
+\end {eqnarray*}
+%
+Each such step can be done in parallel if the memory permits. After that a cumulative sum is taken if possible. Cumulative sum (cumsum) can be implemented as a left fold with the sum function. 
+% 
+The simulation of the log-normal model by writing 
+\begin {eqnarray*}
+  \dd \log F(t,T) = \dd X(t,T) - \frac 1 2 \dd \langle X, X \rangle 
+\end {eqnarray*}
+Denoting by  $ f(t,T) = \log F(t,T) $ we can write the discretizing equation 
+based on log terms as 
+\begin {eqnarray*}
+  f(t_i,T) - f(t_{i-1},T) = \Delta X(t_{i-1},T) - \frac 1 2 \Delta ^2 X(t_{i-1},t_i, T)
+\end {eqnarray*}
+We already handled the first part of the right hand side of the equation. 
+Now we have to efficiently compute the second part. Using equation 
+(\ref{factors}) we can write 
+\begin {eqnarray*}
+  \langle X, X \rangle (t_{i-1},t_i,T) & = & \int_{t_{i-1}}^{t_i}
+  \sum_{i,j=1}^n e^{- (\kappa_i + \kappa_j ) (T - t) } 
+  \sigma_i \sigma_j \rho_{ij} \beta (T)^2 \dd t
+  \\
+  & = & \sum_{i,j=1}^n \frac { e^{- (\kappa_i + \kappa_j ) (T - t_i)} - e^{- (\kappa_i + \kappa_j ) (T - t_{i-1})} } { \kappa_i + \kappa_j } 
+  \sigma_i \sigma_j \rho_{ij} \beta (T)^2 \dd t
+\end {eqnarray*}
+Therefore the second part of the equation above can be written in matrix 
+form as 
+\begin {eqnarray*}
+  \left[ 
+    \begin {array} {ccc}
+      \Delta ^2 X^1 (t,T_1) & \ldots & \Delta ^2 X^N (t,T_1)
+      \\
+      \Delta ^2 X^1 (t,T_2) & \ldots & \Delta ^2 X^N (t,T_2)
+      \\
+      \vdots & \vdots & \vdots 
+      \\
+      \Delta ^2 X^1 (t,T_K) & \ldots & \Delta ^2 X^N (t,T_K)
+    \end {array}
+    \right]
+  & = &
+  \left[ 
+    \begin {array} {c}
+      \Delta ^2 X (t,T_1) 
+      \\
+      \Delta ^2 X (t,T_2)
+      \\
+      \vdots 
+      \\
+      \Delta ^2 X (t,T_K) 
+    \end {array}
+    \right]
+  \cdot 
+  \left[ \begin {array} {ccc} 
+      1 & \ldots & 1 
+    \end {array}
+    \right]
+\end {eqnarray*}
+The matrix where $(i,j)$-th element is $\kappa_i + \kappa_j $ is given 
+by 
+\begin {eqnarray*} 
+  \podcc {B} = \podc {\kappa} \cdot \podc {1}' + \podc {1} \cdot \podc {\kappa}' .
+\end {eqnarray*}
+The matrix where the $(i,j)$-th element is $\sigma_i \sigma_j \rho_{ij}$ is 
+given by 
+\begin {eqnarray*} 
+  \podcc {C} = \podc {\sigma} \cdot \podc {1}' \odot 
+  \podcc {\rho} \odot \podc {1} \podc {\sigma}' .
+\end {eqnarray*}
+The whole matrix is then realized as 
+\begin {eqnarray*}
+  \sum \frac {\exp ( - \podcc {B} (T_k - t_i) ) - \exp ( - \podcc {B} (T_k - t_{i-1} )} 
+  { \podcc {B} }  \odot \podcc {C} \odot \beta (T_k)^2
+\end {eqnarray*}
+where the sum is considered over all elements of the matrix.
+
+The vector in the equation above can be realized as 
+
+
+%
+% SABR model 
+%
+%\input {sabr_model.tex}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%%
+%% bibliography 
+%%
+\begin{thebibliography}{10}
+
+\bibitem{dupire:99} Dupire, B., {\it Functional Ito Calculus}, preprint.
+
+
+\end{thebibliography}
+
+
+\appendix
+
+\section {Computations} 
+We have precomputed the following quantities:
+\begin {eqnarray*}
+  \E (N \cdot 1 (N < a) ) & = & - \frac { \exp (- a^2 /2 ) } { \sqrt { 2 \pi } }
+  \\
+  \E (N^2 \cdot 1 (N < a) ) & = & \frac 1 2 + \frac 1 2 erf ( a / \sqrt {2} ) -
+  \frac { e^{-a^2/2} a } {\sqrt {2 \pi} }   
+  \\
+  \E (N^3 \cdot 1 (N < a) ) & = & - \frac { (a^2 + 2) \exp (- a^2 /2 ) } { \sqrt { 2 \pi } }
+  \\
+  \E (N^4 \cdot 1 (N < a) ) & = & \frac 3 2 ( 1 + erf (a / \sqrt { 2} ) ) - 
+  \frac { a (a^2 + 3) e^{-a^2/2} } { \sqrt { 2 \pi } }
+  \\
+  \E (N \cdot 1 (N > a) ) & = & - E[N \cdot 1 (N<a) ]   
+  \\
+  \E (N^2 \cdot 1 (N > a) ) & = & 1 - E[N^2 \cdot 1 (N<a) ]   
+  \\
+  \E (N^3 \cdot 1 (N > a) ) & = & - E[N^3 \cdot 1 (N<a) ]   
+  \\
+  \E (N^4 \cdot 1 (N > a) ) & = & 3 - E[N^4 \cdot 1 (N<a) ]   
+\end {eqnarray*}
+In addition to the interval 
+
+\end{document}
+
