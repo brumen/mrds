@@ -111,7 +111,7 @@ class TollingModelLattice(object):
         # profit matrix/vector
         self.zero_matrix = self.zero_pp()
 
-        # the next power plant (pp) working condition
+        # the next power plant (power_prices) working condition
         self.work_pp_next = {"max": [], "min": []}  # max for max capacity, min for min cap.; only 2 states for now
         self.work_pp_curr = {"max": [], "min": []}
         self.work_pp_curr_ind = [{"max": [], "min": []}] * 60  # indicator for the max, min
@@ -143,25 +143,23 @@ class TollingModelLattice(object):
             self.sg_xs = gpa.to_gpu(np.array(sg.sg_p(1, sg_level)).flatten())
 
     def zero_pp(self):
-        """
-        Construction of the zero matrix
+        """ Construction of the zero matrix
 
         """
 
         if not self.cuda:
             if self.fuel_ind:
                 return np.zeros((self.lattice_size, self.lattice_size))  # matrix
-            else:
-                return np.zeros(self.lattice_size)  # vector
-        else:
-            if self.fuel_ind:
-                return gpa.zeros((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
-            else:
-                return gpa.zeros(self.lattice_size, dtype=self.dtype_used)  # vector
+
+            return np.zeros(self.lattice_size)  # vector
+
+        if self.fuel_ind:
+            return gpa.zeros((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
+
+        return gpa.zeros(self.lattice_size, dtype=self.dtype_used)  # vector
 
     def maximum_2(self, x, y, keep_dec=False):
-        """
-        computes the maximum and the indices:
+        """ computes the maximum and the indices:
           0 for 1st, 1 for 2nd)
 
         :param x: maximum over these and y is taken
@@ -178,8 +176,8 @@ class TollingModelLattice(object):
         if keep_dec:
             xy_ind = (xy_max == y)
             return xy_max, xy_ind
-        else:
-            return xy_max, 0
+
+        return xy_max, 0
 
     def maximum_3(self, x, y, z, keep_dec=False):
         """
@@ -274,36 +272,41 @@ class TollingModelLattice(object):
         """
         constructs a transition matrix
         """
+
         if step_nb == len(self.hours_seq) - 1:  # last step, no transition
             if not self.cuda:
                 return np.zeros((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
-            else:
-                return gpa.zeros((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
-        else:
-            F_next_v = self.lattice_seq[step_nb]  # next lattice
-            F_curr_v = self.lattice_seq[step_nb+1]  # curr. lattice
-            if not self.cuda:
-                P_m = np.empty((self.lattice_size, self.lattice_size))
-                P_m_tmp = np.zeros(self.lattice_size + 1)  # tmp. mtx for taking differences
-            else:
-                P_m = gpa.empty((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
-                P_m_tmp = gpa.zeros(self.lattice_size + 1, dtype=self.dtype_used)
-            for (F_curr_idx, F_curr) in enumerate(F_curr_v):
-                P_m[F_curr_idx, :] = self.tm_ln_blocks_sg_fast(F_next_v.reshape((self.lattice_size, 1)),
-                                                               F_curr,
-                                                               self.market_seq[step_nb+1]["fwd"],
-                                                               self.market_seq[step_nb]["fwd"],
-                                                               self.market_seq[step_nb+1]["sigma_C"],
-                                                               self.market_seq[step_nb]["sigma_C"],
-                                                               0.9,  # rho WRONG WRONG WRONG
-                                                               np.sum(self.t_diff_seq[:step_nb+2]),
-                                                               self.t_diff_seq[step_nb+2])  # WRONG WRONG # .flatten()
-                # if np.abs(P_m[F_curr_idx, -1]) > 1e-2:
-                #     P_m_tmp[1:] = P_m[F_curr_idx, :] / P_m[F_curr_idx, -1]  # normalization - CHECK CHECK
-                # P_m[F_curr_idx, :] = np.diff(P_m_tmp)
 
-            logger.debug("Finished generating matrix = ", np.sum(P_m, axis = 1))
-            return P_m
+            return gpa.zeros((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
+
+        # not at the last stop
+        F_next_v = self.lattice_seq[step_nb]  # next lattice
+        F_curr_v = self.lattice_seq[step_nb+1]  # curr. lattice
+
+        if not self.cuda:
+            P_m = np.empty((self.lattice_size, self.lattice_size))
+            P_m_tmp = np.zeros(self.lattice_size + 1)  # tmp. mtx for taking differences
+
+        else:
+            P_m = gpa.empty((self.lattice_size, self.lattice_size), dtype=self.dtype_used)
+            P_m_tmp = gpa.zeros(self.lattice_size + 1, dtype=self.dtype_used)
+
+        for (F_curr_idx, F_curr) in enumerate(F_curr_v):
+            P_m[F_curr_idx, :] = self.tm_ln_blocks_sg_fast(F_next_v.reshape((self.lattice_size, 1)),
+                                                           F_curr,
+                                                           self.market_seq[step_nb+1]["fwd"],
+                                                           self.market_seq[step_nb]["fwd"],
+                                                           self.market_seq[step_nb+1]["sigma_C"],
+                                                           self.market_seq[step_nb]["sigma_C"],
+                                                           0.9,  # rho WRONG WRONG WRONG
+                                                           np.sum(self.t_diff_seq[:step_nb+2]),
+                                                           self.t_diff_seq[step_nb+2])  # WRONG WRONG # .flatten()
+            # if np.abs(P_m[F_curr_idx, -1]) > 1e-2:
+            #     P_m_tmp[1:] = P_m[F_curr_idx, :] / P_m[F_curr_idx, -1]  # normalization - CHECK CHECK
+            # P_m[F_curr_idx, :] = np.diff(P_m_tmp)
+
+        logger.debug("Finished generating matrix = ", np.sum(P_m, axis = 1))
+        return P_m
 
     def transit_val(self, P_m, H_m, G_m):
         """
@@ -360,9 +363,9 @@ class TollingModelLattice(object):
                , 'lattice_seq' : lattice_seq}
 
     def running_profit(self, blocks_nb):
-        """
-        Running profit function
+        """ Running profit for block nb_sims block_nb.
 
+        :param blocks_nb: number of the block for which the running profit is computed.
         """
 
         # fixed tolling  TODO: gas tolling TO CORRECT TO CORRECT TO CORRECT
@@ -396,7 +399,7 @@ class TollingModelLattice(object):
         """
         Ut_curr ... current uptime of the PP
         Dt_curr ... current downtime of the PP
-        block_nb ... which block nb in the month are we currently at
+        block_nb ... which block nb_sims in the month are we currently at
         start_nb ... number of startups of the PP in that month NOT IMPLEMENTED YET
         """
         profit_max, profit_min = self.running_profit(block_nb)
@@ -485,9 +488,9 @@ class TollingModelLattice(object):
         return state_mtx
 
     def overwrite_next_w_curr(self):
+        """ Generates work_pp_next, idle_pp_next from the current.
         """
-        generates work_pp_next, idle_pp_next from the current
-        """
+
         for work_pp_ind in range(self.MUT+1):
             self.work_pp_next["max"][work_pp_ind] = self.work_pp_curr["max"][work_pp_ind]
             self.work_pp_next["min"][work_pp_ind] = self.work_pp_curr["min"][work_pp_ind]
@@ -538,9 +541,8 @@ class TollingModelLattice(object):
         return np.dot(pdf_Tm, best_strategy)  # works faster than np.sum
 
 
-class tolling_model_lattice_all(object):
-    """
-    Summing over all the months in the previous model
+class TollingModelLatticeAll:
+    """ Summing over all the months in the previous model
 
     """
 
@@ -553,9 +555,8 @@ class tolling_model_lattice_all(object):
                 , cuda_ind = False ):
         """
 
-
-        params ... same format as for TollingModelLattice
-        market ... market_v.Fv = vector of forward prices
+        :param params: same format as for TollingModelLattice
+        :param market: market_v.Fv = vector of forward prices
                    market_v.sigma_Fv ... vec. of vols
                    market_v.sigma_Cv ... vec. of cash vols
         blocks ... structure of the blocks
@@ -579,12 +580,13 @@ class tolling_model_lattice_all(object):
         tm_curr_val = tm_curr.tolling_value()
         return tm_curr_val
 
-    def compute_val(self, display=False, mp_ind=False):
+    def compute_val(self, mp_ind=False):
         """
         computes the value of the tolling
         :param mp_ind: whether to do this model in parallel
         """
         self.total_val = 0.
+
         if not mp_ind:
             for m in range(self.nb_months):
                 tm_curr_val = self.compute_val_one_month(m)

@@ -175,7 +175,7 @@ class TollingModel:
                             , manual_adj           = None):
         """ Simulate spot prices in the tolling model, by blocks.
 
-        :param nb_sim: nb. simulations
+        :param nb_sim: nb_sims. simulations
         :param days_partition: partition of the week, e.g. [[0,1,2,3,4],[5,6]]
         :param days_parition_names: partition names ['weekday', 'weekend']
         :param power_block_names: power blocks

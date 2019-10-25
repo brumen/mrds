@@ -5,6 +5,7 @@
 import config 
 
 import numpy as np
+from typing import Dict
 
 if config.CUDA_PRESENT:
     import pycuda.autoinit
@@ -26,23 +27,33 @@ class TollingModelLSM:
 
     """
 
-    def __init__(self, params):
-        self.nb_steps = params.nb_steps
-        self.tolling_fast = params.tolling_fast # using the fast tensor routine from tolling_fast.pyx
-        self.tolling_fast_mt = params.tolling_fast_mt # using raw multi-threading 
-        self.params = params ## THIS CAN PERHAPS BE REMOVED LATER
-        self.lattice_size = params.lattice_size
-        self.minimum_downtime = params.MDT
-        self.minimum_uptime = params.MUT
-        self.maxCap = params.maxCap
-        self.minCap = params.minCap
+    def __init__( self
+                , nb_steps     : int
+                , lattice_size : int
+                , tolling_params : Dict ):
+        """
+
+        :param nb_steps: number of steps in the lattice
+        :param lattice_size: size of the lattice
+        :param tolling_params: tolling parameters for the month
+        """
+
+        self.nb_steps = nb_steps
+
+        #self.tolling_fast = params.tolling_fast # using the fast tensor routine from tolling_fast.pyx
+        #self.tolling_fast_mt = params.tolling_fast_mt # using raw multi-threading
+
+        self.lattice_size = lattice_size
+        self.minimum_downtime = tolling_params['MDT']
+        self.minimum_uptime   = tolling_params['MUT']
+        self.maxCap           = tolling_params['maxCap']
+        self.minCap           = tolling_params['minCap']
 
         # initial values of power, fuel
-        self.F0 = params.F0 # forward price for that month 
-        self.K = params.K  # cost of dispatch 
-        self.sigma_F = params.sigma_F # forward vol for the month 
-        self.sigma_C = params.sigma_C # cash vol for the month 
-        # lattice construction 
+        self.F0               = tolling_params['F0'] # forward price for that month
+        self.K                = tolling_params['K']  # cost of dispatch
+        self.sigma_F          = tolling_params['sigma_F']  # forward vol for the month
+        self.sigma_C          = tolling_params['sigma_C']  # cash vol for the month
 
     @property
     def F_v(self):
@@ -51,31 +62,35 @@ class TollingModelLSM:
         TODO: FIX THIS, THIS IS JUNK.
         """
 
-        return self.F0 * np.exp(-1. + np.arange (np.double (self.params.lattice_size))/np.double (self.params.lattice_size) * 2.)
+        return self.F0 * np.exp(-1. + np.arange (np.double (self.lattice_size))/np.double (self.lattice_size) * 2.)
 
-    def daily_sim(self, F_v, sigma_v, cash_v, T_v, nb):
-        """
-            # daily simulation
-    # F_v ... monthly forwards
-    # sigma_v ... monthly vols
-    # cash_v ... cash vols
-    # assumption ... 30 days in a month
-    # T_v ... forwards for these times
-    # nb ... number of simulations
-    # bunch of correlations, but let's leave that aside
-    # output:
-    #
+    def daily_sim(self, F_v, sigma_v, cash_v, T_v, nb_sims : int):
+        """ Daily simulation.
+
+        :param F_v:  monthly forwards
+        # sigma_v ... monthly vols
+        # cash_v ... cash vols
+        # assumption ... 30 days in a month
+        # T_v ... forwards for these times
+        :param nb_sims: number of simulations
+        # bunch of correlations, but let's leave that aside
+        # output:
+        #
 
         """
+
         all_sim = []
 
         for (F, sigma, sigma_cash, T) in zip(F_v, sigma_v, cash_v, T_v): # simulate the month_v 
-            initial_v = np.random.lognormal (mean = np.log (F) - 0.5 * sigma**2 * T, sigma=sigma * np.sqrt(T) , size = nb)
+            initial_v = np.random.lognormal (mean = np.log (F) - 0.5 * sigma**2 * T, sigma=sigma * np.sqrt(T), size = nb_sims)
             
-            #day_curr = initial_v
-            day_incr = np.concatenate(([np.log(initial_v)], np.log (np.random.lognormal (mean = - 0.5 * sigma_cash**2 * (1./365.), sigma=sigma_cash * sqrt (1./365.), size = (29, nb)) ) ), axis=0)
+            day_incr = np.concatenate(( [np.log(initial_v)]
+                                      , np.log(np.random.lognormal(mean  = - 0.5 * sigma_cash**2 * (1./365.)
+                                                                   , sigma = sigma_cash * np.sqrt (1./365.)
+                                                                   , size  = (29, nb_sims))))
+                                      , axis=0 )
             
-            all_sim.append (exp (cumsum(day_incr.transpose(),1)) )
+            all_sim.append(np.exp(np.cumsum(day_incr.transpose(), 1)))
 
         return all_sim
 
@@ -111,7 +126,7 @@ class TollingModelLSM:
             cumsum_prod ( day_incr, block=block_sel, grid=grid_sel)  # cumsum on day_incr
 
             # day_curr = initial_v
-            # day_incr = concatenate(([log(initial_v)], log (numpy.random.lognormal (mean = - 0.5 * sigma_cash**2 * (1./365.), sigma=sigma_cash * sqrt (1./365.), size = (29, nb)) ) ), axis=0)
+            # day_incr = concatenate(([log(initial_v)], log (numpy.random.lognormal (mean = - 0.5 * sigma_cash**2 * (1./365.), sigma=sigma_cash * sqrt (1./365.), size = (29, nb_sims)) ) ), axis=0)
             
             #all_sim.append (exp (cumsum(day_incr.transpose(),1)) )
             all_sim.append (day_incr)

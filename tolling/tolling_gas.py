@@ -134,7 +134,7 @@ class tolling_model_lattice_gas():
             self.work_curr_tmp = gpa.to_gpu(self._zeroPP()).astype(np.float32)
             self.idle_curr_tmp = gpa.to_gpu(self._zeroPP()).astype(np.float32)
 
-        # the next power plant (pp) working condition 
+        # the next power plant (power_prices) working condition
         self.work_pp_next = {"max": list_zero_pp(self.MUT+1),
                              "min": list_zero_pp(self.MUT+1)}
         self.work_pp_curr = {"max": list_zero_pp(self.MUT+1),
@@ -391,7 +391,7 @@ class tolling_model_lattice_gas():
         """
         :param Ut_curr: current uptime of the PP
         :param Dt_curr: current downtime of the PP
-        :param block_nb: which block nb in the month are we currently at
+        :param block_nb: which block nb_sims in the month are we currently at
         :param start_nb: number of startups of the PP in that month NOT IMPLEMENTED YET
         """
 
