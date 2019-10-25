@@ -24,7 +24,7 @@ from vols.vols_basic import black_vol_inverse
 
 from forward_curve import FwdCurve
 from quartic.quartic_cy import QuadRoots, CubicRoots, QuarticRoots
-from opd.opd_avx   import skew_fom
+from tolling.opd import skew_fom
 from discount      import DiscountCurve
 
 logger = Logger(__name__)
@@ -1333,8 +1333,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                             , nb_simulations : int
                             , sim_times      : List[datetime.date]
                             , tenors_list = None
-                            , seed = None
-                            , model = 'skew'):
+                            , seed        = None
+                            , model       = 'skew'):
         """ Simulate first of month (fom) curves.
 
         generates a list of 2 dim arrays:
@@ -1342,7 +1342,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
            2-nd dim: simulation
 
         :param asset: asset for which to simulate, e.g. 'WTI'
-        :param nb_simulations: nb. of simulations
+        :param nb_simulations: number of simulations
         :param sim_times: simulation times
         :param tenors_list: list of tenors to simulate TODO: LOTS TO DISCUSS HERE!!!
         :param model: which model: 'ln' or 'skew', default 'skew'
@@ -1360,7 +1360,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         for tenor_idx, tenor_date in enumerate(tenors_list):
             t_curr = sim_times[tenor_idx]
             F_curr = self.fwd_curve_names(asset)[tenor_date]
-            nb_factors = np.sum(self.nb_factors_for_asset(asset))  # total nb. of factors
+            nb_factors = np.sum(self.nb_factors_for_asset(asset))  # total number of factors
             simulated_rn = np.random.multivariate_normal( np.zeros(nb_factors)
                                                         , complete_corr_mtx
                                                         , size=nb_simulations)

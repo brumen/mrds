@@ -1,49 +1,42 @@
-#   skew model for forward curves
+#   skew model used for tolling.
 #
-from config import work_dir, CUDA_PRESENT
-import numpy as np
 
-# cuda (this can be imported even if cuda is not present)
+import numpy as np
+import logging
+
+from typing import List
+
+from config import work_dir, CUDA_PRESENT
+from mrds   import ComSkew
+
 if CUDA_PRESENT:
     import pycuda.curandom
     import pycuda.gpuarray as gpa
     import pycuda.cumath
-    from pycuda.cumath import exp as cuExp, sqrt as cuSqrt
     from pycuda.compiler import SourceModule
-    import curand  # TODO: THIS IS WRONG
-
-import matplotlib as mpl
-mpl.use('TkAgg')
-
-if CUDA_PRESENT:
     from cuda import cuda_ops
     from cuda.cuda_ops import matmul
 
-import logging
+
 logger = logging.Logger(__name__)
 
-
-# F skew implementation
-if CUDA_PRESENT:
-    F_skew_el = open(work_dir + 'cuda/skew_tsf.c', 'r').read()
-    F_skew_mod = SourceModule(F_skew_el)
-    F_skew_fct = F_skew_mod.get_function('F_skew_tsf')
-
-
-from mrds import ComSkew
+# if CUDA_PRESENT:
+#     F_skew_el = open(work_dir + 'cuda/skew_tsf.c', 'r').read()
+#     F_skew_mod = SourceModule(F_skew_el)
+#     F_skew_fct = F_skew_mod.get_function('F_skew_tsf')
 
 
 class ComSkewTolling(ComSkew):
-    """
-    Adds the methods responsible only for tolling simulation, etc.
-
+    """ Adds the methods responsible only for tolling simulation, etc.
     """
 
     @staticmethod
     def generate_days_vecs(hours_partition, days_partition, cuda_ind=False):
-        """
-        Generate days for simulate_spot_blocks.
+        """ Generate days for simulate_spot_blocks.
 
+        :param hours_partition: partition of day in blocks
+        :param days_partition: partition of the week in blocks, e.g. [[0,1,2,3,4], [5,6]] means that
+                               days 0-4 are one block, and 5,6 are another block
         """
 
         # construct the equiv. of days = range(31)/365.25
@@ -53,70 +46,43 @@ class ComSkewTolling(ComSkew):
             hours_for_day_week = [hp for (hp, dp) in zip(hours_partition, days_partition)
                                   if day_week in dp][0]
             days = np.append(days, days[-1] + np.cumsum(hours_for_day_week)/24./365.25)
-        days_d = gpa.to_gpu(days).astype(np.float32)
+        days_d = gpa.to_gpu(days)
 
         if cuda_ind:
-            days_diff = gpa.empty(len(days), dtype=np.float32)
-            days_diff[0] = np.array(0., dtype=np.float32)
-            days_diff[1:] = np.diff(days).astype(np.float32)
+            days_diff = gpa.empty(len(days))
+            days_diff[0] = np.array(0.)
+            days_diff[1:] = np.diff(days)  # TODO: WHY IS np. here ???
         else:
             days_diff = np.empty(len(days))
             days_diff[0] = 0.
             days_diff[1:] = np.diff(days)
 
-        days_diff_l = len(days_diff)
-
-        return days, days_d, days_diff, days_diff_l
-
-    def simulate_spot_blocks_all(self, nb_simulations,
-                                 days_partition, hours_partition,
-                                 tenors_chosen=None,
-                                 set_seed=None,
-                                 cuda_ind=False):
-        """
-        Same as simulate_spot_blocks, but for all blocks
-
-        """
-
-        days_tuple = self.generate_days_vecs(hours_partition,
-                                             days_partition,
-                                             cuda_ind=cuda_ind)
-
-        return [self.simulate_spot_blocks( asset_nb
-                                         , nb_simulations
-                                         , days_partition
-                                         , hours_partition
-                                         , days_tuple
-                                         , tenors_chosen = tenors_chosen
-                                         , set_seed      = set_seed
-                                         , cuda_ind      = cuda_ind )
-                for asset_nb in range(self.nb_assets)]
+        return days, days_d, days_diff
 
     def simulate_spot_blocks( self
-                            , asset_nb
+                            , assets : List[str]
                             , nb_simulations
                             , days_partition
                             , hours_partition
-                            , days_tuple
                             , tenors_chosen = None
                             , set_seed      = None
-                            , cuda_ind      = False):
-        """
+                            , cuda_ind      = False ):
+        """ Same as simulate_spot_blocks, but for all blocks.
         Simulates the spots from this model, used for a tolling model.
 
+        :param asset: asset which to simulate.
         :param days_partition: a partition of days in the week, i.e. [[0, 1, 2, 3, 4], [5, 6]]
         :type days_partition: list[list[int]]
         :param hours_partition: [hours for blocks, e.g. [[6, 18], [12, 12]]
         :type hours_partition: list[list[int]]
         """
 
+        days_tuple = self.generate_days_vecs(hours_partition, days_partition, cuda_ind=cuda_ind)
+
         # construct the equiv. of days = range(31)/365.25
         days, days_d, days_diff, days_diff_l = days_tuple
-        fom_sims_all = self.simulate_curves_fom(asset_nb, nb_simulations,
-                                                tenors_list=tenors_chosen,
-                                                set_seed=set_seed,
-                                                cuda_ind=cuda_ind)
-        self.gen_days_number(asset_nb)
+        fom_sims_all = self.simulate_curves_fom(assets, nb_simulations, tenors_list=tenors_chosen, seed=set_seed)
+        self.gen_days_number(asset)  # TODO: FIX THIS HERE!!!
         self.gen_spot_rn(nb_simulations, cuda_ind=cuda_ind)
 
         spot_sims = {}
