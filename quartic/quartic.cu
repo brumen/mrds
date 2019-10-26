@@ -1,9 +1,7 @@
 /*
 ** quartic.c
 ** 
-** Made by (brumen)
-** Login   <brumen@prasic>
-** 
+**
 ** Started on  Sun Jul  3 11:07:10 2011 brumen
 ** Last update Sun May 12 01:17:25 2002 Speed Blue
 */
@@ -557,7 +555,7 @@ __global__ void comp_quartic (float (*p_mat)[5], float (*r_mat)[3][5]) {
 
 // computes the truncated E[ N^{0,1,2,3,4} * 1(N <a) ] where N std. normal
 // in succession 
-/* __device__ float  __trunc_normal_above__(float a, float N[5]): */
+/* __device__ float  _trunc_normal_above(float a, float N[5]): */
 /*   return array([ normcdf (a) ,  */
 /*                  - exp ( - a*a / 2.0 ) / sqrt (2 * pi),		\ */
 /* 		 0.5 + 0.5 * scipy.special.erf (a / sqrt (2) ) -	\ */
@@ -569,10 +567,10 @@ __global__ void comp_quartic (float (*p_mat)[5], float (*r_mat)[3][5]) {
 
 /*   // computes the truncated E[ N^{0,1,2,3,4} * 1(N >a) ] where N std. normal */
 /*   // in succession  */
-/*     def __trunc_normal_below__(self, a): */
-/*         return - self.__trunc_normal_above__(a) + array([1.0, 0.0, 1.0, 0.0, 3.0]) */
+/*     def _trunc_normal_below(self, a): */
+/*         return - self._trunc_normal_above(a) + array([1.0, 0.0, 1.0, 0.0, 3.0]) */
 
 /*     # computes the truncated E[ N^{0,1,2,3,4} * 1(a < N <b) ] where N std. normal */
 /*     # in succession  */
-/*     def __trunc_normal_interval__(self, a, b): */
-/*         return self.__trunc_normal_above__(b) - self.__trunc_normal_above__ (a) */
+/*     def _trunc_normal_interval(self, a, b): */
+/*         return self._trunc_normal_above(b) - self._trunc_normal_above (a) */

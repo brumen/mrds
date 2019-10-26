@@ -3,23 +3,24 @@
 # write unittests
 # 
 
-import config # very general config
-from numpy import *
-import numpy.random 
+import config
+import numpy as np
 
+import pycuda.autoinit
+import pycuda.gpuarray as gpa
 
-j = complex (0.,1.) # complex number 
+j = complex (0.,1.)
 
 
 # quadratic function solution on cuda 
 # pols ... matrix of Nx3 
 # result is in a form Nx5 matrix, the roots are on 1,2 places 
 def quadr_cuda(pols):
-    nb_pols = shape (pols)[0]
-    rts = zeros ( (nb_pols,3,5) )
+    nb_pols = np.shape(pols)[0]
+    rts = np.zeros((nb_pols, 3, 5))
 
-    coef_mat = config.gpuarray.to_gpu ( pols ).astype(float32)
-    sol_mat = config.gpuarray.to_gpu ( rts ).astype(float32)
+    coef_mat = gpa.to_gpu ( pols ).astype(float32)
+    sol_mat  = gpa.to_gpu ( rts ).astype(float32)
     quartic_string = open ("quartic.cu").read()
     quad_sol = config.SourceModule(quartic_string).get_function ("comp_quadr")
     quad_sol (coef_mat, sol_mat, block=(1,1,1),grid=(nb_pols,1) ) # TO IMPROVE TO IMPROVE 
@@ -57,24 +58,22 @@ def quartic_cuda(pols):
     return sol_mat.get()
 
 
-
-
-# Roots of poly p[0] x^2 + p[1] x+p[2]=0
-# p[0] != 0 
 def QuadRoots(p):
-    
+    """ Solves for the roots of poly p[0] x^2 + p[1] x+ p[2]=0. p[0] != 0
+    """
+
     b  = -p[1]/p[0]/2.
     c  =  p[2]/p[0]
     d2 =  b*b - c
     
-    r = zeros (2, dtype = complex )
+    r = np.zeros(2, dtype = complex )
 
     if( d2 >= 0. ):
-        d         = sqrt(d2)
+        d         = np.sqrt(d2)
         r[0] = b-d 
         r[1] = b+d
     else:
-        d       = sqrt(-d2)
+        d       = np.sqrt(-d2)
         r[0] = b + d*j 
         r[1] = b - d*j 
 
@@ -98,7 +97,7 @@ def CubicRoots( p ):
     d = b*b - c
 
     if( d >= 0. ):
-        d = (sqrt(d) + abs(b) )**(1.0/3.0)
+        d = (np.sqrt(d) + abs(b) )**(1.0/3.0)
     
         # if( d != 0. ):
         #     if( b > 0. ):
@@ -109,7 +108,7 @@ def CubicRoots( p ):
 
         c = c * (d == 0.) + t/b * (d != 0.)
         b = b * (d == 0.) + (-d) * ( d != 0. and b>0.) + d * (d !=0. and b <= 0.)
-        d =  sqrt(0.75) * (b - c)
+        d =  np.sqrt(0.75) * (b - c)
         b =  b + c
         c = -0.5 * b - x
         r[1] = c + d * j # first root 
@@ -118,28 +117,25 @@ def CubicRoots( p ):
 
     else:
         if( b == 0. ):
-            d =  arctan(1.0)/1.5
+            d =  np.arctan(1.0)/1.5
         else:
-            d =  arctan( sqrt(-d)/abs(b) )/3.0 
+            d =  np.arctan( np.sqrt(-d)/abs(b) )/3.0
 
-        if( b < 0. ):
-            b =  sqrt(t)*2.0
-        else:
-            b = -2.0*sqrt(t)
+        b =  np.sqrt(t)*2.0 if b < 0 else -2.0*np.sqrt(t)
 
-        c =  cos(d) * b
-        t = - sqrt(0.75) * sin(d) * b - 0.5 * c
+        c = np.cos(d) * b
+        t = - np.sqrt(0.75) * np.sin(d) * b - 0.5 * c
         d = -t - c - x
         c =  c - x
         t =  t - x
 
-        if( abs(c) > abs(t) ):
+        if abs(c) > abs(t):
             r[2] = c
         else:
             r[2] = t
             t    = c
 
-        if( abs(d) > abs(t) ):
+        if abs(d) > abs(t):
             r[1] = d
         else:
             r[1] = t
@@ -149,14 +145,10 @@ def CubicRoots( p ):
 
     return r
 
-
-
-
-#
-# Roots of poly p[0] x^4 + p[1] x^3...+p[4]=0
-# p[0] (leading term) _HAS_ to be 1.
-# CHECK CHECK IF THIS WORKS AGAIN..
 def BiquadRoots(p_in):
+    """ Roots of poly p[0] x^4 + p[1] x^3...+p[4]=0
+        p[0] (leading term) _HAS_ to be 1.
+    """
 
     e = 0.25 * p_in[1]
     b = 2. * e
@@ -167,14 +159,13 @@ def BiquadRoots(p_in):
     c = p_in[4] + e * ( e * a - p_in[3] )
     a = a - d
 
-    p = zeros (4)
+    p = np.zeros(4)
     p[0] = p_in[0]
     p[1] = 0.5 * a
     p[2] = ( p[1] * p[1] - c ) * 0.25
     p[3] = b * b / (-64.0)
 
-    r = zeros(4, dtype=complex)
-
+    r = np.zeros(4, dtype=complex)
 
     if( p[3] < 0. ):
         r[0], r[1], r[2] = CubicRoots(p)
@@ -184,11 +175,11 @@ def BiquadRoots(p_in):
                 a = a + d
 
                 if ( a >= 0. and b >= 0.):
-                    p[1] =   sqrt(d)
+                    p[1] =   np.sqrt(d)
                 elif ( a <= 0. and b <= 0.):
-                    p[1] =   sqrt(d)
+                    p[1] =   np.sqrt(d)
                 else:
-                    p[1] = - sqrt(d)
+                    p[1] = - np.sqrt(d)
 
                 b = 0.5*( a + b/p[1] )
                 p[2]    = c/b
@@ -204,19 +195,19 @@ def BiquadRoots(p_in):
                 for i in range (4):
                     r[i] += - e
 
-    if( p[2] < 0. ):
-        b    = sqrt(c)
+    if p[2] < 0.:
+        b    = np.sqrt(c)
         d    = b + b - a
         p[1] = 0.
     
         if( d > 0. ):
-            p[1] = sqrt(d)
+            p[1] = np.sqrt(d)
 
     else:
         if( p[1] > 0.):
-            b =   sqrt(p[2])*2.0 + p[1]
+            b =   np.sqrt(p[2])*2.0 + p[1]
         else:
-            b = - sqrt(p[2])*2.0 + p[1]
+            b = - np.sqrt(p[2])*2.0 + p[1]
 
         if( b != 0.):
             p[1] = 0.
@@ -240,23 +231,20 @@ def BiquadRoots(p_in):
 
     return r
 
-
-
-# general quartic equation 
-# p[0] ... leading term _HAS_ to be 0 
-# Roots of poly p[0] x^4 + p[1] x^3...+p[4]=0
-# UNITTEST THIS
 def QuarticRoots(p_in):
-
+    """ General quartic equation
+        p[0] ... leading term _HAS_ to be 0
+        Roots of poly p[0] x^4 + p[1] x^3...+p[4]=0
+    """
     a3 = p_in[1]
     a2 = p_in[2]
     a1 = p_in[3]
     a0 = p_in[4]
 
-    r = zeros (4, dtype=complex)
+    r = np.zeros(4, dtype=complex)
 
     # resolvent cubic equation cofs:
-    p = zeros (4)
+    p = np.zeros(4)
     p[0] = p_in[0]
     p[1] = - a2
     p[2] = a1 * a3 - 4. * a0
@@ -265,8 +253,8 @@ def QuarticRoots(p_in):
     r[0], r[1], r[2] = CubicRoots(p)
 
     # finding real roots
-    reRoots = array([r[0], r[1], r[2] ])[ array([r[0], r[1], r[2] ]) == \
-                                         array([r[0], r[1], r[2] ]).real ]
+    reRoots = np.array([r[0], r[1], r[2] ])[ np.array([r[0], r[1], r[2] ]) == \
+                                         np.array([r[0], r[1], r[2] ]).real ]
     y1 = min (reRoots) 
 
     R2 = 0.25 * a3 * a3 - a2 + y1
@@ -277,32 +265,32 @@ def QuarticRoots(p_in):
 
 
     if( R2 > 0.):
-        R = sqrt(R2)
+        R = np.sqrt(R2)
         D2 = a + b/R
         E2 = a - b/R
 
         if( D2 >= 0. ):
-            D       = sqrt(D2)
+            D       = np.sqrt(D2)
             r[0] = -0.25*a3 + 0.5*R + 0.5*D
             r[1] = -0.25*a3 + 0.5*R - 0.5*D
         else:
-            D       = sqrt(-D2)
+            D       = np.sqrt(-D2)
             r[0] = -0.25 * a3 + 0.5 * R + j * 0.5 * D
             r[1] = -0.25 * a3 + 0.5 * R - j * 0.5 * D
 
         if( E2 >= 0. ):
-            E       = sqrt(E2)
+            E       = np.sqrt(E2)
             r[2] = -0.25 * a3 - 0.5 * R + 0.5 * E
             r[3] = -0.25 * a3 - 0.5 * R - 0.5 * E
         else:
-            E       = sqrt(-E2)
+            E       = np.sqrt(-E2)
             r[2] = -0.25 * a3 - 0.5 * R + j * 0.5 * E
             r[3] = -0.25 * a3 - 0.5 * R - j * 0.5 * E
 
     elif ( R2 < 0.):
-        R = sqrt(-R2)
+        R = np.sqrt(-R2)
 
-        CD2_abs_sqrt = sqrt(sqrt( a*a + b*b/R/R))
+        CD2_abs_sqrt = np.sqrt(np.sqrt( a*a + b*b/R/R))
         CD2_theta = arctan ( - b / R / a )
         real_CD = CD2_abs_sqrt * cos ( CD2_theta/2.) 
         imag_CD = CD2_abs_sqrt * sin ( CD2_theta/2.)
@@ -319,31 +307,31 @@ def QuarticRoots(p_in):
     else:  # R2=0 case
 
         if(d >= 0.):
-            D2 = c + sqrt(d)
-            E2 = c - sqrt(d)
+            D2 = c + np.sqrt(d)
+            E2 = c - np.sqrt(d)
 
             if( D2 >= 0. ):
-                D       = sqrt(D2)
+                D       = np.sqrt(D2)
                 r[0] = -0.25 * a3 + 0.5 * R + 0.5 * D
                 r[1] = -0.25 * a3 + 0.5 * R - 0.5 * D
             else:
-                D       = sqrt(-D2)
+                D       = np.sqrt(-D2)
                 r[0] = -0.25*a3 + 0.5*R + j * 0.5 * D
                 r[1] = -0.25*a3 + 0.5*R - j * 0.5 * D
 
             if( E2 >= 0. ):
-                E       = sqrt(E2)
+                E       = np.sqrt(E2)
                 r[2] = -0.25 * a3 - 0.5 * R + 0.5 * E
                 r[3] = -0.25 * a3 - 0.5 * R - 0.5 * E
             else:
-                E       = sqrt(-E2)
+                E       = np.sqrt(-E2)
                 r[2] = -0.25*a3 - 0.5*R + j * 0.5 * E
                 r[3] = -0.25*a3 - 0.5*R - j * 0.5 * E
 
         else:
-            ds = sqrt(-d)
+            ds = np.sqrt(-d)
 
-            CD2_abs_sqrt = sqrt(sqrt( c*c + ds*ds))
+            CD2_abs_sqrt = np.sqrt(np.sqrt( c*c + ds*ds))
             CE2_theta = arctan ( ds / c)
             real_CD = CD2_abs_sqrt * cos ( CE2_theta/2.)
             imag_CD = CD2_abs_sqrt * sin ( CE2_theta/2.)
