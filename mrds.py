@@ -1240,9 +1240,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             factor_corr_mat = self.__factor_corr_mat_multiple(assets)
             simulated_rn    = self.__class__.__simulate_std_normal( total_nb_factors, factor_corr_mat, nb_simulations )
 
-            old_cov_mat = factor_corr_mat
-            old_chol_inv = np.linalg.inv(np.linalg.cholesky(old_cov_mat))
-            sims_Z_unit = np.dot(old_chol_inv, simulated_rn.transpose())  # TODO: CHECK HERE
+            sims_Z_unit = np.dot( np.linalg.inv(np.linalg.cholesky(factor_corr_mat))
+                                , simulated_rn.transpose())
 
             for asset in assets:
                 for tenor_idx, tenor_nb in enumerate(tenor_list):
