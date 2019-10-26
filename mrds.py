@@ -22,10 +22,11 @@ from vols.vols     import Volatility
 from vols.vols_get import get_vol_object
 from vols.vols_basic import black_vol_inverse
 
-from forward_curve import FwdCurve
-from quartic.quartic_cy import QuadRoots, CubicRoots, QuarticRoots
-from tolling.opd import skew_fom
-from discount      import DiscountCurve
+from forward_curve       import FwdCurve
+from discount            import DiscountCurve
+from quartic.quartic_cy  import QuadRoots, CubicRoots, QuarticRoots
+from tolling.opd.opd_avx import skew_fom
+
 
 logger = Logger(__name__)
 

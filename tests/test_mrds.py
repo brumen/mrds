@@ -1,11 +1,10 @@
 # test cases for the base mrds module.
+# IMPORTANT: date has to be _before_ 20150420, CHOOSE 2015-04-01
 
 import datetime
 from unittest import TestCase
 
 from mrds import ComSkew
-
-# IMPORTANT: date has to be _before_ 20150420
 
 
 class TestMrds(TestCase):
@@ -23,7 +22,9 @@ class TestMrds(TestCase):
         """
 
         m1 = ComSkew.from_db(datetime.date(2015, 4, 1), ['WTI',])
-        m1.simulation_times = [0.2, 0.4]
-        m1.simulate_curves(10000, cuda_ind=False)
+        m1.simulate_curves( ['WTI']
+                          , 10000
+                          , [0.2, 0.4]
+                          , tenor_list = [datetime.date(2015, 8, 1), datetime.date(2015, 12, 1)] )
 
         self.assertTrue(True)
