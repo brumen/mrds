@@ -5,63 +5,56 @@ from numpy import exp, sqrt, pi, inf, arange, array
 from numpy.linalg.linalg import norm
 import scipy
 import scipy.optimize
-import scipy.integrate
+from scipy.integrate import quad
 
 import pricers
 import unittest
 import pickle
 import vols
 
+
 class ComSkewTests(unittest.TestCase):
 
     # reads the market object 
     def setUp (self):
+        # TODO: FIX THIS CONSIDERABLY
         self.mo = pickle.load (open ('/home/brumen/workspace/mrds/mobj/wti_skew.obj') ) # loading the calibrated object
-        
-    def tearDown(self):
-        self.mo = None
 
     def test_trunc_normal_above(self):
-        a = arange (-3, 3, 0.1)
-        assertion = True
-        for a in arange (-3,3,0.1):
+        """ Tests the _trunc_normal_above function of the ComSkewMaths class.
+        """
+
+        for a in arange(-3, 3, 0.1):
             mo_res = self.mo._trunc_normal_above(a)
-            num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0], \
-                              scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0], \
-                              scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0], \
-                              scipy.integrate.quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0], \
-                              scipy.integrate.quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0] ] )
-            assertion = ( norm ( mo_res - num_res) < 1e-7 ) and True
-                    
-        self.assertTrue( assertion )
+            num_res = array([ quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
+                              quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
+                              quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
+                              quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
+                              quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0] ] )
+
+            self.assertTrue(norm ( mo_res - num_res) < 1e-7 )
 
     def test_trunc_normal_below(self):
-        a = arange (-3, 3, 0.1)
-        assertion = True
-        for a in arange (-3,3,0.1):
-            mo_res = self.mo._trunc_normal_below(a)
-            num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
-                              scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
-                              scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
-                              scipy.integrate.quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
-                              scipy.integrate.quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0] ] )
-            assertion = ( norm ( mo_res - num_res) < 1e-7 ) and True
 
-        self.assertTrue( assertion )
+        for a in arange (-3, 3, 0.1):
+            mo_res = self.mo._trunc_normal_below(a)
+            num_res = array([ quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
+                              quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
+                              quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
+                              quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
+                              quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0] ] )
+            self.assertTrue( norm ( mo_res - num_res) < 1e-7 )
 
     def test_trunc_normal_interval(self):
-        a = arange (-3, 3, 0.1)
-        assertion = True
+
         for a in arange (-3,3,0.1):
             mo_res = self.mo._trunc_normal_interval(a, a + 1.)
-            num_res = array([ scipy.integrate.quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
-                              scipy.integrate.quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
-                              scipy.integrate.quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
-                              scipy.integrate.quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
-                              scipy.integrate.quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0] ] )
-            assertion = ( norm ( mo_res - num_res) < 1e-7 ) and True
-                    
-        self.assertTrue( assertion )
+            num_res = array([ quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
+                              quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
+                              quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
+                              quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
+                              quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0] ] )
+            self.assertTrue( norm ( mo_res - num_res) < 1e-7 )
 
     def test_inverse_naive (self):
         """ Comparing the black_vol_inverse: advanced function and _naive function.
@@ -124,12 +117,12 @@ class ComSkewTests(unittest.TestCase):
         self.mo.update_sim_times (sim_times)
         self.mo.simulate_curves(nb_sims)
 
-        nb_cms = len (self.mo.simulated_curves) # nb. of commodities
+        nb_cms = len (self.mo.simulated_curves) # nb_sims. of commodities
         skew_ind = [False] * nb_cms # placeholder
         for cm in range (nb_cms): # do this for every commodity
             for fwd in range ( sum (self.mo.option_tenors_list[cm] <= sim_times[-1]), 
                                len (self.mo.forward_curve_list[cm]) ):
-                # print "Skew: Testing the martingale of futures prices for com.", cm," and future nb. ", fwd
+                # print "Skew: Testing the martingale of futures prices for com.", cm," and future nb_sims. ", fwd
                 skew_ind[cm] = scipy.linalg.norm ( mean ( self.mo.simulated_curves[cm][:,fwd,:], axis=1) - 
                                                    self.mo.simulated_curves[cm][0,fwd,0] ) < 1e-3
                 
@@ -231,7 +224,3 @@ class ComSkewTests(unittest.TestCase):
                                          [pr1], 1., disc_fact, theta, 1e-4)
 
         self.assertTrue(abs (iv - self.mo.atm_vol_list[0][15] ) < 1e-4)
-
-# final statements that runs these tests 
-# suite = unittest.TestLoader().loadTestsFromTestCase(mrds_tests)
-# unittest.TextTestRunner(verbosity=2).run(suite)
