@@ -637,10 +637,10 @@ class TollingModel:
         :param nb_sim: number of simulations for the dispatch.
         """
 
-        conseq_hours, conseq_block_names = TollingModel.construct_consequitive_hours(self.days_partition,
-                                                                                          self.hours_partition,
-                                                                                          self.nb_days,
-                                                                                          self.hours_partition_names)
+        conseq_hours, conseq_block_names = TollingModel.construct_consequitive_hours( self.days_partition
+                                                                                    , self.hours_partition
+                                                                                    , self.nb_days
+                                                                                    , self.hours_partition_names )
 
         dispatch_result = {}
         for month in months_to_compute:

@@ -1,28 +1,31 @@
 import numpy as np
+from typing import Tuple
+
 from tolling.opd import opd_avx
 
 SMALL_EPS = 1e-5
 
 
-def opd_1fuel(power_prices  : np.ndarray
-              , fuel_prices : np.ndarray
-              , params
+def opd_1fuel(power_prices     : np.ndarray
+              , fuel_prices    : np.ndarray
+              , tolling_params : Tuple
               , startup_sp
               , curr_state
               , curr_decision
-              , hours_in_block
-              , nb_paths
-              , cashflow_per_path):
+              , hours_in_block    : int
+              , nb_paths          : int
+              , cashflow_per_path : np.ndarray ):
     """ Computes one period tolling optimization.
 
     :param power_prices: power prices
     :param fuel_prices: fuel prices
+    :param tolling_params: parameters of the tolling
     :param startup_sp: startup shadow price.
     :param curr_state: current state vector
     :param curr_decision: current decision vector
     :param hours_in_block: hours for current block
     :param nb_paths: number of paths for , also the length of the power & fuel price vectors.
-    :param cashflow_per_path:
+    :param cashflow_per_path: vector of cashflow for every path
     """
 
     # unpacking of params
@@ -35,7 +38,7 @@ def opd_1fuel(power_prices  : np.ndarray
         max_monthly_starts, \
         cold_startup, startup_horizon, shutdown_horizon, \
         ramp_up_sp_in, ramp_down_sp_in, \
-        ramp_up_cost, ramp_down_cost, ramp_up_horizon, ramp_down_horizon = params
+        ramp_up_cost, ramp_down_cost, ramp_up_horizon, ramp_down_horizon = tolling_params
 
     state_state = curr_state['state']  # bool type
 
@@ -60,7 +63,7 @@ def opd_1fuel(power_prices  : np.ndarray
                                   is_not_cold_start * (fixed_startup_cost + start_fuel * fuel_prices)
 
     # startup shadow price
-    startup_sp = startup_sp + fixed_and_fuel_startup_cost / (startup_horizon * max_cap)
+    startup_sp += fixed_and_fuel_startup_cost / (startup_horizon * max_cap)  # adjustment of the startup shadow prices TODO: CHECK IF THIS MAKES SENSE
     startup_profit_v = power_prices - optimal_marginal_cost_at_max - startup_sp > 0.
 
     is_startup_profitable = startup_profit_v
