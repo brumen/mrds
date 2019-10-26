@@ -17,13 +17,20 @@ class TestMrds(TestCase):
 
         self.assertTrue(True)
 
+    def test_c_calibration(self):
+
+        m1 = ComSkew.from_db(datetime.date(2015, 4, 1), ['WTI'])
+        print(m1._c_vec('WTI', datetime.date(2015, 8,1)))
+
+        self.assertTrue(True)
+
     def test_simulate_curves_cpu(self):
         """ Tests whether the simulate curves actually runs on the cpu. This should always work.
         """
 
         m1 = ComSkew.from_db(datetime.date(2015, 4, 1), ['WTI',])
         m1.simulate_curves( ['WTI']
-                          , 10000
+                          , 1000
                           , [0.2, 0.4]
                           , tenor_list = [datetime.date(2015, 8, 1), datetime.date(2015, 12, 1)] )
 

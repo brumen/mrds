@@ -199,6 +199,28 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         if not self.__C_vec:
+            self.__C_vec = {asset: {fwd_date: self._opt_fct_skew(asset, [fwd_date])[fwd_date]}}
+            return self.__C_vec[asset][fwd_date]
+
+        if asset not in self.__C_vec:
+            self.__C_vec[asset] = {fwd_date: self._opt_fct_skew(asset, [fwd_date])[fwd_date]}
+            return self.__C_vec[asset][fwd_date]
+
+        if fwd_date not in self.__C_vec[asset]:
+            self.__C_vec[asset][fwd_date] = self._opt_fct_skew(asset, [fwd_date])[fwd_date]
+            return self.__C_vec[asset][fwd_date]
+
+        return self.__C_vec[asset][fwd_date]  # already computed, just return it.
+
+    # TODO: REMOVE THIS
+    def _c_vec_old(self, asset : str, fwd_date : datetime.date) -> np.array:
+        """ Returns the C vector (skew vector) for the asset and forward date.
+
+        :param asset: asset for which C vector
+        :param fwd_date: forward date.
+        """
+
+        if not self.__C_vec:
             self.__C_vec = {asset: {fwd_date: np.array([1., 0., 0.])}}  # TODO: CHECK HERE
             return self.__C_vec[asset][fwd_date]
 
@@ -969,14 +991,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # put
         return (strike - A0, - A1, -A2, -A3, -A4, V)
 
-    def polynomial_european( self
-                           , asset_nb : str
-                           , C_vec
-                           , opt_mat_idx
-                           , strike
-                           , call_put_ind
-                           , ttm          : float
-                           , debug_mode = False ) -> float:
+    def _polynomial_european(self
+                             , asset_nb : str
+                             , C_vec
+                             , opt_mat_idx
+                             , strike
+                             , call_put_ind
+                             , ttm          : float
+                             , debug_mode = False) -> float:
         """
         value of european call option in skew model with strike
         call_put_ind ... 1 for call, -1 for put
@@ -1045,7 +1067,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         strikes = self.__deltas_to_strikes(asset, fwd_date, deltas_used)
         cp_ind = np.array([1 if (strike >= self.fwd_curve_names(asset).fwd_value(fwd_date)) else -1 for strike in strikes])
 
-        option_prices = [self.polynomial_european(asset, C_vec, fwd_date, strike, cp)
+        # TODO: check if self.__difference_to ... is the correct parameter.
+        option_prices = [self._polynomial_european(asset, C_vec, fwd_date, strike, cp, self.__difference_to_market_date(fwd_date))
                          for strike, cp in zip(strikes, cp_ind)]
 
         option_tenor = self.__option_tenor_for_fwd_tenor(asset, fwd_date)  # option tenor corresponding to fwd_date
@@ -1054,7 +1077,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return np.array([black_vol_inverse(self.fwd_curve_names(asset).fwd_value(fwd_date)
                                            , strike
                                            , opt_price
-                                           , option_tenor
+                                           , self.__difference_to_market_date(option_tenor)  # TODO: CHECK IF THIS IS CORRECT HERE!!
                                            , df
                                            , cp
                                            , self.black_vol_inverse_tol)
@@ -1062,26 +1085,40 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def _opt_fct_skew( self
                      , asset     : str
-                     , fwd_dates : List[datetime.date]):
+                     , fwd_dates : List[datetime.date]
+                     , deltas = None  ):
         """ Optimization function to minimize over the fwd_dates.
 
         :param asset: asset for which the skew function is calibrates, e.g. ('WTI')
         :param fwd_dates: list of forward dates for calibration of the skew.
+        :param deltas: deltas for which to calibrate the skew
         """
 
         # penalize the calibrated funtion for values of C where positive forward prices.
         # penalization level is 10000
-        #    imp_vol_vec_model - self.vol_surface_list[asset][fwd_idx, :]
-        return NLP( lambda C_vec: scipy.linalg.norm(self.__model_vol_surface(asset, C_vec, fwd_dates) -
-                                                    self.vol_curve_names(asset).getVolForDate(fwd_dates))
-                  , np.array([1., 0., 0.])  # TODO: THIS HAS TO BE IMPROVED
-                  , iprint = -1 )\
-                  .solve(self.__class__.NLP_SOLVER).xf
+
+        deltas_used = deltas if deltas else self._default_deltas_for_skew()
+
+        C_calib = {}
+        for fwd_date in fwd_dates:
+            diff_to_mkt_date = self.__difference_to_market_date(fwd_date)
+            fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
+            implied_vols = np.array([self.vol_curve_names(asset).implied_vol( fwd_date
+                                                                            , np.exp(delta) * fwd_value
+                                                                            , diff_to_mkt_date)
+                                     for delta in deltas_used ])
+
+            C_calib[fwd_date] = NLP( lambda C_vec: scipy.linalg.norm(self.__model_vol_surface(asset, C_vec, fwd_date) - implied_vols)
+                                   , np.array([1., 0., 0.])
+                                   , iprint = -1 )\
+                                   .solve(self.__class__.NLP_SOLVER).xf
+
+        return C_calib
 
     def __c_vec_calibrate( self
                          , asset     : str
                          , fwd_dates : List[datetime.date]
-                         , multi_thread_ind = True):
+                         , multi_thread_ind = False ):
         """ Returns the skew parameters for asset. If done the first time, it calibrates the parameters,
             otherwise it returns the stored value.
 
@@ -1272,6 +1309,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
                     # self.simulated_curves[asset][t_i, tenor_idx, :] = F_res
                     c1, c2, c3 =  self._c_vec(asset, tenor_nb)
+                    print('C0, C1, C2: {0}, {1}, {2}'.format(c1, c2, c3))
                     skew_fom( self.fwd_curve_names(asset).fwd_value(tenor_nb)
                             , X[asset][tenor_idx, :]  # delta_X
                             , 0.5 * c1

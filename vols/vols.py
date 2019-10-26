@@ -2,25 +2,20 @@
 
 import config
 import logging
-
 import datetime
-
-import numpy as np
-from numpy import double, log, exp, sqrt
-
-from typing import List, Tuple, Dict
-
 import scipy
 import scipy.stats
 import scipy.interpolate  # spline package
-from openopt import NLP
+import numpy      as np
 import matplotlib as mpl
-mpl.use('TkAgg')
-
-from mpl_toolkits.mplot3d import Axes3D
+import tkinter    as tk
 import matplotlib.pyplot as plt
+
+
+from typing  import List, Tuple, Dict
+from openopt import NLP
+from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import tkinter as tk
 
 from pycuda.compiler import SourceModule
 from pycuda.gpuarray import to_gpu, GPUArray
@@ -30,6 +25,8 @@ from pycuda.gpuarray import to_gpu, GPUArray
 import ds
 from pricers.pricers import black_greeks
 from forward_curve   import FwdCurve
+
+mpl.use('TkAgg')
 
 logger = logging.Logger(__name__)
 
@@ -126,7 +123,7 @@ class Volatility:
         :returns: normalized strike of the option
         """
 
-        return log(K_v.reshape(1, len(K_v)) / S0) / (sigma * np.sqrt(ttm_v))
+        return np.log(K_v.reshape(1, len(K_v)) / S0) / (sigma * np.sqrt(ttm_v))
 
     @staticmethod
     def normalized_strike_inv(delta_v: np.array
@@ -139,7 +136,7 @@ class Volatility:
         :param ttm: time to maturity
         """
 
-        return exp(scipy.stats.norm.ppf(delta_v) * sigma * np.sqrt(np.double(ttm)) - 0.5 * sigma ** 2 * ttm)
+        return np.exp(scipy.stats.norm.ppf(delta_v) * sigma * np.sqrt(np.double(ttm)) - 0.5 * sigma ** 2 * ttm)
 
     def implied_vol(self, fwd_date : datetime.date, K : float, ttm : float) -> float:
         """ Implied vol needs to be implemented in the subclass.
@@ -206,14 +203,14 @@ class Volatility:
 
         pr_0 = black_greeks( S0
                            , K
-                           , -log(df) / double(ttm)
+                           , -np.log(df) / ttm
                            , self.implied_vol(S0, K, ttm)
                            , ttm
                            , 0)
 
         pr_delta = black_greeks( S0
                                , K + delta_K
-                               , -log(df) / double(ttm)
+                               , -np.log(df) / ttm
                                , self.implied_vol(S0, K + delta_K, ttm)
                                , ttm
                                , 0 )
@@ -254,7 +251,7 @@ class Volatility:
         based on difference methods
         LV^2 = 2 * DC/DT / K^2 / D^2C/DK^2
 
-        :params dT:
+        :param dT:
         """
 
         sigma = self.impl_vol(K, T)  # CORRECT THIS HERE

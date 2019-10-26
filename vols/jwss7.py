@@ -10,7 +10,8 @@ from tkinter import Scale, Button, HORIZONTAL
 from scipy.interpolate import splev, splrep
 
 import ds
-from vols.vols import Volatility, VolatilityDrawMixin
+from forward_curve import FwdCurve
+from vols.vols     import Volatility, VolatilityDrawMixin
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class JWSS7Volatility(Volatility):
 
         return cls( com_name
                   , mkt_date
-                  , fwd_params = ds.get_forward_curve(com_name, mkt_date)
+                  , fwd_params = FwdCurve.from_db(mkt_date, com_name)  # ds.get_forward_curve(com_name, mkt_date)
                   , vol_params = vol_params)  # TODO: FIX THE LINE BELOW.
                #vol_params = cls._transform_from_jwss7(vol_params) )
 
@@ -105,6 +106,28 @@ class JWSS7Volatility(Volatility):
 
             return transformed_curve
 
+    def _interpolate_params_for_fwd_date(self, fwd_date : datetime.date) -> datetime.date:
+        """ Interpolate parameters for forward date fwd_date.
+        In this case I just select the next larger date, or if not, the largest date in the self._vol_params
+
+        :param fwd_date: forward date for which parameters are requested.
+        """
+
+        input_dates = sorted(list(self._vol_dates))  # sort input dates
+        selected_date = None
+        for input_date in input_dates:
+            if selected_date:
+                if fwd_date < input_date <= selected_date:
+                    selected_date = input_date
+            else:
+                if input_date > fwd_date:
+                    selected_date = input_date
+
+        if not selected_date:
+            selected_date = max(input_dates)
+
+        return selected_date
+
     def _vol_compute(self, fwd_date : datetime.date, normalized_strike : float) -> float:
         """ Computes the volatility given the following parameters:
 
@@ -112,12 +135,11 @@ class JWSS7Volatility(Volatility):
         :param normalized_strike: normalized strike
         """
 
-        nth_contract = 1 # TODO: FIX THIS HERE
-        vol_params = self._vol_params[nth_contract]  # TODO: FIX HERE
+        sigma_0, A, B, C, P, alpha_C, alpha_P = self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)]
         z = normalized_strike  # abbreviation, for simplicity
 
-        return vol_params['sigma_0'] * np.sqrt(1. + vol_params['A'] * np.log(vol_params['B'] * np.exp(vol_params['C'] * (z / (1.0 + z * z) ** (vol_params['alphaC']/2))) +
-                                                                     (1. - vol_params['B']) * np.exp(- vol_params['P'] * (z / (1.0 + z * z) ** (vol_params['alphaP']/2)))))
+        return sigma_0 * np.sqrt(1. + A * np.log(B * np.exp(C * (z / (1.0 + z * z) ** (alpha_C/2))) +
+                                          (1. - B) * np.exp(- P * (z / (1.0 + z * z) ** (alpha_P/2)))))
 
     def implied_vol(self, fwd_date : [datetime.date, int], K : float, ttm : float) -> float:
         """ Implied vol for the fwd_date.
@@ -130,7 +152,7 @@ class JWSS7Volatility(Volatility):
         return self._vol_compute( fwd_date
                                 , JWSS7Volatility.normalized_strike(self._fwd_params.fwd_value(fwd_date)
                                                                     , np.array([K])
-                                                                    , self._vol_params[fwd_date] [0]  # atm vol is the first element
+                                                                    , self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)][0]  # atm vol is the first element
                                                                     , ttm) )
 
     def local_vol(self, fwd_date : datetime.date, T : float, S: float, ttm : float) -> float:
