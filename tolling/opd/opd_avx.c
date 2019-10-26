@@ -109,6 +109,7 @@ void skew_fom(double F
 
 
 
+
 double num_quad_internal(double *vec1, double *vec2, size_t v_len) {
   // performs np.sum(vec1 * vec2), a scalar product
   reg v1_xmm, v2_xmm, v3_xmm, res_xmm;
@@ -127,7 +128,9 @@ double num_quad_internal(double *vec1, double *vec2, size_t v_len) {
 
 
 double num_quad(PO *vec1, PO *vec2, int v_len) {
-  CP(vec1); CP(vec2);
+  CP(vec1);
+  CP(vec2);
+
   return num_quad_internal((double *) CN(vec1),
                            (double *) CN(vec2),
                            (size_t) v_len);
