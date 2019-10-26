@@ -1,9 +1,12 @@
 import numpy as np
-from scipy.misc import comb
-import quad1d  # my own 1d quadrature only for sparse grids
-import opd.opd_avx as opd_avx
+import quad1d
 
-# 
+from scipy.misc import comb
+
+from tolling.opd import opd_avx
+
+
+#
 # My own sparse grid implementation
 #
 # Abbreviations: 
@@ -71,7 +74,7 @@ def pairs_final(vec_list):
     return pairs(map(lambda y: map(lambda x: [x], y), vec_list))
 
 
-def sg_p(D, l, one_d_discret='gauss_hermite', one_d_grid=[]):
+def sg_p(D : int, l : int, one_d_discret='gauss_hermite', one_d_grid=[]):
     """ Construct sparse grid points:
 
     :param D: dimension of sparse grid
@@ -105,7 +108,7 @@ def sg_p(D, l, one_d_discret='gauss_hermite', one_d_grid=[]):
     return spg
 
 
-def sg_w(D, l, one_d_discret='gauss_hermite'):
+def sg_w(D : int, l : int, one_d_discret='gauss_hermite'):
     """ Constructs weights for sparse grid of dimension D and level l
 
     :param D: dimension of sparse grid.
@@ -133,7 +136,7 @@ def sg_w(D, l, one_d_discret='gauss_hermite'):
     return [np.prod(x[0]) * x[1] for x in spg]
 
 
-def sg_quad(D, l, f, one_d_discret='gauss_hermite', xmm_use=True):
+def sg_quad(D : int, l : int, f, one_d_discret='gauss_hermite', xmm_use=True):
     """ Sparse grid quadrature.
         Integrates \int f(x) e^(-x**2) / (2 * pi)^(D/2)
 
