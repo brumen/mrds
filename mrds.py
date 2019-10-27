@@ -900,42 +900,47 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
             return 0.
 
+        # abbreviations
+        cdf_below = ComMathsMixin._trunc_normal_below
+        cdf_above = ComMathsMixin._trunc_normal_above
+        cdf_interval = ComMathsMixin._trunc_normal_interval
+
         if nb_real_roots == 1:
             if A3 > 0:
-                return np.sum(ComSkew._trunc_normal_below(real_roots[0]) * Asigma)
+                return np.sum(cdf_below(real_roots[0]) * Asigma)
 
-            return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma)
+            return np.sum(cdf_above(real_roots[0]) * Asigma)
 
         if nb_real_roots in [2, 3]:  # integrate over 2 intervals
             if A4 > 0:
-                return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
-                       np.sum(ComSkew._trunc_normal_below(real_roots[1]) * Asigma)
+                return np.sum(cdf_above(real_roots[0]) * Asigma) + \
+                       np.sum(cdf_below(real_roots[1]) * Asigma)
 
             if A4 < 0.:
-                return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma)
+                return np.sum(cdf_interval(real_roots[0], real_roots[1]) * Asigma)
 
             if A4 == 0. and A3 != 0.:
                 if A3 > 0.:
-                    return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma) + \
-                           np.sum(ComSkew._trunc_normal_below(real_roots[2]) * Asigma)
+                    return np.sum(cdf_interval(real_roots[0], real_roots[1]) * Asigma) + \
+                           np.sum(cdf_below(real_roots[2]) * Asigma)
                 # A3 < 0
-                return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
-                       np.sum(ComSkew._trunc_normal_interval(real_roots[1], real_roots[2]) * Asigma)
+                return np.sum(cdf_above(real_roots[0]) * Asigma) + \
+                       np.sum(cdf_interval(real_roots[1], real_roots[2]) * Asigma)
             if A4 == 0. and A3 == 0.:
                 if A2 < 0.:
-                    return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma)
+                    return np.sum(cdf_interval(real_roots[0], real_roots[1]) * Asigma)
 
-                return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
-                       np.sum(ComSkew._trunc_normal_below(real_roots[1]) * Asigma)
+                return np.sum(cdf_above(real_roots[0]) * Asigma) + \
+                       np.sum(cdf_below(real_roots[1]) * Asigma)
 
         # elif nb_real_roots == 4:  # integrate over 3 intervals
         if A4 > 0:
-            return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
-                   np.sum(ComSkew._trunc_normal_below(real_roots[3]) * Asigma) + \
-                   np.sum(ComSkew._trunc_normal_interval(real_roots[1], real_roots[2]) * Asigma)
+            return np.sum(cdf_above(real_roots[0]) * Asigma) + \
+                   np.sum(cdf_below(real_roots[3]) * Asigma) + \
+                   np.sum(cdf_interval(real_roots[1], real_roots[2]) * Asigma)
         # A4 < 0
-        return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma) + \
-               np.sum(ComSkew._trunc_normal_interval(real_roots[2], real_roots[3]) * Asigma)
+        return np.sum(cdf_interval(real_roots[0], real_roots[1]) * Asigma) + \
+               np.sum(cdf_interval(real_roots[2], real_roots[3]) * Asigma)
 
     @staticmethod
     def __integr_num(A_V : np.array, call_put_ind : int, strike : float) -> float:
