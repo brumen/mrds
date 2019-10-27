@@ -11,7 +11,7 @@ from openopt import NLP
 import matplotlib as mpl
 mpl.use('TkAgg')
 
-import vols.vols_fast as vols_fast
+from vols.vols_fast import black_vol_inverse_normalized
 
 
 if config.CUDA_PRESENT:
@@ -82,23 +82,31 @@ def black_vol_inverse( F         : float
     :param tolerance: tolerance for vol search.
     """
 
+    # TODO: TO REMOVE THIS LATER>
     print('black vol p: {0}, {1}, {2}, {3}'.format(F, K, p, dt))
-    return vols_fast.black_vol_inverse_normalized(double(p) / (DF * sqrt(double(F) * double(K)))
-                                                  , log(double(F) / double(K))
-                                                  , theta
-                                                  , tolerance) / sqrt(dt)
+    return black_vol_inverse_normalized( double(p) / (DF * sqrt(double(F) * double(K)))
+                                       , log(double(F) / double(K))
+                                       , theta
+                                       , tolerance) / sqrt(dt)
 
 
+# TODO: REMOVE THIS FUNCTION LATER, NO PURPOSE
 def black_vol_inverse_naive_vec(F, K_vec, p_vec, dt, DF, theta, tol, solver=None):
     return np.array([black_vol_inverse_naive(F, K, p, dt, DF, theta, tol, solver)
                      for K, p in zip(K_vec, p_vec)]).ravel()
 
 
-def black_vol_inverse_naive(F, K, p, dt, DF, theta, tol, solver=None):
-    """
-    black vol computation
+def black_vol_inverse_naive(F : float, K : float, p : float, dt : float, DF : float, theta : int, tol : float, solver=None):
+    """ Inverse black volatility computation.
 
-      _theta = 1 ... call option, -1 ... put option
+    :param F: forward price
+    :param K: strike price
+    :param p: option price to infer black vol from
+    :param dt: time to maturity
+    :param DF: discount factor
+    :param theta:  = 1 ... call option, -1 ... put option
+    :param tol: tolerance bound
+    :param solver: which NLP solver to use, default scipy_cobyla
     """
 
     x = log(double(F) / double(K))  # insuring that no integer division is made

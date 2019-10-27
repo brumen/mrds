@@ -1250,7 +1250,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         #   simulates ln process, basis for skew as well
         #   t_i ... idx of sim_time
         #   fact_sum ... factors of the individual assets
-        for t_i, t_value in enumerate(simulation_times):
+        sim_times_numeric = [self.__difference_to_market_date(t_datetime) for t_datetime in simulation_times]
+        for t_i, t_value in enumerate(sim_times_numeric):
 
             nb_factors_by_asset = [self.nb_factors_for_asset(asset) for asset in assets]
             total_nb_factors = sum(nb_factors_by_asset)
@@ -1265,7 +1266,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                 for tenor_idx, tenor_nb in enumerate(tenor_list):
                     # prepare cov mtx
                     nb_factors_asset = self.nb_factors_for_asset(asset)
-                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, t_i, simulation_times)
+                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, t_i, sim_times_numeric)
                                                              for j in range(nb_factors_asset)]
                                                             for i in range(nb_factors_asset)]))
                     delta_X = np.sum(np.dot(cov_chol, sims_Z_unit), axis=0)
@@ -1275,7 +1276,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                       , factor_2
                                                       , tenor_nb
                                                       , tenor_nb
-                                                      , 0. if t_i == 0 else simulation_times[t_i - 1]
+                                                      , 0. if t_i == 0 else sim_times_numeric[t_i - 1]
                                                       , t_value )
                                   for factor_1 in range(nb_factors_asset)]
                                  for factor_2 in range(nb_factors_asset)])
