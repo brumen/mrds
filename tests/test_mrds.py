@@ -17,6 +17,16 @@ class TestMrds(TestCase):
 
         self.assertTrue(True)
 
+    def test_integr_analy(self):
+        """ Tests the integrate analytircally method
+
+        """
+
+        m1 = ComSkew.from_db(datetime.date(2015, 4, 1), ['WTI'])
+        res = m1._ComSkew__integr_analy([1,2], -11, -22, 3, 4, 5, 6)
+
+        self.assertTrue(True)
+
     def test_c_calibration(self):
 
         m1 = ComSkew.from_db(datetime.date(2015, 4, 1), ['WTI'])
