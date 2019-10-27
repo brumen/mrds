@@ -7,9 +7,8 @@ import datetime
 import numpy as np
 import mrds
 import ds
-# TODO: THIS FROM IS WRONG!!!
-from tolling import opd as opd_1fuel, opd as opd_1fuel_cu
 
+from tolling.opd              import opd_1fuel, opd_1fuel_cu
 from tolling.com_skew_tolling import ComSkewTolling
 
 if config.CUDA_PRESENT:

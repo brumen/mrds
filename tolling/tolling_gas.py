@@ -498,7 +498,7 @@ class TollingModelLatticeGas:
             self.overwrite_next_w_curr()
 
     def tolling_value(self, month):
-        """ compute the tolling value from partial tolls for the given month
+        """ Compute the tolling value from partial tolls for the given month
 
         :param month: month for which the tolling is to be computed.
         """
