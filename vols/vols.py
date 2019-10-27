@@ -14,11 +14,10 @@ import matplotlib.pyplot as plt
 
 from typing  import List, Tuple, Dict
 from openopt import NLP
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
 from pycuda.compiler import SourceModule
 from pycuda.gpuarray import to_gpu, GPUArray
+from mpl_toolkits.mplot3d              import Axes3D
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 # if config.CUDA_PRESENT:
 #     import pycuda.autoinit  # this needs to be here.
 
@@ -83,9 +82,7 @@ class Volatility:
         :param mkt_date: for which market date the vol is needed
         """
 
-        vol_type, vol_params = ds.get_vol_curve(com_name, mkt_date)
-        # if vol_type != 'JWSS7':
-        #     raise RuntimeError('Fetching the wrong curve. {0} has type {1}'.format(com_name, vol_type))
+        _, vol_params = ds.get_vol_curve(com_name, mkt_date)
 
         return cls( com_name
                   , mkt_date
