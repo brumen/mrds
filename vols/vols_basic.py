@@ -69,20 +69,20 @@ def black_vol_inverse( F         : float
                      , p         : float
                      , dt        : float
                      , DF        : float
-                     , theta     : float
+                     , theta     : int
                      , tolerance : float ):
-    """ Computation of black vol from option prices.
+    """ Computation of black vol from option price.
 
     :param F: forward price
     :param K: strike price
     :param p: option price
     :param dt: time to maturity
     :param DF: discount factor until dt
-    :param theta: call/put indicator
-    :type theta: TODO
-    :param tolerance: tolerance
+    :param theta: call/put indicator, 1 if call option, -1 for put.
+    :param tolerance: tolerance for vol search.
     """
 
+    print('black vol p: {0}, {1}, {2}, {3}'.format(F, K, p, dt))
     return vols_fast.black_vol_inverse_normalized(double(p) / (DF * sqrt(double(F) * double(K)))
                                                   , log(double(F) / double(K))
                                                   , theta
