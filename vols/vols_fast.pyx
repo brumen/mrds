@@ -48,11 +48,11 @@ cdef double b(double x, double sigma, double theta):
     if sigma != 0.:
         d1 = x/sigma + sigma /2.
         return theta * e1 * pricers.pricers_fast.cdf(theta * d1) - theta/e1 * pricers.pricers_fast.cdf(theta*(d1 - sigma))
-    else:
-        if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0): # d1 = +infty or d1 = -infty
-            return theta * e1 - theta / e1
 
-        return 0.
+    if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0): # d1 = +infty or d1 = -infty
+        return theta * e1 - theta / e1
+
+    return 0.
 
 
 cdef double sigma_c(double x):
