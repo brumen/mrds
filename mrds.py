@@ -11,7 +11,7 @@ from openopt         import NLP, NSP
 from logging         import Logger
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
-from typing          import List, Dict
+from typing          import List, Dict, Tuple
 
 # mrds imports
 from mrds_maths    import ComMathsMixin
@@ -199,40 +199,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         if not self.__C_vec:
+            logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
             self.__C_vec = {asset: {fwd_date: self._opt_fct_skew(asset, [fwd_date])[fwd_date]}}
             return self.__C_vec[asset][fwd_date]
 
         if asset not in self.__C_vec:
+            logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
             self.__C_vec[asset] = {fwd_date: self._opt_fct_skew(asset, [fwd_date])[fwd_date]}
             return self.__C_vec[asset][fwd_date]
 
         if fwd_date not in self.__C_vec[asset]:
+            logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
             self.__C_vec[asset][fwd_date] = self._opt_fct_skew(asset, [fwd_date])[fwd_date]
             return self.__C_vec[asset][fwd_date]
 
         return self.__C_vec[asset][fwd_date]  # already computed, just return it.
-
-    # TODO: REMOVE THIS
-    def _c_vec_old(self, asset : str, fwd_date : datetime.date) -> np.array:
-        """ Returns the C vector (skew vector) for the asset and forward date.
-
-        :param asset: asset for which C vector
-        :param fwd_date: forward date.
-        """
-
-        if not self.__C_vec:
-            self.__C_vec = {asset: {fwd_date: np.array([1., 0., 0.])}}  # TODO: CHECK HERE
-            return self.__C_vec[asset][fwd_date]
-
-        if asset not in self.__C_vec:
-            self.__C_vec[asset] = {fwd_date: np.array([1., 0., 0.])}
-            return self.__C_vec[asset][fwd_date]
-
-        if fwd_date not in self.__C_vec[asset]:
-            self.__C_vec[asset][fwd_date] = np.array([1., 0., 0.])
-            return self.__C_vec[asset][fwd_date]
-
-        return self.__C_vec[asset][fwd_date]
 
     def _set_c_vec(self, asset : str, fwd_date : datetime.date, c_vec_value : np.array) -> np.array:
         """ Sets the c_vec value.
@@ -895,25 +876,23 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                self.fwd_curve_names(asset).fwd_value(tenor_date)
 
     @staticmethod
-    def __integr_analy( real_roots_tsf
-                      , nb_real_roots  : int
-                      , A0
-                      , A1
-                      , A2
-                      , A3
-                      , A4
-                      , V ):
+    def __integr_analy( real_roots : np.ndarray
+                      , A0         : float
+                      , A1         : float
+                      , A2         : float
+                      , A3         : float
+                      , A4         : float
+                      , V          : float ):
         """ Integrate the polynomial between the roots, used for option calibration.
-            Computes E[ network_struct(x)_+ ]  TODO: CHECK HERE.
-            A_0 x**4 + A_1 x**3 + A_2 x**2 + A_3 x + A_4
+            Computes E[ p(x)_+ ]  where p(x) = A_0 x**4 + A_1 x**3 + A_2 x**2 + A_3 x + A_4
 
-        :param real_roots_tsf:
-        :param nb_real_roots: number of real roots
-
+        :param real_roots: real roots of the polynomial described above.
+        :returns: integrated value of the option w/ the prescribed parameters
+        :rtype: float
         """
 
-        # TODO: THIS IS NOT CORRECT PROBABLY
         Asigma = np.array([A0, A1, A2, A3, A4]) * np.array([1., V, V ** 2, V ** 3, V ** 4])  # A multiplied by sigmas
+        nb_real_roots = len(real_roots)
 
         if nb_real_roots == 0:  # integrate polynomial function over whole of real axis
             if A4 > 0 or (A4 == 0 and A2 > 0) or (A4 == 0 and A2 == 0 and A0 > 0):
@@ -923,51 +902,63 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         if nb_real_roots == 1:
             if A3 > 0:
-                return np.sum(ComSkew._trunc_normal_below(real_roots_tsf[0]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_below(real_roots[0]) * Asigma)
 
-            return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma)
+            return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma)
 
         if nb_real_roots in [2, 3]:  # integrate over 2 intervals
             if A4 > 0:
-                return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
-                       np.sum(ComSkew._trunc_normal_below(real_roots_tsf[1]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
+                       np.sum(ComSkew._trunc_normal_below(real_roots[1]) * Asigma)
 
             if A4 < 0.:
-                return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma)
 
             if A4 == 0. and A3 != 0.:
                 if A3 > 0.:
-                    return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-                           np.sum(ComSkew._trunc_normal_below(real_roots_tsf[2]) * Asigma)
+                    return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma) + \
+                           np.sum(ComSkew._trunc_normal_below(real_roots[2]) * Asigma)
                 # A3 < 0
-                return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
-                       np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
+                       np.sum(ComSkew._trunc_normal_interval(real_roots[1], real_roots[2]) * Asigma)
             if A4 == 0. and A3 == 0.:
                 if A2 < 0.:
-                    return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma)
+                    return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma)
 
-                return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
-                       np.sum(ComSkew._trunc_normal_below(real_roots_tsf[1]) * Asigma)
+                return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
+                       np.sum(ComSkew._trunc_normal_below(real_roots[1]) * Asigma)
 
         # elif nb_real_roots == 4:  # integrate over 3 intervals
         if A4 > 0:
-            return np.sum(ComSkew._trunc_normal_above(real_roots_tsf[0]) * Asigma) + \
-                   np.sum(ComSkew._trunc_normal_below(real_roots_tsf[3]) * Asigma) + \
-                   np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[1], real_roots_tsf[2]) * Asigma)
+            return np.sum(ComSkew._trunc_normal_above(real_roots[0]) * Asigma) + \
+                   np.sum(ComSkew._trunc_normal_below(real_roots[3]) * Asigma) + \
+                   np.sum(ComSkew._trunc_normal_interval(real_roots[1], real_roots[2]) * Asigma)
         # A4 < 0
-        return np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[0], real_roots_tsf[1]) * Asigma) + \
-               np.sum(ComSkew._trunc_normal_interval(real_roots_tsf[2], real_roots_tsf[3]) * Asigma)
+        return np.sum(ComSkew._trunc_normal_interval(real_roots[0], real_roots[1]) * Asigma) + \
+               np.sum(ComSkew._trunc_normal_interval(real_roots[2], real_roots[3]) * Asigma)
 
-    def __integr_num(self, A_V, call_put_ind, strike):
-        """
-        Integrate numerically between the roots of the polynomials.
-        IMPORTANT: For testing purposes only, in prod. use the code in integr_analy.
+    @staticmethod
+    def __integr_num(A_V : np.array, call_put_ind : int, strike : float) -> float:
+        """ Integrate numerically between the roots of the polynomials.
+             IMPORTANT: For testing purposes only, in prod. use the code in integr_analy.
 
+        :param A_V: array of A0, A1, A2, A3, A4, V
+        :param call_put_ind: indicator for call (1) or put (-1)
+        :param strike: option strike.
+        :returns: integrated option value for TODO: COMPLETE HERE.
         """
 
         from scipy.integrate import quad
 
-        A0, A1, A2, A3, A4, V = ComSkew.__unpack_params(A_V, call_put_ind, strike)
+        A0, A1, A2, A3, A4, V = A_V
+        if call_put_ind == 1:
+            A0 -= strike
+        else:  # put
+            A0 = strike - A0
+            A1 = - A1
+            A2 = - A2
+            A3 = - A3
+            A4 = - A4
 
         return quad(lambda x: np.max([A0 + A1 * V * x + A2 * V**2 * x**2 +
                                       A3 * V**3 * x**3 + A4 * V**4 * x**4, 0.]) / \
@@ -975,28 +966,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                    , -np.inf
                    , np.inf)[0]
 
-    @staticmethod
-    def __unpack_params(A_V, call_put_ind : int, strike : float) -> tuple:
-        """ Unpacks the parameters A, V from A_V.
-            V ... integrated volatility.
-
-        :param A_V: vector of A0, A1, A2, A3, A4, V
-
-        """
-
-        A0, A1, A2, A3, A4, V = A_V
-
-        if call_put_ind == 1:  # call
-            return (A0 - strike, A1, A2, A3, A4, V)
-        # put
-        return (strike - A0, - A1, -A2, -A3, -A4, V)
-
     def _polynomial_european(self
                              , asset_nb : str
                              , C_vec
                              , opt_mat_idx
-                             , strike
-                             , call_put_ind
+                             , strike       : float
+                             , call_put_ind : int
                              , ttm          : float
                              , debug_mode = False) -> float:
         """
@@ -1007,15 +982,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param C_vec: vector of skew parameters
         :param opt_mat_idx:
         :param strike: strike of the option TODO
-        :param call_put_ind: indicator whether this is a call or a put.
+        :param call_put_ind: indicator whether this is a call (1) or a put (-1)
         :param ttm: time to maturity of the option.
-        :param debug_mode: debug mode, computes the value numerically
+        :param debug_mode: whether to run in debug mode
         """
 
         # obtaining the coefficients
-        A0, A1, A2, A3, A4, V = self.__class__.__unpack_params( self.skew_params(asset_nb, C_vec, opt_mat_idx)
-                                                              , call_put_ind
-                                                              , strike )
+        A0, A1, A2, A3, A4, V = self._skew_params(asset_nb, C_vec, opt_mat_idx)
+        if call_put_ind == 1:
+            A0 -= strike
+        else:  # put
+            A0 = strike - A0
+            A1 = - A1
+            A2 = - A2
+            A3 = - A3
+            A4 = - A4
 
         if debug_mode:
             poly_roots = np.sort(np.poly1d([A4, A3, A2, A1, A0]).roots)
@@ -1033,20 +1014,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         real_roots = poly_roots[poly_roots == poly_roots.real].real  # real roots only
 
-
         #if debug_mode:  # debug, selects the numeric approach
         #    return disc_fact * self.__integr_num(Asigma, call_put_ind, strike)
         #else:  # production mode
 
-        return self.DF(ttm) * \
-                   self.__class__.__integr_analy( real_roots / V
-                                                , np.sum(poly_roots == poly_roots.real)  # number of real roots
-                                                , A0
-                                                , A1
-                                                , A2
-                                                , A3
-                                                , A4
-                                                , V )
+        print('PARAMS {0}'.format([A0, A1, A2, A3, A4, V]))
+
+        return self.DF(ttm) * self.__class__.__integr_analy( real_roots / V, A0, A1, A2, A3, A4, V )
 
     def _default_deltas_for_skew(self):
         """ Default deltas to be used for calibration. - simple here, can be overwritten
@@ -1065,22 +1039,28 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         deltas_used = deltas if deltas else self._default_deltas_for_skew()
 
         strikes = self.__deltas_to_strikes(asset, fwd_date, deltas_used)
-        cp_ind = np.array([1 if (strike >= self.fwd_curve_names(asset).fwd_value(fwd_date)) else -1 for strike in strikes])
+        fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
+        cp_ind = np.array([1 if strike >= fwd_value else -1 for strike in strikes])
 
         # TODO: check if self.__difference_to ... is the correct parameter.
-        option_prices = [self._polynomial_european(asset, C_vec, fwd_date, strike, cp, self.__difference_to_market_date(fwd_date))
-                         for strike, cp in zip(strikes, cp_ind)]
-
         option_tenor = self.__option_tenor_for_fwd_tenor(asset, fwd_date)  # option tenor corresponding to fwd_date
+        option_prices = [self._polynomial_european( asset
+                                                  , C_vec
+                                                  , fwd_date
+                                                  , strike
+                                                  , cp
+                                                  , self.__difference_to_market_date(option_tenor))
+                         for strike, cp in zip(strikes, cp_ind)]
+        print("OPTION P: {0}".format(option_prices))
         df = self.DF(option_tenor)
 
-        return np.array([black_vol_inverse(self.fwd_curve_names(asset).fwd_value(fwd_date)
-                                           , strike
-                                           , opt_price
-                                           , self.__difference_to_market_date(option_tenor)  # TODO: CHECK IF THIS IS CORRECT HERE!!
-                                           , df
-                                           , cp
-                                           , self.black_vol_inverse_tol)
+        return np.array([black_vol_inverse( fwd_value
+                                          , strike
+                                          , opt_price
+                                          , self.__difference_to_market_date(option_tenor)
+                                          , df
+                                          , cp
+                                          , self.black_vol_inverse_tol)
                          for opt_price, strike, cp in zip( option_prices, strikes, cp_ind ) ] )
 
     def _opt_fct_skew( self
@@ -1437,10 +1417,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return sim_fom
 
-    def skew_params(self
-                    , asset    : str
-                    , C_vec    : np.array
-                    , fwd_date  : datetime.date) -> tuple :
+    def _skew_params(self
+                     , asset    : str
+                     , C_vec    : np.array
+                     , fwd_date  : datetime.date) -> tuple :
         """ Given the C parameters, returns the parameters for the option value computation using the polynomial approach.
 
         :param asset: number of the asset
