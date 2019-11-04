@@ -12,7 +12,7 @@ from timing import time_cuda_call, time_normal_call
 import cuda_ops as co 
 
 
-def test_vpm_cols(pt_ind='p',
+def test_vpm_cols(pt_ind='network_struct',
                   rows_l=[31, 300, 3000, 10000],
                   cols_l=[40, 400, 4000, 10000]):
     """
@@ -88,7 +88,7 @@ def test_rowsum_cuda(rows_l=[31, 300, 3000, 10000],
         res_gpu = res_cpu  # res_gpu_d.get()
         res_diff = res_cpu - res_gpu
         res_bool = np.abs(res_diff) < 1e-2
-        print "row, nb, sppedup:", (row_nb, col_nb), t1/t2
+        print "row, nb_sims, sppedup:", (row_nb, col_nb), t1/t2
         return res_bool.all()
 
     for rows_nb in rows_l:

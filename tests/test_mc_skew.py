@@ -132,7 +132,7 @@ class ComSkewTests(unittest.TestCase):
         self.assertTrue ( reduce (lambda x,y: x and y, skew_ind, True) ) # all skew indicators have to be 0
 
     def test_poly_eu_no_roots (self):
-        """ Testing the roots part of polynomial_european"
+        """ Testing the roots part of _polynomial_european"
         """
         C1_range = arange (-1., 1., 0.05)
         C2_range = arange (-2., 2., 0.05)
@@ -148,27 +148,27 @@ class ComSkewTests(unittest.TestCase):
         for C1 in C1_range:
             var_C_cur = array([C1, var_C[1], var_C[2]])
             self.mo.debug_mode = False
-            res1 = self.mo.polynomial_european(0, var_C_cur, 11, K, 1)
+            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
             self.mo.debug_mode = True
-            res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, 1)
+            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
             assert1 = assert1 and ( norm ( res1 - res2) < 1e-6 )
 
 
         for C2 in C2_range:
             var_C_cur = array([var_C[0], C2, var_C[2]])
             self.mo.debug_mode = False
-            res1 = self.mo.polynomial_european(0, var_C_cur, 11, K, 1)
+            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
             self.mo.debug_mode = True
-            res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, 1)
+            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
             assert2 = assert2 and ( norm ( res1 - res2) < 1e-6 )
 
 
         for C3 in C3_range:
             var_C_cur = array([var_C[0], var_C[1], C3])
             self.mo.debug_mode = False
-            res1 = self.mo.polynomial_european(0, var_C_cur, 11, K, 1)
+            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
             self.mo.debug_mode = True
-            res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, 1)
+            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
             assert3 = assert3 and ( norm ( res1 - res2) < 1e-6 )
 
 
@@ -182,27 +182,27 @@ class ComSkewTests(unittest.TestCase):
         for C1 in C1_range:
             var_C_cur = array([C1, var_C[1], var_C[2]])
             self.mo.debug_mode = False
-            res1 = self.mo.polynomial_european(0, var_C_cur, 11, K, -1)
+            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
             self.mo.debug_mode = True
-            res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, -1)
+            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
             assert4 = assert4 and ( norm ( res1 - res2) < 1e-6 )
 
 
         for C2 in C2_range:
             var_C_cur = array([var_C[0], C2, var_C[2]])
             self.mo.debug_mode = False
-            res1 = self.mo.polynomial_european(0, var_C_cur, 11, K, -1)
+            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
             self.mo.debug_mode = True
-            res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, -1)
+            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
             assert5 = assert5 and ( norm ( res1 - res2) < 1e-6 )
 
 
         for C3 in C3_range:
             var_C_cur = array([var_C[0], var_C[1], C3])
             self.mo.debug_mode = False
-            res1 = self.mo.polynomial_european(0, var_C_cur, 11, K, -1)
+            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
             self.mo.debug_mode = True
-            res2 = self.mo.polynomial_european(0, var_C_cur, 11, K, -1)
+            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
             assert6 = assert6 and ( norm ( res1 - res2) < 1e-6 )
 
         self.assertTrue(assert1 and assert2 and assert3 and assert4 and assert5 and assert6)

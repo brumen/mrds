@@ -3,7 +3,8 @@
 #
 
 import datetime
-import numpy as np
+import numpy  as np
+import pandas as pd
 import scipy
 import scipy.stats
 import scipy.interpolate  # spline package
@@ -1211,11 +1212,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                             , size = nb_simulations )
 
     def simulate_curves( self
-                        , assets           : List[str]
-                        , nb_simulations   : int
-                        , simulation_times : List[datetime.date]
-                        , tenor_list       : List[datetime.date]
-                        , set_seed         = None) -> np.array :
+                       , assets           : List[str]
+                       , nb_simulations   : int
+                       , simulation_times : List[datetime.date]
+                       , tenor_list       : List[datetime.date]
+                       , set_seed         = None) -> Dict[str, np.array]:
         """ Simulate all curves for desired simulation times.
 
         Generates a 3-dimensional array
@@ -1229,7 +1230,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param simulation_times: simulation times for the forwards.
         :param tenor_list: list of tenors which to simulate
         :param set_seed: seed, if needed, can be left to None
-        :returns: a matrix of simulated paths
+        :returns: a dictionary where keys are simulated asset names, and values arrays.
         """
 
         np.random.seed(set_seed)
@@ -1238,6 +1239,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         for com_curve in assets:
             com_fwd_curve = self.fwd_curve_names(com_curve)
+            # TODO: CHANGE THIS TO MAKE IT A PANDAS DATA STRUCTURE - SO MUCH NICER!!!
             simulated_curves[com_curve] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))  #  if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
             fwd_c_col[com_curve] = com_fwd_curve.fwd_value(tenor_list)
             simulated_curves[com_curve][0, :, :] = np.array(fwd_c_col[com_curve]).reshape((len(tenor_list), 1))
@@ -1253,10 +1255,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         # looping over time steps
         #   simulates ln process, basis for skew as well
-        #   t_i ... idx of sim_time
+        #   sim_time_idx ... idx of sim_time
         #   fact_sum ... factors of the individual assets
         sim_times_numeric = [self.__difference_to_market_date(t_datetime) for t_datetime in simulation_times]
-        for t_i, t_value in enumerate(sim_times_numeric):
+        for sim_time_idx, sim_time_value in enumerate(sim_times_numeric):  # simulation index, simulation time (in numeric terms)
 
             nb_factors_by_asset = [self.nb_factors_for_asset(asset) for asset in assets]
             total_nb_factors = sum(nb_factors_by_asset)
@@ -1271,7 +1273,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                 for tenor_idx, tenor_nb in enumerate(tenor_list):
                     # prepare cov mtx
                     nb_factors_asset = self.nb_factors_for_asset(asset)
-                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, t_i, sim_times_numeric)
+                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, sim_time_idx, sim_times_numeric)
                                                              for j in range(nb_factors_asset)]
                                                             for i in range(nb_factors_asset)]))
                     delta_X = np.sum(np.dot(cov_chol, sims_Z_unit), axis=0)
@@ -1281,8 +1283,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                       , factor_2
                                                       , tenor_nb
                                                       , tenor_nb
-                                                      , 0. if t_i == 0 else sim_times_numeric[t_i - 1]
-                                                      , t_value )
+                                                      , 0. if sim_time_idx == 0 else sim_times_numeric[sim_time_idx - 1]
+                                                      , sim_time_value )
                                   for factor_1 in range(nb_factors_asset)]
                                  for factor_2 in range(nb_factors_asset)])
 
@@ -1293,8 +1295,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     # F_res = F_u * (1. + X_u + 0.5 * c1 * (X_u**2 - V_u) +
                     #                c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
                     #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
-                    # self.simulated_curves[asset][t_i, tenor_idx, :] = F_res
+                    # self.simulated_curves[asset][sim_time_idx, tenor_idx, :] = F_res
                     c1, c2, c3 =  self._c_vec(asset, tenor_nb)
+                    # TODO: REMOVE THIS LINE LATER!
                     print('C0, C1, C2: {0}, {1}, {2}'.format(c1, c2, c3))
                     skew_fom( self.fwd_curve_names(asset).fwd_value(tenor_nb)
                             , X[asset][tenor_idx, :]  # delta_X
@@ -1302,13 +1305,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                             , qv  # V_u, quadratic variation
                             , c2/6.
                             , c3/24.
-                            , simulated_curves[asset][t_i, tenor_idx, :]
+                            , simulated_curves[asset][sim_time_idx, tenor_idx, :]
                             , nb_simulations )
 
         return simulated_curves
 
-    def simulate_1nb( self, nb_simulations : int
-                    , simulation_times = None
+    def simulate_1nb( self
+                    , assets           : List[str]
+                    , nb_simulations   : int
+                    , simulation_times : List[datetime.date]
                     , set_seed         = None ) -> Dict[str, np.ndarray]:
         """ Simulate the 1NB (rolling) contract.
 
@@ -1323,18 +1328,29 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param set_seed: set the seed for simulations.
         """
 
-        assert simulation_times[-1] > self.fwd_curves[0][-1], \
-            'Last simulation time is larger than the largest forward tenor.'
+        #assert simulation_times[-1] > self.fwd_curves[0][-1], \
+        #    'Last simulation time is larger than the largest forward tenor.'
 
-        simulated_curves = self.simulate_curves(nb_simulations, simulation_times, set_seed)
+        # collect tenors from all assets
+        tenors_from_all_curves = []
+        for fwd_curve in self.fwd_curves:
+            tenors_from_all_curves.extend(fwd_curve.fwd_tenors)
+        # sort all fwd_tenors
+        tenors_from_all_curves.sort()
+
+        simulated_curves = self.simulate_curves( assets
+                                               , nb_simulations
+                                               , simulation_times
+                                               , tenor_list = tenors_from_all_curves
+                                               , set_seed   = set_seed)
+
         new_simulated_curves = {}
-
         for fwd_curve in self.fwd_curves:
             asset = fwd_curve.fwd_name
-            new_simulated_curves[asset] = np.empty((len(simulation_times), nb_simulations))
-            for t_idx, t_i in enumerate(simulation_times):
-                current_tenor_nb = np.sum(self.fwd_curves[asset] <= t_i)
-                new_simulated_curves[asset][t_i, :] = simulated_curves[asset][t_i, current_tenor_nb, :]
+            new_simulated_curves[asset] = np.empty((len(fwd_curve.fwd_tenors), nb_simulations))
+            for tenor_idx, curr_tenor in enumerate(fwd_curve.fwd_tenors):
+                # current_tenor_nb = np.sum(self.fwd_curves[asset] <= t_i)
+                new_simulated_curves[asset][tenor_idx, :] = simulated_curves[asset][t_i, current_tenor_nb, :]
 
         return new_simulated_curves
 
