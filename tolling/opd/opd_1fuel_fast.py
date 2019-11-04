@@ -136,7 +136,7 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
     # this is replaced by the opd_avx function
     # totalCost = fuel_cost + variable_cost + startup_cost + ramp_cost
     # cashflow = revenue - totalCost
-    # cashflow_per_path[:] = cashflow
+    # cashflow[:] = cashflow
     add4( revenue
         , curr_energy * (fuel_prices + add_fuel_cost) * actual_heat_rate  # fuel costs
         , variable_cost, startup_cost, ramp_cost, cashflow_per_path, nb_paths)

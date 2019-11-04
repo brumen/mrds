@@ -12,9 +12,9 @@ def opd_1fuel(power_prices     : np.ndarray
               , startup_sp
               , curr_state
               , curr_decision
-              , hours_in_block    : int
-              , nb_paths          : int
-              , cashflow_per_path : np.ndarray ):
+              , hours_in_block : int
+              , nb_paths       : int
+              , cashflow       : np.ndarray ):
     """ Computes one period tolling optimization.
 
     :param power_prices: power prices
@@ -25,7 +25,7 @@ def opd_1fuel(power_prices     : np.ndarray
     :param curr_decision: current decision vector
     :param hours_in_block: hours for current block
     :param nb_paths: number of paths for , also the length of the power & fuel price vectors.
-    :param cashflow_per_path: vector of cashflow for every path
+    :param cashflow: vector of one period cashflow for every path
     """
 
     # unpacking of params
@@ -80,11 +80,11 @@ def opd_1fuel(power_prices     : np.ndarray
                                                (is_shutdown_profitable & (curr_decision['force_shut'] == 1)))
     # compute dispatch
     not_state_state = ~state_state
-    curr_state      = (state_state & (~do_shutdown)) | (not_state_state & do_startup)
-    state_change    = curr_state != state_state
+    new_state       = (state_state & (~do_shutdown)) | (not_state_state & do_startup)
+    state_change    = new_state != state_state
 
     # accounting (- on curr_state is because curr_state is -1)
-    curr_generation = curr_state * (max_cap * not_run_at_min_index + run_at_min_index * min_disp)
+    curr_generation = new_state * (max_cap * not_run_at_min_index + run_at_min_index * min_disp)
     generation_change = curr_generation - curr_state['generation']
     ramping_adjustment = (0.5 / (ramp_rate * hours_in_block)) * np.abs(generation_change) * generation_change
     curr_generation -= ramping_adjustment
@@ -94,27 +94,27 @@ def opd_1fuel(power_prices     : np.ndarray
     actual_heat_rate = run_at_min_index * hr_at_min + not_run_at_min_index * hr_at_max
     fuel_cost = curr_energy * (fuel_prices + add_fuel_cost) * actual_heat_rate
 
-    not_curr_state = ~curr_state
-    starts = curr_state & not_state_state  # curr_state > state_state
-    shuts = not_curr_state & state_state
+    not_new_state = ~new_state
+    starts = new_state & not_state_state  # curr_state > state_state
+    shuts = not_new_state & state_state
 
     startup_cost = (is_cold_start & starts) * (fixed_startup_cost_cold + fuel_prices * start_fuel_cold) + \
                    (is_not_cold_start & starts) * (fixed_startup_cost + fuel_prices * start_fuel)
 
-    ramp_cost = (~starts) & (generation_change > SMALL_EPS  ) * ramp_up_cost + \
-                (~shuts ) & (generation_change < - SMALL_EPS) * ramp_down_cost
+    ramp_cost = ((~starts) & (generation_change > SMALL_EPS  )) * ramp_up_cost + \
+                 ((~shuts ) & (generation_change < - SMALL_EPS)) * ramp_down_cost
 
     # this is replaced by the opd_avx function
     # totalCost = fuel_cost + variable_cost + startup_cost + ramp_cost
     # cashflow = revenue - totalCost
-    # cashflow_per_path[:] = cashflow
-    opd_avx.add4(revenue, fuel_cost, variable_cost, startup_cost, ramp_cost, cashflow_per_path, nb_paths)
+    # cashflow[:] = cashflow
+    opd_avx.add4(revenue, fuel_cost, variable_cost, startup_cost, ramp_cost, cashflow, nb_paths)
 
     # new unit state
     curr_state['hours_in_state']  = curr_state['hours_in_state'] * (~state_change) + hours_in_block
     curr_state['generation']      = curr_generation
     curr_state['total_starts']   += starts
-    curr_state['hours_shut']      = not_curr_state * (curr_state['hours_shut'] + hours_in_block)
-    curr_state['hours_run']       = curr_state * (curr_state['hours_run'] + hours_in_block)
+    curr_state['hours_shut']      = not_new_state * (curr_state['hours_shut'] + hours_in_block)
+    curr_state['hours_run']       = new_state * (curr_state['hours_run'] + hours_in_block)
     curr_state['global_starts']  += starts
-    curr_state['state']           = curr_state
+    curr_state['state']           = new_state

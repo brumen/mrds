@@ -1,6 +1,6 @@
 # to compile xmm files
 SWIG = swig
-CPP  = g++-8
+CPP  = g++-9
 PROC_DIR     = -funroll-all-loops -falign-functions=16 -O3
 PROC_DIR_AVX = -funroll-all-loops -falign-functions=32 -O3
 XMM  = $(PROC_DIR) -msse4a

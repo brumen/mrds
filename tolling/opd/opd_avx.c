@@ -56,7 +56,7 @@
 
 void add4(PO *r, PO *a, PO *b, PO *c, PO *d, PO *y, int n) {
   // computes r - (a+b+c+d)
-  // Using g++-8 the compiler opimizes this using vaddpd instructions.
+  // Using g++-{8,9} the compiler opimizes this using vaddpd instructions.
 
   CPN(double, r);
   CPN(double, a);
@@ -90,7 +90,8 @@ void skew_fom(double F
               , double c3_ch
               , PO *sim_fom
               , int nb_sim) {
-
+  /* Computes the skew transform from F, delta_X and c1, c2, c3 parameters.
+   */
   CPN(double, delta_X);
   CPN(double, sim_fom);
 
@@ -108,14 +109,14 @@ void skew_fom(double F
 }
 
 
-
-
 double num_quad_internal(double *vec1, double *vec2, size_t v_len) {
   // performs np.sum(vec1 * vec2), a scalar product
   reg v1_xmm, v2_xmm, v3_xmm, res_xmm;
   size_t idx;
   double res[DOUBLE_INCR];
+
   res_xmm = msetz();
+
   for (idx=0; idx < v_len; idx += DOUBLE_INCR) {
     v1_xmm = mloa(vec1 + idx);
     v2_xmm = mloa(vec2 + idx);
@@ -134,6 +135,28 @@ double num_quad(PO *vec1, PO *vec2, int v_len) {
   return num_quad_internal((double *) CN(vec1),
                            (double *) CN(vec2),
                            (size_t) v_len);
+}
+
+double num_quad_tog(PO *vec1, PO *vec2, int v_len) {
+
+  CP(vec1);
+  CP(vec2);
+
+  reg v1_xmm, v2_xmm, v3_xmm, res_xmm;
+  size_t idx;
+  double res[DOUBLE_INCR];
+
+  res_xmm = msetz();
+
+  for (idx=0; idx < v_len; idx += DOUBLE_INCR) {
+    v1_xmm = mloa(CN(vec1) + idx);
+    v2_xmm = mloa(CN(vec2) + idx);  // TODO: CHECK IF THIS AND PREV. LINE ARE OK??
+    v2_xmm = mmul(v1_xmm, v2_xmm);  // multiplied
+    res_xmm = madd(res_xmm, v2_xmm); // added
+  }
+  msto(res, res_xmm);
+  return res[0] + res[1];
+
 }
 
 
