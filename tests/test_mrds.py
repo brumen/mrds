@@ -55,7 +55,8 @@ class TestMrds(TestCase):
         nb_sims    = 1000  # number of simulations
         sim_times  = [datetime.date(2015, 4, 20), datetime.date(2015, 5 , 1)]  # simulation times
 
-        m1.simulate_1nb( nb_sims
-                       , [datetime.date(2015, 4, 20), datetime.date(2015, 5, 1)] )
+        res1 = m1.simulate_1nb( ['WTI'], nb_sims, sim_times )
 
-        self.assertTrue(True)
+        self.assertIn('WTI', res1)
+
+        # TODO: TO ANOTHER CHECK ON THE RESULT MATRIX!!
