@@ -973,28 +973,26 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                    , np.inf)[0]
 
     def _polynomial_european(self
-                             , asset_nb : str
-                             , C_vec
-                             , opt_mat_idx
+                             , asset        : str
+                             , C_vec        : np.array
+                             , fwd_date     : datetime.date
                              , strike       : float
                              , call_put_ind : int
                              , ttm          : float
                              , debug_mode = False) -> float:
-        """
-        value of european call option in skew model with strike
-        call_put_ind ... 1 for call, -1 for put
+        """ Value of european call option in skew model with strike.
 
-        :param asset_nb: asset to consider, e.g. 'WTI'.
+        :param asset: asset to consider, e.g. 'WTI'.
         :param C_vec: vector of skew parameters
-        :param opt_mat_idx:
-        :param strike: strike of the option TODO
+        :param fwd_date: option maturity.
+        :param strike: strike of the option
         :param call_put_ind: indicator whether this is a call (1) or a put (-1)
         :param ttm: time to maturity of the option.
         :param debug_mode: whether to run in debug mode
         """
 
         # obtaining the coefficients
-        A0, A1, A2, A3, A4, V = self._skew_params(asset_nb, C_vec, opt_mat_idx)
+        A0, A1, A2, A3, A4, V = self._skew_params(asset, C_vec, fwd_date)
         if call_put_ind == 1:
             A0 -= strike
         else:  # put
@@ -1023,8 +1021,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         #if debug_mode:  # debug, selects the numeric approach
         #    return disc_fact * self.__integr_num(Asigma, call_put_ind, strike)
         #else:  # production mode
-
-        print('PARAMS {0}'.format([A0, A1, A2, A3, A4, V]))
 
         return self.DF(ttm) * self.__class__.__integr_analy( real_roots / V, A0, A1, A2, A3, A4, V )
 
@@ -1057,7 +1053,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                   , cp
                                                   , self.__difference_to_market_date(option_tenor))
                          for strike, cp in zip(strikes, cp_ind)]
-        print("OPTION P: {0}".format(option_prices))
+
         df = self.DF(option_tenor)
 
         return np.array([black_vol_inverse( fwd_value
@@ -1119,7 +1115,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # using multithreading
         with Pool(processes=cpu_count()) as pool:
             curr_nb_tenors = len(fwd_dates)
-            C = pool.map(opt_fct_skew_wrap, zip([self] * curr_nb_tenors, [asset] * curr_nb_tenors, fwd_dates))
+            C = pool.map( opt_fct_skew_wrap
+                        , zip( [self] * curr_nb_tenors
+                             , [asset] * curr_nb_tenors
+                             , fwd_dates ) )
 
             return np.array(C)
 
@@ -1145,7 +1144,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                 # TODO: HERE COMPLETELY WRONG
                 self.__complete_corr_mtx[self.__factor_positions(asset_1.fwd_name), self.__factor_positions(asset_2.fwd_name)] = self._ # self.__factor_corr_mtx(asset_1, asset_2)
 
-        # find the closest matrix that is positive semidefinite
+        # find the closest matrix that is positive semi-definite
         self.__complete_corr_mtx = near_corr_simple(self.__complete_corr_mtx, nb_steps)
         while not (np.linalg.eig(self.__complete_corr_mtx)[0] > 0.).all():
             d1, v1 = np.linalg.eig(self.__complete_corr_mtx)
@@ -1153,28 +1152,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             self.__complete_corr_mtx = np.dot(v1, np.dot(d1p, v1.transpose()))
 
         return self.__complete_corr_mtx
-
-    def _corr_mtx_for_assets(self, assets : List[str], tenors_for_assets: List[List[datetime.date]]) -> np.ndarray:
-        """ Returns the correlation matrix for the assets in a list.
-
-        :param assets: list of assets, e.g. ['WTI', 'ERCOT_PEAK']
-        :param tenors_for_assets: tenors for each individual asset, e.g. [[datetime.date(2016, 1, 1), datetime.date(2016, 2,1)], [datetime.date(2016, 3, 1), datetime.date(2016, 4, 1)]]
-        """
-
-        mtx_size = sum([len([x ] )])
-
-        corr_mtx = np.empty((mtx_size, mtx_size))  # resulting corrlation matrix
-
-        for x in X:
-            idx_1 = 1
-            idx_2 = 2  # TODO: FINISH THIS index to factor ???
-            x[idx_1, idx_2] = self.__black_corr_intra_curves( model_corr_mtx
-                                                            , curve_1
-                                                            , curve_2
-                                                            , tenor_1
-                                                            , tenor_2)
-
-        return corr_mtx
 
     def _var_covar_mtx( self
                       , asset_nb : str
@@ -1217,20 +1194,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                        , simulation_times : List[datetime.date]
                        , tenor_list       : List[datetime.date]
                        , set_seed         = None) -> Dict[str, np.array]:
-        """ Simulate all curves for desired simulation times.
+        """ Simulate curves in assets for desired simulation times in simulation_times.
 
-        Generates a 3-dimensional array
-        0-th dimension: asset
-        1-st dimension: simulation times
-        2-nd dimension: curve
-        3-rd dimension: repeats of the curve
+        Generates a dictionary of 3-dimensional arrays:
+            keys of the dictionary: assets
+            values of the dictionary: 3 dimensional arrays where
+                1-st dimension: simulation times
+                2-nd dimension: forward date
+                3-rd dimension: repeats of the curve
 
         :param assets: list of assets for which to simulate
-        :param nb_simulations: self. explanatory
+        :param nb_simulations: number of simulations
         :param simulation_times: simulation times for the forwards.
         :param tenor_list: list of tenors which to simulate
         :param set_seed: seed, if needed, can be left to None
-        :returns: a dictionary where keys are simulated asset names, and values arrays.
+        :returns: a dictionary where keys are simulated asset names, and values arrays as described above.
         """
 
         np.random.seed(set_seed)
@@ -1315,42 +1293,54 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     , nb_simulations   : int
                     , simulation_times : List[datetime.date]
                     , set_seed         = None ) -> Dict[str, np.ndarray]:
-        """ Simulate the 1NB (rolling) contract.
+        """ Simulate the first nearby (1NB) (rolling) contract. Generates a dictionary where keys are
+            assets and values are 2 dimensional arrays:
+               0-th dimension: simulation times
+               1-st dimension: repeats of the curve
 
-        # TODO: FIX THIS HERE!!
-        generates a 3-dimensional array:
-          0-th dimension: asset
-          1-st dimension: simulation times
-          2-rd dimension: repeats of the curve
-
+        :param assets: assets for which to generate first nearby.
         :param nb_simulations: number of simulations to simulate.
         :param simulation_times: times when to simulate curves, if None TODO: WHAT THEN???
         :param set_seed: set the seed for simulations.
         """
 
-        #assert simulation_times[-1] > self.fwd_curves[0][-1], \
-        #    'Last simulation time is larger than the largest forward tenor.'
-
         # collect tenors from all assets
-        tenors_from_all_curves = []
-        for fwd_curve in self.fwd_curves:
-            tenors_from_all_curves.extend(fwd_curve.fwd_tenors)
-        # sort all fwd_tenors
-        tenors_from_all_curves.sort()
+        tenors_from_all_curves = set()  # all tenors to simulate.
+        assets_to_tenors = {}  # mapping where keys are assets and values are lists of tenors for that asset, e.g {'WTI': [date_1, date_2], ...}
+        for asset in assets:
+            fwd_curve = self.fwd_curve_names(asset)
+            assets_to_tenors[asset] = []
+            for sim_time in simulation_times:
+                tenor_1nb, _ = fwd_curve.get_1nb(sim_time)
+                tenors_from_all_curves.add(tenor_1nb)
+                assets_to_tenors[asset].append(tenor_1nb)
 
+        # sort all fwd_tenors, this is obligatory
+        tenors_from_all_curves = list(tenors_from_all_curves)
+        tenors_from_all_curves.sort()  # list of simulation times.
+
+        # simulate all the relevant simulation times.
+        # 1 - st dimension: simulation times
+        # 2 - nd dimension: forward date
+        # 3 - rd dimension: repeats of the curve
         simulated_curves = self.simulate_curves( assets
                                                , nb_simulations
                                                , simulation_times
                                                , tenor_list = tenors_from_all_curves
                                                , set_seed   = set_seed)
 
+        # which simulation times correspond to which asset
+        assets_to_rows_in_matrix = {}  # mapping of assets to rows in the simulated matrix, e.g. {'WTI': [1,2,5], ... }
+        for asset in assets:
+            tenors_to_process = assets_to_tenors[asset]
+            assets_to_rows_in_matrix[asset] = []
+            for tenor in tenors_to_process:
+                assets_to_rows_in_matrix[asset].append(tenors_from_all_curves.index(tenor))
+
         new_simulated_curves = {}
-        for fwd_curve in self.fwd_curves:
-            asset = fwd_curve.fwd_name
-            new_simulated_curves[asset] = np.empty((len(fwd_curve.fwd_tenors), nb_simulations))
-            for tenor_idx, curr_tenor in enumerate(fwd_curve.fwd_tenors):
-                # current_tenor_nb = np.sum(self.fwd_curves[asset] <= t_i)
-                new_simulated_curves[asset][tenor_idx, :] = simulated_curves[asset][t_i, current_tenor_nb, :]
+        for asset in assets:
+            # TODO: NOT ALL ASSETS ARE NEEDED FOR ALL SIMULATION TIMES - IMPROVE HERE
+            new_simulated_curves[asset] = simulated_curves[asset][ :, assets_to_rows_in_matrix[asset], : ]
 
         return new_simulated_curves
 

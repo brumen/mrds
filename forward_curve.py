@@ -54,9 +54,9 @@ class FwdCurve:
 
     @property
     def _fwd_tenors_numeric(self, dcf=365.25):
-        """
-        Converts datetime into numeric values given
+        """ Returns the fwd tenors, but in numeric value, as specified by the dcf.
 
+        :param dcf: day-count factor.
         """
 
         if self.__fwd_tenors_numeric:
