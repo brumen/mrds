@@ -1456,44 +1456,29 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
 class ComSkewChecks(ComSkew):
     """ Commodity skew model w/ checks for the correlation, more for debugging.
-
     """
 
-    def check_black_vol_calib(self, asset : str, reportingDiff=1e-2) -> None:
+    def check_black_vol_calib(self, asset : str, reporting_diff=1e-2) -> None:
         """
         Checks the black vol calibration, logs the results if the calibration failed.
 
         :param asset: asset to be checked, e.g. 'WTI'
-        :param reportingDiff: difference between model and market vols to be reported.
+        :param reporting_diff: difference between model and market vols to be reported.
         """
 
-        model_atm_vols = np.array([self.black_vol(asset
-                                                  , self._kappa_vec(asset)
-                                                  , self._sigma_vec(asset)
-                                                  , self.__factor_corr_mtx(asset, asset), fwd)
-                                   for fwd in range(self.forward_curve_len[asset])])
+        for fwd_curve in self.fwd_curves:
+            fwd_curve_name = fwd_curve.fwd_name
+            model_atm_vols = np.array([self.black_vol( fwd_curve_name
+                                                     , fwd_tenor
+                                                     , self._kappa_vec(fwd_curve_name)
+                                                     , self._sigma_vec(fwd_curve_name)
+                                                     , self._factor_corr_mat(fwd_curve_name, fwd_curve_name))
+                                       for fwd_tenor in fwd_curve.fwd_tenors])
 
-        diff = scipy.linalg.norm(model_atm_vols - self.atm_vol_list[asset])
+            vol_curve = self.vol_curve_names(fwd_curve_name)
+            diff = scipy.linalg.norm(model_atm_vols - vol_curve.implied_vol(fwd_date, K, ttm))  # TODO: FIX THIS TILL THE END
 
-        if diff > reportingDiff:
-            logger.info('Calibration of ATM vols for asset nb. {0} FAILED. Diff= {1}'.format(asset, str(diff)))
+            if diff > reporting_diff:
+                logger.info('Calibration of ATM vols for asset {0} is LARGER than prescribed. Market - calibrated diff: {1}.'.format(asset, diff))
 
         logger.debug('Calibration of ATM vols for asset nb. {0} succeeded. Diff = {1}'.format(asset, str(diff)))
-
-    def __default_corr_mat(self, asset : str, exp_nb : float) -> np.ndarray:
-        """ Constructs the default correlation matrix
-        the closer exp_nb is to 0, the more singular the matrix is
-        and the correlation between forwards is closer to 1
-        (does not need optimization)
-
-        :param asset: asset in the model to be considered ('WTI')
-        :param exp_nb: correlation number for the correlation matrix.
-
-        """
-
-        nb_tenors = len(self.fwd_curves[asset].fwd_tenors)
-
-        # TODO: THIS IS WRONG - MUST DEPEND ON tenor distance.
-        return np.array([ [ np.exp(-(np.abs(j-i)*exp_nb))
-                            for i in range(nb_tenors) ]
-                          for j in range(nb_tenors) ] )
