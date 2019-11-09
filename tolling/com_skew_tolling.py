@@ -74,18 +74,20 @@ class ComSkewTolling(ComSkew):
             hours_for_day_week = [hp for (hp, dp) in zip(self.hours_partition, self.days_partition)
                                   if day_week in dp][0]
             days = np.append(days, days[-1] + np.cumsum(hours_for_day_week)/24./365.25)
-        days_d = gpa.to_gpu(days)
+        # days_d = gpa.to_gpu(days)
 
         if cuda_ind:
             days_diff = gpa.empty(len(days))
             days_diff[0] = np.array(0.)
             days_diff[1:] = np.diff(days)  # TODO: PROBABLY THIS IS INEFFICIENT, CHECK!!
-        else:
-            days_diff = np.empty(len(days))
-            days_diff[0] = 0.
-            days_diff[1:] = np.diff(days)
 
-        return days, days_d, days_diff
+            return gpa.to_gpu(days), days_diff
+
+        # cpu generation
+        days_diff = np.empty(len(days))
+        days_diff[0] = 0.
+        days_diff[1:] = np.diff(days)
+        return days, days_diff
 
     def simulate_spot_blocks( self
                             , assets          : List[str]
@@ -99,10 +101,9 @@ class ComSkewTolling(ComSkew):
         :returns:
         """
 
-        days_tuple = self.generate_days_vecs(cuda_ind=cuda_ind)
+        days, days_diff = self.generate_days_vecs(cuda_ind=cuda_ind)
 
         # construct the equiv. of days = range(31)/365.25
-        days, days_d, days_diff, days_diff_l = days_tuple
         fom_sims_all = self.simulate_1nb(assets, nb_simulations, tenors_chosen, set_seed=set_seed)
 
         for asset in assets:
@@ -123,7 +124,7 @@ class ComSkewTolling(ComSkew):
                 fom_sims = fom_sims_all[fwd_tenor_nb, :]   # row vec
                 mult_1 = np.float32(-0.5 * cash_vol_tenor**2)
                 mult_2 = np.float32(cash_vol_tenor)
-                col_vec = pycuda.cumath.exp(days_d * mult_1 + w_days * mult_2)
+                col_vec = pycuda.cumath.exp(days * mult_1 + w_days * mult_2)
                 # transpose is used
                 spot_sims[fwd_tenor_nb] = cuda_ops.vtpv(fom_sims, col_vec, tm_ind='t',
                                                         transpose_ind=True).transpose()
