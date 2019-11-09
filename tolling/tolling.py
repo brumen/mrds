@@ -260,8 +260,8 @@ class TollingModel:
         tenors_chosen    = range( max(np.sum([ft < self.toll_start for ft in fwd_tenors_dt]) - 1, 0)
                                 , max(np.sum([ft < self.toll_end   for ft in fwd_tenors_dt]) - 1, 0) + 1)
 
-        fom_sims_all = [self.power_models.simulate_curves_fom(asset_nb, nb_sim, tenors_list=tenors_chosen )
-                        for asset_nb in range(self.power_models.nb_assets)]
+        fom_sims_all = [self.power_models.simulate_1nb(asset, nb_sim, tenors_chosen)  # tenors_chosen are simulation times TODO: CHECK THIS HERE
+                        for asset in self.power_models.nb_assets]
 
         power_fuel_foms = [[(fom_sims_all[power_gas_block_idx[mo]],
                              fom_sims_all[power_gas_block_idx[self.fuel_idx_name]])
