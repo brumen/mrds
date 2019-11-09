@@ -90,7 +90,7 @@ class Volatility:
                   , vol_params = vol_params )
 
     @property
-    def _vol_dates(self) -> List[datetime.date]:
+    def vol_dates(self) -> List[datetime.date]:
         """ Volatility dates.
         """
 
@@ -102,7 +102,7 @@ class Volatility:
         :param date_: date for which the volatility is obtained.
         """
 
-        nearest_vol = sum([fwdDateInCurve < date_ for fwdDateInCurve in self._vol_dates])
+        nearest_vol = sum([vol_spine_date < date_ for vol_spine_date in self.vol_dates])
 
         return 1.  # TODO: FIX THIS HERE!!!
 
@@ -391,7 +391,10 @@ class ATMFVolatility(Volatility):
     """
 
     @property
-    def _vol_dates(self):
+    def vol_dates(self):
+        """ Returns the volatility spine points, building blocks of volatility structure.
+
+        """
         # TODO: THIS IS WRONG, DATES, NOT string
         return 'volDates'
 
@@ -402,4 +405,4 @@ class ATMFVolatility(Volatility):
         :returns: atm volatility for that point.
         """
 
-        return self._volParams[self._vol_dates][self._vol_for_date(fwd_date)]
+        return self._volParams[self.vol_dates][self._vol_for_date(fwd_date)]

@@ -972,6 +972,30 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                    , -np.inf
                    , np.inf)[0]
 
+    def _skew_params(self
+                     , asset    : str
+                     , C_vec    : np.array
+                     , fwd_date  : datetime.date) -> tuple :
+        """ Given the C parameters, returns the parameters for the option value computation using the polynomial approach.
+
+        :param asset: asset for which skew parameters are computed.
+        :param C_vec: vector of calibrated skew parameters, [c0, c1, c2]
+        :returns: a tuple of A0, A1, A2, A3, A4, V used in the _polynomial_european method.
+        """
+
+        cc1, cc2, cc3 = C_vec
+        # integrated volatility
+        v = self.black_vol_current(asset, fwd_date) * \
+            np.sqrt(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, fwd_date)))
+        f0t = self.fwd_curve_names(asset).fwd_value(fwd_date)
+
+        return ( (1. - cc1 * v**2 / 2. + cc3 * v**4 / 8.) * f0t
+               , (1. - cc2 * v**2 / 2.) * f0t
+               , (cc1 / 2. - cc3 * v**2 / 4.) * f0t
+               , (cc2 / 6.) * f0t
+               , (cc3 / 24.) * f0t
+               , v )
+
     def _polynomial_european(self
                              , asset        : str
                              , C_vec        : np.array
@@ -988,7 +1012,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param strike: strike of the option
         :param call_put_ind: indicator whether this is a call (1) or a put (-1)
         :param ttm: time to maturity of the option.
-        :param debug_mode: whether to run in debug mode
+        :param debug_mode: whether to compute the polynomial european option numerically or analytically.
         """
 
         # obtaining the coefficients
@@ -1357,101 +1381,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fact_sum[1:(len(cums)+1)] = cums
 
         return slice(fact_sum[asset_nb], fact_sum[asset_nb+1])
-
-    def simulate_curves_fom(self
-                            , asset          : str
-                            , nb_simulations : int
-                            , sim_times      : List[datetime.date]
-                            , tenors_list = None
-                            , seed        = None
-                            , model       = 'skew'):
-        """ Simulate first of month (fom) curves.
-
-        generates a list of 2 dim arrays:
-           1-st dim: tenor
-           2-nd dim: simulation
-
-        :param asset: asset for which to simulate, e.g. 'WTI'
-        :param nb_simulations: number of simulations
-        :param sim_times: simulation times
-        :param tenors_list: list of tenors to simulate TODO: LOTS TO DISCUSS HERE!!!
-        :param model: which model: 'ln' or 'skew', default 'skew'
-        """
-
-        np.random.seed(seed=seed)
-
-        sim_times = self.vol_curve_names(asset).vol_tenors if not tenors_list else self.vol_curve_names(asset).vol_tenors[tenors_list]
-        complete_corr_mtx = self._complete_corr_mtx()
-
-        # looping over tenors
-        #    t_i ... idx of sim_time (also tenor)
-        #    fact_sum ... factors of the individual assets
-        sim_fom = np.empty((len(tenors_list), nb_simulations))  # nb_tenors x nb_simulations
-        for tenor_idx, tenor_date in enumerate(tenors_list):
-            t_curr = sim_times[tenor_idx]
-            F_curr = self.fwd_curve_names(asset)[tenor_date]
-            nb_factors = np.sum(self.nb_factors_for_asset(asset))  # total number of factors
-            simulated_rn = np.random.multivariate_normal( np.zeros(nb_factors)
-                                                        , complete_corr_mtx
-                                                        , size=nb_simulations)
-            nb_factors_asset = self.nb_factors_for_asset[asset]
-            new_cov_mat = np.array([[self._var_covar_mtx(self, asset, tenor_date, i, j, tenor_idx, sim_times)
-                                    for j in range(nb_factors_asset)]
-                                    for i in range(nb_factors_asset)])
-
-            new_chol = np.linalg.cholesky(new_cov_mat)
-            old_cov_mat = complete_corr_mtx[self.__factor_positions(asset), self.__factor_positions(asset)]
-            old_chol = np.linalg.cholesky(old_cov_mat)
-
-            sims_Z = simulated_rn[:, self.__factor_positions(asset)].transpose()
-            sims_Z_unit = np.dot(np.linalg.inv(old_chol), sims_Z)
-            delta_X = np.sum(np.dot(new_chol, sims_Z_unit), axis=0)
-            qv = np.sum([[self._V_cross_factor(asset, factor_1, factor_2, tenor_date, tenor_date, 0., t_curr)
-                          for factor_1 in range(nb_factors_asset)]
-                         for factor_2 in range(nb_factors_asset)])
-
-            if model == 'ln':
-                sim_fom[tenor_idx, :] = F_curr * np.exp(delta_X - 0.5 * qv)
-            else:  # skew model
-                c0, c1, c2 = self._c_vec(asset, tenor_date)
-                # sim_fom[t_i, :] = F_curr * \
-                #                    (1. + delta_X + 0.5 * c1 * (delta_X**2 - qv) +
-                #                    c2 * (delta_X**3 - 3. * delta_X * qv) / 6. +
-                #                    c3 * (delta_X**4 - 6. * qv * delta_X**2 + 3. * qv**2) / 24.)
-                skew_fom( F_curr
-                        , delta_X
-                        , 0.5 * c0
-                        , qv
-                        , c1/6.
-                        , c2/24.
-                        , sim_fom[tenor_idx, :]
-                        , nb_simulations )
-
-        return sim_fom
-
-    def _skew_params(self
-                     , asset    : str
-                     , C_vec    : np.array
-                     , fwd_date  : datetime.date) -> tuple :
-        """ Given the C parameters, returns the parameters for the option value computation using the polynomial approach.
-
-        :param asset: number of the asset
-        :param C_vec: vector of calibrated skew parameters, [c0, c1, c2]
-        :returns: a tuple of A0, A1, A2, A3, A4, V
-        """
-
-        cc1, cc2, cc3 = C_vec
-        # integrated volatility
-        v = self.black_vol_current(asset, fwd_date) * \
-            np.sqrt(self.__difference_to_market_date(self.__option_tenor_for_fwd_tenor(asset, fwd_date)))
-        f0t = self.fwd_curve_names(asset).fwd_value(fwd_date)
-
-        return ( (1. - cc1 * v**2 / 2. + cc3 * v**4 / 8.) * f0t
-               , (1. - cc2 * v**2 / 2.) * f0t
-               , (cc1 / 2. - cc3 * v**2 / 4.) * f0t
-               , (cc2 / 6.) * f0t
-               , (cc3 / 24.) * f0t
-               , v )
 
 
 class ComSkewChecks(ComSkew):

@@ -40,7 +40,7 @@ class JWSS7Volatility(Volatility):
         self.__atm_vol_curve_interp = None
 
     @property
-    def _vol_dates(self) -> List[datetime.date]:
+    def vol_dates(self) -> List[datetime.date]:
         """ Returns the curve spine points, i.e. the points on the curve from which the curve is interpolated.
         """
 
@@ -56,7 +56,7 @@ class JWSS7Volatility(Volatility):
         if self.__atm_vol_curve_interp:
             return self.__atm_vol_curve_interp
 
-        vol_dates = [(x - self.mkt_date).days / self.__dcf for x in self._vol_dates]
+        vol_dates = [(x - self.mkt_date).days / self.__dcf for x in self.vol_dates]
         atm_vols  = [x[0] for x in self._vol_params.values()]
 
         vol_dates_values = sorted(zip(vol_dates, atm_vols), key=lambda vol_date_val: vol_date_val[0])
@@ -113,7 +113,7 @@ class JWSS7Volatility(Volatility):
         :param fwd_date: forward date for which parameters are requested.
         """
 
-        input_dates = sorted(list(self._vol_dates))  # sort input dates
+        input_dates = sorted(list(self.vol_dates))  # sort input dates
         selected_date = None
         for input_date in input_dates:
             if selected_date:

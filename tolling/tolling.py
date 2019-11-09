@@ -181,7 +181,6 @@ class TollingModel:
                             , nb_days            : int
                             , fixed_monthly        = None
                             , cash_vols_overwrite  = False
-                            , parallel             = False
                             , cash_fwd_tenors_days = None
                             , cash_vol_tenors_days = None
                             , manual_adj           = None):
