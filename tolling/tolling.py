@@ -10,30 +10,34 @@ import ds
 
 from tolling.opd              import opd_1fuel, opd_1fuel_cu
 from tolling.com_skew_tolling import ComSkewTolling
+from forward_curve            import FwdCurve
+from vols.vols                import Volatility
 
 if config.CUDA_PRESENT:
     import pycuda.gpuarray as gpa
     import cuda.cuda_ops   as cuda_ops
 
 
-class TollingModel:
+class TollingModel(ComSkewTolling):
     """ Tolling dispatch model.
     """
 
     def __init__(self
                  , mkt_date   : datetime.date
-                 , calc_date  : datetime.date
-                 , toll_start : datetime.date
-                 , toll_end   : datetime.date
+                 , fwd_curves : List[FwdCurve]
+                 , vol_curves : List[Volatility]
+                 , days_partition  : List[List[int]]
+                 , hours_partition : List[List[int]]
+                 , toll_start      : datetime.date
+                 , toll_end        : datetime.date
                  , power_blocks_names
                  , fuel_idx_name
-                 , days_partition
                  , days_partition_names
-                 , hours_partition
                  , hours_partition_names
                  , cash_vols
                  , tolling_params
-                 , cash_vols_overwrite    = False
+                 , discount_curve = None
+                 , calc_date      = None  # datetime.date format
                  , adj_fwd_tenors_days    = None
                  , adj_vol_tenors_days    = None
                  , cash_fwd_tenors_days   = None
@@ -75,6 +79,9 @@ class TollingModel:
                                    rampDownHorizon
         """
 
+        super().__init__( mkt_date
+                        , fwd_curves= )
+
         self.tolling_params      = tolling_params
         self.nb_days     = tolling_params.nb_days
         self.mkt_date     = mkt_date
@@ -99,23 +106,29 @@ class TollingModel:
         self.hours_partition = hours_partition
         self.hours_partition_names = hours_partition_names
         self.cash_vols = cash_vols
-        self.cash_vols_overwrite = cash_vols_overwrite
 
         fixed_monthly_val = None if self.fuel_idx_name is not 'FIXED' else self.tolling_params['fixedCostPerMonth']
 
         # tolling support vectors
         self.days_toll, self.days_d_toll, self.days_diff_toll, self.days_diff_l_toll = \
-            self.power_models.generate_days_vecs(self.hours_partition, self.days_partition)
+            self.power_models._generate_days_vecs(self.hours_partition, self.days_partition)
 
         # for usage w/ this class
         self.__power_models     = None
         self.__power_gas_blocks = None
 
     @classmethod
-    def from_db(cls):
-        """ Initializes the tolling model by reading the parameters from database
-
+    def from_db(cls, mkt_date : datetime.date, block_names : List[List[str]]):
+        """ Initializes the tolling model by reading the parameters from database.
         """
+
+        # extracts all the commodities from the blocks.
+        all_coms = set()
+        for day_block in block_names:
+            for hour_block in day_block:
+                all_coms.add(hour_block)
+
+        return cls(mkt_date)
 
     @property
     def power_gas_blocks(self) -> List[str]:
@@ -173,11 +186,8 @@ class TollingModel:
 
     def _power_fuel_process(self
                             , nb_sim             : int
-                            , days_partition
                             , power_blocks_names : List[List[str]]
-                            , hours_partition    : List[List[int]]
                             , fuel_idx_name      : str
-                            , cash_vols
                             , nb_days            : int
                             , fixed_monthly        = None
                             , cash_vols_overwrite  = False

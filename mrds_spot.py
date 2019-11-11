@@ -2,12 +2,13 @@
 #   skew model for Spot processes
 #
 
-from config import CUDA_PRESENT
 
-import datetime as dt
+import datetime
 import numpy as np
 import calendar
+import logging
 
+from config import CUDA_PRESENT
 from typing import List, Dict
 
 # cuda (this can be imported even if cuda is not present)
@@ -24,9 +25,10 @@ if CUDA_PRESENT:
     from cuda import cuda_ops
     from cuda.cuda_ops import matmul
 
-from mrds import ComSkew
-
-import logging
+from mrds          import ComSkew
+from vols.vols     import Volatility
+from forward_curve import FwdCurve
+from correlations  import corr_hyp_sec_two_fronts_time_diff
 
 
 logger = logging.Logger(__name__)
@@ -38,53 +40,75 @@ class ComSkewSpot(ComSkew):
 
     """
 
-    @property
-    def cash_corr(self):
-        return self._cash_corr
+    def __init__(self
+                 , mkt_date        : datetime.date
+                 , fwd_curves      : List[FwdCurve]
+                 , vol_curves      : List[Volatility]
+                 , cash_vol_curves : List[Volatility]
+                 , cash_correlations = None
+                 , discount_curve    = None
+                 , calc_date         = None ):
 
-    @cash_corr.setter
-    def cash_corr(self, cc):
-        self._cash_corr = cc
+        """ Initialization of the skew model for tolling simulation.
 
-    def set_cash_vols(self, asset_nb, cash_vols):
-        """
-        Sets the cash vols for the particular asset.
-
-        """
-
-        # TODO: FIX THIS HERE!
-        assert len(cash_vols) == len(fwd_curve_list[asset_nb])
-
-        self.cash_vol_list[asset_nb] = cash_vols
-
-    def gen_days_number(self, asset_nb : int) -> Dict[int]:
-        """
-        Generates a dict of number of days per month for every tenor, saves it to
-           self.nb_days_month and returns the same thing.
-
-        :param asset_nb: which asset
-        :returns: a dictionary where the key is the number of days for that month in the model,
-                  i.e. if m = 0 that refers to the number of days for the first month generated
-        :rtype: dict[int] = int
+        :param mkt_date: market date
+        :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
+                     forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
+        :param vol_curves: commodity vol curves, in case they are different than forward curves.
+        :param cash_vol_curves: cash vol curves, corresponding to fwd_curves & vol_curves
+        :param cash_correlations: cash correlation function between asset_1, asset_2, see _cash_correlation method below
+        :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
+        :param calc_date: calculation date.
         """
 
-        if not self.days_nb_const_ind:  # if not yet constructed
+        super().__init__(mkt_date, fwd_curves, vol_curves, discount_curve=discount_curve, calc_date=calc_date)
 
-            nb_fwds = len(self.forward_tenors_list[asset_nb])
-            self.nb_days_month = {}
-            beg_curr_month = self.mkt_date - dt.timedelta(self.mkt_date.day - 1)
-            curr_month = beg_curr_month
-            curr_month_y, curr_month_m = curr_month.year, curr_month.month
-            for m in range(nb_fwds):  # m month
-                self.nb_days_month[m] = calendar.monthrange(curr_month_y, curr_month_m)[1]
-                if curr_month_m == 12:
-                    curr_month_y += 1
-                    curr_month_m = 1
-                else:
-                    curr_month_m += 1
-            self.days_nb_const_ind = True  # indicator about the days number
+        # new things in this class.
+        self.__cash_vol_curves   = cash_vol_curves
+        self.__cash_correlations = cash_correlations
 
-        return self.nb_days_month
+    def _cash_vol_curves(self, asset : str) -> Volatility:
+        """ Returns the cash vol curve for the particular asset. If you enter the
+            wrong asset, None is returned.
+
+        :param asset: asset cash vol to be returned.
+        """
+
+        for fwd_curve, cash_vol_curve in zip(self.fwd_curves, self.__cash_vol_curves):
+            if fwd_curve.fwd_name == asset:
+                return cash_vol_curve
+
+    def _cash_correlation(self
+                         , asset_1 : str
+                         , asset_2 : str
+                         , fwd_date_1 : datetime.date
+                         , fwd_date_2 : datetime.date ):
+        """ Cash correlations between asset_1 and asset_2
+
+        :param asset_1: first asset to get correlations. ('ERCOT-PEAK')
+        :param asset_2: second asset to compute correlations. ('ERCOT-OFFPEAK')x
+        """
+
+        if self.__cash_correlations:  # cash correlation is a given function
+            return self.__cash_correlations(asset_1, asset_2, fwd_date_1, fwd_date_2)
+
+        # else: default correlation
+        # TODO: FIX THIS 0.95 - fictional number
+        return corr_hyp_sec_two_fronts_time_diff(0.95, fwd_date_1, fwd_date_2)
+
+    def _number_days_for_month(self, month_start_date : datetime.date) -> int:
+        """ Generates a dict of number of days per month for every tenor.
+
+        :param month_start_date: date of the start of that month
+        :returns: number of days for that month
+        """
+
+        if month_start_date.month == 12:
+            next_month_start = datetime.date(month_start_date.year + 1, 1, 1)
+        else:
+            next_month_start = datetime.date(month_start_date.year, month_start_date.month+1, 1)
+
+        return (next_month_start - month_start_date).days
 
     def gen_spot_rn( self
                    , nb_simulations : int
@@ -127,11 +151,10 @@ class ComSkewSpot(ComSkew):
                             self.spot_rn_a[asset_nb][:, day_idx] = self.spot_rn[day_idx][:, asset_nb]
 
     def gen_cash_rns( self
-                    , nb_simulations
-                    , rn_type=np.float32
+                    , assets         : List[str]
+                    , nb_simulations : int
                     , cuda_ind = False):
-        """
-        Generates the cash correlations
+        """ Generates the cash correlations
 
         """
 
@@ -148,14 +171,26 @@ class ComSkewSpot(ComSkew):
                                             , self.cash_corr
                                             , size=nb_simulations)
 
-    def simulate_spot(self, asset_nb, nb_simulations):
-        """
-        Simulate daily spot using for all tenors the cash_vols for asset asset
+    def simulate_spot( self
+                     , assets         : List[str]
+                     , start_date     : datetime.date
+                     , end_date       : datetime.date
+                     , nb_simulations : int ):
+        """ Simulate daily spots from start_date to end_date.
 
+        :param assets: list of assets to simulate (['ERCOT_NORTH', 'ERCOT_SOUTH'])
+        :param start_date: start of simulations
+        :param end_date: end of simulations
+        :param nb_simulations: number of simulations
+        :returns: TODO;
         """
 
-        self.gen_days_number(asset_nb)
-        self.gen_spot_rn(nb_simulations)
+        # create first of months - then use simulate_1nb
+
+        self.simulate
+
+        #self._number_days_for_month(asset_nb)
+        #self.gen_spot_rn(nb_simulations)
         self.simulate_curves(nb_simulations, self.option_tenors_list[asset_nb])
         spot_sims = {}
         for fwd_tenor_nb, cash_vol_tenor in enumerate(self.cash_vol_list[asset_nb]):
