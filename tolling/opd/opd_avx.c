@@ -101,7 +101,7 @@ void skew_fom(double F
 
     CN(sim_fom)[idx] =  F * (1.
                              + delta_X_xmm
-                             + c1_ch * delta_X2_xmm - qv
+                             + c1_ch * (delta_X2_xmm - qv)
                              + c2_ch * (delta_X2_xmm * delta_X_xmm  -3. * delta_X_xmm * qv)
                              + c3_ch * (delta_X2_xmm * delta_X2_xmm -6. * qv * delta_X2_xmm + 3. * qv*qv));
   }
@@ -124,6 +124,7 @@ double num_quad_internal(double *vec1, double *vec2, size_t v_len) {
     res_xmm = madd(res_xmm, v2_xmm); // added
   }
   msto(res, res_xmm);
+
   return res[0] + res[1];
 }
 
@@ -306,13 +307,13 @@ void is_start_profitable_internal(double *startup_sp_in,
   reg shut_sp_in_avx = mset(shutdown_sp_in);
 
   for (size_t idx=0; idx < nSize; idx += 2) {
-    reg start_sp_in_avx = mloa(startup_sp_in + idx);
-    reg ff_startup_avx = mloa(fixed_and_fuel_startup_cost + idx);
+    reg start_sp_in_avx     = mloa(startup_sp_in + idx);
+    reg ff_startup_avx      = mloa(fixed_and_fuel_startup_cost + idx);
     reg shut_gen_profit_avx = mloa(shutdown_gen_profit + idx);
-    reg pp_marg_max_avx = mloa(pp_marg_max + idx);
-    reg xud_startup_sp_avx = mmul(start_sp_in_avx, sh_max_cap_avx);
-    xud_startup_sp_avx = madd(start_sp_in_avx, xud_startup_sp_avx);
-    reg shut_cost_sp_avx = mmul(shut_sp_in_avx, mmul(xud_shut_avx, max_cap_avx));
+    reg pp_marg_max_avx     = mloa(pp_marg_max + idx);
+    reg xud_startup_sp_avx  = mmul(start_sp_in_avx, sh_max_cap_avx);
+    xud_startup_sp_avx      = madd(start_sp_in_avx, xud_startup_sp_avx);
+    reg shut_cost_sp_avx    = mmul(shut_sp_in_avx, mmul(xud_shut_avx, max_cap_avx));
 
     // double masks
     reg is_shut_prof = _mm256_cmp_pd(madd(madd(ff_startup_avx, shut_cost_sp_avx),
@@ -321,11 +322,11 @@ void is_start_profitable_internal(double *startup_sp_in,
     reg is_start_prof = _mm256_cmp_pd(xud_startup_sp_avx, pp_marg_max_avx, 1);
     //saving masks
     reg_int start_mask_i = (reg_int) is_start_prof;
-    reg_int shut_mask_i = (reg_int) is_shut_prof;
-    is_shutdown_profitable[idx] = _mm256_extract_epi16(shut_mask_i, 3);
+    reg_int shut_mask_i  = (reg_int) is_shut_prof;
+    is_shutdown_profitable[idx]   = _mm256_extract_epi16(shut_mask_i, 3);
     is_shutdown_profitable[idx+1] = _mm256_extract_epi16(shut_mask_i, 7);
-    is_startup_profitable[idx] = _mm256_extract_epi16(start_mask_i, 3);
-    is_startup_profitable[idx+1] = _mm256_extract_epi16(start_mask_i, 7);
+    is_startup_profitable[idx]    = _mm256_extract_epi16(start_mask_i, 3);
+    is_startup_profitable[idx+1]  = _mm256_extract_epi16(start_mask_i, 7);
   }
   // mising if nSize not divisible by 2 
 }

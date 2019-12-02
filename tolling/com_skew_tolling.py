@@ -51,8 +51,6 @@ class ComSkewTolling(ComSkewSpot):
                      forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
         :param vol_curves: commodity vol curves, in case they are different than forward curves.
         :param cash_vol_curves: cash vol curves, corresponding to fwd_curves & vol_curves
-        :param tolling_start: start date of tolling
-        :param end
         :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
         :param calc_date: calculation date.
         :param days_partition: partition of days,  Mon = 0, Sun = 6, e.g. [[0,1,2,3,4], [5,6]]  # TODO: MAYBE CHANGE THIS
@@ -79,6 +77,7 @@ class ComSkewTolling(ComSkewSpot):
                                   if day_week in dp][0]
             days = np.append(days, days[-1] + np.cumsum(hours_for_day_week)/24./365.25)
 
+        # gpu days
         if cuda_ind:
             days_diff = gpa.empty(len(days))
             days_diff[0] = np.array(0.)
