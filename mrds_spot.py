@@ -9,7 +9,7 @@ import calendar
 import logging
 
 from config import CUDA_PRESENT
-from typing import List, Dict
+from typing import List, Dict, Union
 
 # cuda (this can be imported even if cuda is not present)
 if CUDA_PRESENT:
@@ -72,6 +72,7 @@ class ComSkewSpot(ComSkew):
             wrong asset, None is returned.
 
         :param asset: asset cash vol to be returned.
+        :returns: the Volatility subclass for that asset
         """
 
         for fwd_curve, cash_vol_curve in zip(self.fwd_curves, self.__cash_vol_curves):
@@ -82,21 +83,25 @@ class ComSkewSpot(ComSkew):
                          , asset_1 : str
                          , asset_2 : str
                          , fwd_date_1 : datetime.date
-                         , fwd_date_2 : datetime.date ):
+                         , fwd_date_2 : datetime.date
+                         , default_corr = 0.95 ):
         """ Cash correlations between asset_1 and asset_2
 
         :param asset_1: first asset to get correlations. ('ERCOT-PEAK')
-        :param asset_2: second asset to compute correlations. ('ERCOT-OFFPEAK')x
+        :param asset_2: second asset to compute correlations. ('ERCOT-OFFPEAK')
+        :param fwd_date_1: date on the first curve (asset_1)
+        :param fwd_date_2: date on the second curve
+        :param default_corr: default correlation between asset_1 & asset_2, in hyp_sec form
         """
 
         if self.__cash_correlations:  # cash correlation is a given function
             return self.__cash_correlations(asset_1, asset_2, fwd_date_1, fwd_date_2)
 
         # else: default correlation
-        # TODO: FIX THIS 0.95 - fictional number
-        return corr_hyp_sec_two_fronts_time_diff(0.95, fwd_date_1, fwd_date_2)
+        return corr_hyp_sec_two_fronts_time_diff(default_corr, fwd_date_1, fwd_date_2)
 
-    def _number_days_for_month(self, month_start_date : datetime.date) -> int:
+    @staticmethod
+    def _number_days_for_month(month_start_date : datetime.date) -> int:
         """ Generates a dict of number of days per month for every tenor.
 
         :param month_start_date: date of the start of that month
@@ -110,66 +115,45 @@ class ComSkewSpot(ComSkew):
 
         return (next_month_start - month_start_date).days
 
-    def gen_spot_rn( self
-                   , nb_simulations : int
-                   , nb_days  = 65
-                   , cuda_ind = False
-                   , rn_type  = np.float32 ):
-        """
-        Returns the random walk of nb_simulations for nb_days.
-        Nb_days can also be the number of blocks.
-
-        :param nb_simulations: number of simulations.
-        :param nb_days: number of days (or blocks) to simulate.
-        :param cuda_ind: indicator for cuda.
-        :returns:
-        :rtype: np.array or gpa.GPUarray depending on what cuda_ind is.
-        """
-
-        if not self.simulate_spot_rn_ind:  # random walk not yet initialized
-            self.spot_rn = {}
-
-            for day_idx in range(nb_days):
-                self.spot_rn[day_idx] = self.gen_cash_rns(nb_simulations, cuda_ind=cuda_ind)
-
-            self.spot_rn_a = {}
-            for asset_nb in range(self.nb_assets):
-                self.spot_rn_a[asset_nb] = np.empty((nb_simulations, nb_days)) if cuda_ind==False else gpa.empty((nb_simulations, nb_days), dtype=rn_type)
-                for day_idx in range(nb_days):
-                    self.spot_rn_a[asset_nb][:, day_idx] = self.spot_rn[day_idx][:, asset_nb]
-
-            self.simulate_spot_rn_ind = True
-
-        else:
-            if self.spot_rn[0].shape[0] != nb_simulations:
-                for day_idx in range(nb_days):
-                    self.spot_rn[day_idx] = self.gen_cash_rns(nb_simulations, rn_type=rn_type)
-                    self.spot_rn_a = {}
-                    for asset_nb in range(self.nb_assets):
-                        self.spot_rn_a[asset_nb] = np.empty((nb_simulations, nb_days)) if cuda_ind==False else gpa.empty((nb_simulations, nb_days), dtype=rn_type)
-                        for day_idx in range(nb_days):
-                            self.spot_rn_a[asset_nb][:, day_idx] = self.spot_rn[day_idx][:, asset_nb]
-
-    def gen_cash_rns( self
-                    , assets         : List[str]
-                    , nb_simulations : int
-                    , cuda_ind = False):
+    @staticmethod
+    def _cash_rns( cash_corr      : np.ndarray
+                 , nb_simulations : int
+                 , rn_type        = float
+                 , cuda_ind = False ):
         """ Generates the cash correlations
 
+        :param cash_corr: matrix of cash correlations
+        :param nb_simulations: number of simulations.
+        :param rn_type: type of random numbers to generate.
+        :param
         """
+
+        nb_assets = cash_corr.shape[0]  # cash_corr is a square matrix
 
         if cuda_ind:  # cuda version
             rng = pycuda.curandom.XORWOWRandomNumberGenerator()
-            spot_rn_init = gpa.empty((self.nb_assets, nb_simulations), dtype=rn_type)
-            cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(self.cash_corr).astype(rn_type))
+            spot_rn_init = gpa.empty((nb_assets, nb_simulations), dtype=rn_type)
+            cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(cash_corr).astype(rn_type))
             curand.gen_eff_dev_rns(spot_rn_init.size, np.longlong(spot_rn_init.ptr), rng)
 
             return cuda_ops.matmul(cash_corr_gpu, spot_rn_init)
 
         # cpu version
-        return np.random.multivariate_normal(np.zeros(self.nb_assets)
-                                            , self.cash_corr
-                                            , size=nb_simulations)
+        return np.random.multivariate_normal( np.zeros(nb_assets)
+                                            , cash_corr
+                                            , size = nb_simulations )
+
+    @staticmethod
+    def __create_first_of_months(start_date : datetime.date, end_date : datetime.date):
+
+        first_first_of_month = datetime.date(start_date.year, start_date.month, 1)
+
+        if start_date.month == 12:
+            next_first_of_month = datetime.date(start_date.year, 1, 1)
+        else:
+            next_first_of_month = datetime.date(start_date.year, start_date.month+1, 1)
+
+        last_first_of_month = datetime.date(end_date.year, end_date.month, 1)
 
     def simulate_spot( self
                      , assets         : List[str]
@@ -186,12 +170,10 @@ class ComSkewSpot(ComSkew):
         """
 
         # create first of months - then use simulate_1nb
-
-        self.simulate
+        self.simulate_1nb(assets, nb_simulations, self.__create_first_of_months(start_date, end_date))
 
         #self._number_days_for_month(asset_nb)
         #self.gen_spot_rn(nb_simulations)
-        self.simulate_curves(nb_simulations, self.option_tenors_list[asset_nb])
         spot_sims = {}
         for fwd_tenor_nb, cash_vol_tenor in enumerate(self.cash_vol_list[asset_nb]):
             nb_days_m = self.nb_days_month[fwd_tenor_nb]
