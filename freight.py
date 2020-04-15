@@ -6,7 +6,7 @@ import numpy as np
 import logging
 from scipy.optimize import linprog
 
-from typing import Dict, List
+from typing import Dict, List, Callable
 
 from discount import DF
 from pricers.pricers import spread_option_kirk
@@ -26,15 +26,15 @@ class Freight:
     LARGE_NUMBER = 1000000.  # large number to prohibit travel between certain directions & times.
 
     def __init__(self
-                 , mkt_date         : datetime.date
-                 , fwd_curve_fct  # function
-                 , vol_curve_fct  # function
+                 , mkt_date          : datetime.date
+                 , fwd_curve_fct     : Callable
+                 , vol_curve_fct     : Callable
                  , corr_matrix       : Dict
                  , travel_matrix     : Dict
                  , cost_matrix       : Dict
                  , initial_locations : Dict
                  , time_grid         : List[datetime.date]
-                 , dcf = 365.25):
+                 , dcf               : float = 365.25 ):
         """
         :param mkt_date: market date
         :param initial_locations: locations between which freight can be transported, list[str]
