@@ -258,7 +258,7 @@ def mrds_calib_db_multiple( com_fwd_l
 
     :param com_fwd_l: list of com to calibrate
     col_vol_l ... list of vols for counterparted coms
-    nb_fwd_l ... list of nb of forwards [12, 10, 12]
+    nb_fwd_l ... list of nb_sims of forwards [12, 10, 12]
     :param mt: multithreading indicator
     :type mt: bool
     :param adj_fwd_tenors_days:  dict of {com_nb: nb_days_adj}
@@ -284,7 +284,7 @@ def mrds_calib_db_multiple( com_fwd_l
                                   adj_fwd_tenors_days=adj_fwd_tenors,
                                   adj_vol_tenors_days=adj_vol_tenors)
         mm.read_model_config_db(com_nb)
-        mm.set_other_params(com_nb)
+        mm._set_other_params(com_nb)
         mm.__kappa_sigma_rho(com_nb)
         if model_ind is 'skew':
             mm.calibrate_skew_params(com_nb)
@@ -309,7 +309,7 @@ def compute_partial_deltas(mm
        pricer (mo, params) where
          mo ... market object
          params ... parameters
-    :param nb_sim: nb. of simulations
+    :param nb_sim: nb_sims. of simulations
     :type nb_sim: int
     :param subset_idx: for which futures to compute the deltas
     :type subset_idx: list[int]

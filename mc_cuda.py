@@ -1,13 +1,8 @@
 import config
 import numpy as np
-import scipy.integrate
-from numpy.random import multivariate_normal as mn
+
 
 if config.CUDA_PRESENT:
-    import pycuda.cumath
-    import cuda_ops 
-    import pycuda.gpuarray as gpa
-    import pycuda.cumath as cumath
     import curand
     rn_gen_global = curand.create_gen_simple()  # generator of random numbers
 else:
@@ -35,7 +30,7 @@ def mc_mult_steps_gpu(F_v, s_v, T_l, rho_m, nb_sim,
     sc = gpa.zeros((nb_time_steps, fwd_c_len, nb_sim), dtype=np.double)  # sc - simulated curve 
     fwd_c = F_v
 
-    cuda_ops.vtpm_cols(np.log(fwd_c), sc[0, :, :], tm_ind='p')
+    cuda_ops.vtpm_cols(np.log(fwd_c), sc[0, :, :], tm_ind='network_struct')
     X = gpa.zeros((fwd_c_len, nb_sim), dtype=np.double)
     X_prev = gpa.empty((fwd_c_len[asset_nb], nb_simulations), dtype=np.double)
     simulated_rn = gpa.empty((fwd_c_len, nb_sim), dtype=np.double)

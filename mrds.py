@@ -1316,7 +1316,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     , assets           : List[str]
                     , nb_simulations   : int
                     , simulation_times : List[datetime.date]
-                    , set_seed         = None ) -> Dict[str, np.ndarray]:
+                    , set_seed         = None ) -> Dict[datetime.date, Dict[str, np.ndarray]]:
         """ Simulate the first nearby (1NB) (rolling) contract. Generates a dictionary where keys are
             assets and values are 2 dimensional arrays:
                0-th dimension: simulation times
