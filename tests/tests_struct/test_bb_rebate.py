@@ -36,16 +36,16 @@ if __name__ == '__main__':
     b.read_model_config(1, wb_name, 'MC_1')
     b.read_model_config(2, wb_name, 'MC_2')
 
-    b.market_corr_list[0][1] = b.market_corr_list[1][0] = ones ((1,len (subset_idx))).ravel() * 0.462
-    b.market_corr_list[1][2] = b.market_corr_list[2][1] = ones ((1,len (subset_idx))).ravel() * 0.458
-    b.market_corr_list[0][2] = b.market_corr_list[2][0] = ones ((1,len (subset_idx))).ravel() * 0.99
+    b._market_corr[0][1] = b._market_corr[1][0] = ones ((1, len (subset_idx))).ravel() * 0.462
+    b._market_corr[1][2] = b._market_corr[2][1] = ones ((1, len (subset_idx))).ravel() * 0.458
+    b._market_corr[0][2] = b._market_corr[2][0] = ones ((1, len (subset_idx))).ravel() * 0.99
 
 
-    b.set_other_params()
+    b._set_other_params()
     # calibration part 
-    b.black_vol_calibration(0)
-    b.black_vol_calibration(1)
-    b.black_vol_calibration(2)
+    b.__kappa_sigma_rho(0)
+    b.__kappa_sigma_rho(1)
+    b.__kappa_sigma_rho(2)
     b.calibrate_skew_params(0)
     b.calibrate_skew_params(1)
     b.calibrate_skew_params(2)

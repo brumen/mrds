@@ -7,19 +7,22 @@ from tolling.opd import add4
 SMALL_EPS = 1e-5
 
 
-def opd_1fuel_fast(power_prices,  # vector of power prices
-                   fuel_prices,  # vector of fuel prices
+def opd_1fuel_fast( power_prices  # vector of power prices
+                  , fuel_prices   # vector of fuel prices
                    # scalars for 1 fuel
-                   hr_max, hr_min,
-                   max_cap, min_disp,  # max, min dispatch
-                   start_fuel, start_fuel_cold,  # scalar
-                   added_fuel_cost,  # scalar
+                    , hr_max
+                    , hr_min
+                    , max_cap
+                    , min_disp  # max, min dispatch
+                    , start_fuel
+                    , start_fuel_cold  # scalar
+                    , added_fuel_cost,  # scalar
                    VC,  # variable cost, scalar
                    ramp_rate,  # scalar
                    startup_sp_in,
                    shutdown_sp_in,
                    startup_cost,
-                   startup_cost_cold, 
+                   startup_cost_cold,
                    xud_cold_startup,
                    xud_startup_horizon,
                    xud_shutdown_horizon,
@@ -109,12 +112,12 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
                                  (is_shutdown_profitable & (dc_force_shut == 1)))
     # compute dispatch
     not_state_state = ~state_state
-    curr_state = (state_state & (~do_shutdown)) | (not_state_state & do_startup)
-    state_change = curr_state != state_state
+    curr_state      = (state_state & (~do_shutdown)) | (not_state_state & do_startup)
+    state_change    = curr_state != state_state
 
     # accounting (- on curr_state is because curr_state is -1)
-    curr_generation = curr_state * (max_cap * not_run_at_min_index + run_at_min_index * min_disp)
-    generation_change = curr_generation - state_generation
+    curr_generation    = curr_state * (max_cap * not_run_at_min_index + run_at_min_index * min_disp)
+    generation_change  = curr_generation - state_generation
     ramping_adjustment = (0.5 / (ramp_rate * hours_in_block)) * np.abs(generation_change) * generation_change
     curr_generation -= ramping_adjustment
     curr_energy = curr_generation * hours_in_block
@@ -124,9 +127,9 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
 
     not_curr_state = ~curr_state
     starts = curr_state & not_state_state  # curr_state > state_state
-    shuts = not_curr_state & state_state
+    shuts  = not_curr_state & state_state
 
-    startup_cost = (is_cold_start & starts) * (fixed_startup_cost_cold + fuel_prices * start_fuel_cold) + \
+    startup_cost = (is_cold_start & starts)     * (fixed_startup_cost_cold + fuel_prices * start_fuel_cold) + \
                    (is_not_cold_start & starts) * (fixed_startup_cost + fuel_prices * start_fuel)
 
     ramp_cost_up_ind = (~starts) & (generation_change > SMALL_EPS)
@@ -139,13 +142,17 @@ def opd_1fuel_fast(power_prices,  # vector of power prices
     # cashflow[:] = cashflow
     add4( revenue
         , curr_energy * (fuel_prices + add_fuel_cost) * actual_heat_rate  # fuel costs
-        , variable_cost, startup_cost, ramp_cost, cashflow_per_path, nb_paths)
+        , variable_cost
+        , startup_cost
+        , ramp_cost
+        , cashflow_per_path
+        , nb_paths )
 
     # new unit state
     nus_hours_in_state[:] = state_hours_in_state * (~state_change) + hours_in_block
-    nus_generation[:] = curr_generation
-    nus_total_starts[:] = state_total_starts + starts
-    nus_hours_shut[:] = not_curr_state * (state_hours_shut + hours_in_block)
-    nus_hours_run[:] = curr_state * (state_hours_run + hours_in_block)
-    nus_global_starts[:] = state_global_starts + starts
-    nus_state[:] = curr_state
+    nus_generation[:]     = curr_generation
+    nus_total_starts[:]   = state_total_starts + starts
+    nus_hours_shut[:]     = not_curr_state * (state_hours_shut + hours_in_block)
+    nus_hours_run[:]      = curr_state * (state_hours_run + hours_in_block)
+    nus_global_starts[:]  = state_global_starts + starts
+    nus_state[:]          = curr_state

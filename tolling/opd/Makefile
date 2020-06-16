@@ -1,11 +1,11 @@
 # to compile xmm files
 SWIG = swig
-CPP  = g++-9
+CPP  = g++
 PROC_DIR     = -funroll-all-loops -falign-functions=16 -O3
 PROC_DIR_AVX = -funroll-all-loops -falign-functions=32 -O3
 XMM  = $(PROC_DIR) -msse4a
 AVX2 = $(PROC_DIR_AVX) -mavx2
-PYTHON_INCLUDE = -I/usr/include/python3.5/
+PYTHON_INCLUDE = $(shell python-config --includes)
 
 # compilation abbrevation
 CPP_XMM_COMPILE = $(CPP) $(XMM) $(PYTHON_INCLUDE)

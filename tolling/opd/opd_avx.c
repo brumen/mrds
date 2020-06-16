@@ -11,7 +11,8 @@
 #include <emmintrin.h>
 #endif
 
-#define PO PyObject
+#define PO  PyObject
+#define PAO PyArrayObject
 
 #include <python3.5m/Python.h>
 #include <numpy/ndarraytypes.h>
@@ -52,33 +53,33 @@
 
 #define CP(name) PyArrayObject *npy_## name = (PyArrayObject *) (name)  // mnemonic for change pointer
 #define CN(name) npy_## name  // mnemonic for change name
-#define CPN(typeused, name) typeused *npy_##name = (typeused *) ((PyArrayObject *)(name))->data
+#define CPN(typeused, name) (typeused *) ((PyArrayObject *)(name))->data
 
 void add4(PO *r, PO *a, PO *b, PO *c, PO *d, PO *y, int n) {
   // computes r - (a+b+c+d)
   // Using g++-{8,9} the compiler opimizes this using vaddpd instructions.
 
-  CPN(double, r);
-  CPN(double, a);
-  CPN(double, b);
-  CPN(double, c);
-  CPN(double, d);
-  CPN(double, y);
+  double* npy_r = CPN(double, r);  //(double *) ((PAO *) r)->data;
+  double* npy_a = CPN(double, a);  // (double *) ((PAO *) a)->data;
+  double* npy_b = CPN(double, b);  // (double *) ((PAO *) b)->data;
+  double* npy_c = CPN(double, c);  // (double *) ((PAO *) c)->data;
+  double* npy_d = CPN(double, d);  // (double *) ((PAO *) d)->data;
+  double* npy_y = CPN(double, y);  // (double *) ((PAO *) y)->data;
 
   for (size_t idx=0; idx<n; idx += 1)
-    CN(y)[idx] = CN(r)[idx] - (CN(a)[idx] + CN(b)[idx] + CN(c)[idx] + CN(d)[idx]);
+    npy_y[idx] = npy_r[idx] - (npy_a[idx] + npy_b[idx] + npy_c[idx] + npy_d[idx]);
 }
 
 
 void mul4(PO *r, PO *a, PO *b, double c, PO *y, int n) {
   // computes: r * a * b * c (c scalar, all other vectors)
-  CPN(double, r);
-  CPN(double, a);
-  CPN(double, b);
-  CPN(double, y);
+  double *npy_r = CPN(double, r);
+  double *npy_a = CPN(double, a);
+  double *npy_b = CPN(double, b);
+  double *npy_y = CPN(double, y);
 
   for (size_t idx=0; idx<n; idx += 1)
-    CN(y)[idx] = CN(r)[idx] * CN(a)[idx] * CN(b)[idx] * c;
+    npy_y[idx] = npy_r[idx] * npy_a[idx] * npy_b[idx] * c;
 
 }
 
@@ -92,11 +93,11 @@ void skew_fom(double F
               , int nb_sim) {
   /* Computes the skew transform from F, delta_X and c1, c2, c3 parameters.
    */
-  CPN(double, delta_X);
-  CPN(double, sim_fom);
+  double *npy_delta_X = CPN(double, delta_X);
+  double *npy_sim_fom = CPN(double, sim_fom);
 
   for (size_t idx = 0; idx< nb_sim; idx += 1) {
-    double delta_X_xmm  = CN(delta_X)[idx];
+    double delta_X_xmm  = npy_delta_X[idx];
     double delta_X2_xmm = delta_X_xmm * delta_X_xmm;
 
     CN(sim_fom)[idx] =  F * (1.
@@ -138,27 +139,27 @@ double num_quad(PO *vec1, PO *vec2, int v_len) {
                            (size_t) v_len);
 }
 
-double num_quad_tog(PO *vec1, PO *vec2, int v_len) {
+/* double num_quad_tog(PO *vec1, PO *vec2, int v_len) { */
 
-  CP(vec1);
-  CP(vec2);
+/*   CP(vec1); */
+/*   CP(vec2); */
 
-  reg v1_xmm, v2_xmm, v3_xmm, res_xmm;
-  size_t idx;
-  double res[DOUBLE_INCR];
+/*   reg v1_xmm, v2_xmm, v3_xmm, res_xmm; */
+/*   size_t idx; */
+/*   double res[DOUBLE_INCR]; */
 
-  res_xmm = msetz();
+/*   res_xmm = msetz(); */
 
-  for (idx=0; idx < v_len; idx += DOUBLE_INCR) {
-    v1_xmm = mloa(CN(vec1) + idx);
-    v2_xmm = mloa(CN(vec2) + idx);  // TODO: CHECK IF THIS AND PREV. LINE ARE OK??
-    v2_xmm = mmul(v1_xmm, v2_xmm);  // multiplied
-    res_xmm = madd(res_xmm, v2_xmm); // added
-  }
-  msto(res, res_xmm);
-  return res[0] + res[1];
+/*   for (idx=0; idx < v_len; idx += DOUBLE_INCR) { */
+/*     v1_xmm = mloa(CN(vec1) + idx); */
+/*     v2_xmm = mloa(CN(vec2) + idx);  // TODO: CHECK IF THIS AND PREV. LINE ARE OK?? */
+/*     v2_xmm = mmul(v1_xmm, v2_xmm);  // multiplied */
+/*     res_xmm = madd(res_xmm, v2_xmm); // added */
+/*   } */
+/*   msto(res, res_xmm); */
+/*   return res[0] + res[1]; */
 
-}
+/* } */
 
 
 double num_quad_internal_simple(double *vec1, double *vec2, size_t v_len) {
@@ -179,6 +180,27 @@ double num_quad_simple(PO *vec1, PO *vec2, int v_len) {
                                   (size_t) v_len);
 }
 
+
+bool do_start_shut_internal_simple(short *dc_can,
+                                   short *dc_force,
+                                   short *is_profitable,
+                                   bool  *do_action,
+                                   int   nb) {
+
+  // implements startup/shutdown
+  // dc_can_start & ((dc_force_start == 2) || (is_profit & dc_force == 1))
+  // and stores it into do_action
+
+  short dc_can_start, dc_force_start, is_profit;
+
+  for (size_t idx=0; idx<nb; idx += 1) {
+    dc_can_start = *(dc_can + nb);
+    dc_force_start = *(dc_force + nb);
+    is_profit      = *(is_profitable + nb);
+    do_action[nb] = dc_can_start & ((dc_force_start == 2) || (is_profit & dc_force_start == 1));
+  }
+
+}
 
 void do_start_shut_internal(short *dc_can,
 			                short *dc_force,
@@ -226,15 +248,30 @@ void do_start_shut(PO *dc_can, PO *dc_force, PO *is_profitable, PO *do_action, i
                          nb_sim);
 }
 
+void do_start_shut2(PO *dc_can, PO *dc_force, PO *is_profitable, PO *do_action, int nb_sim) {
+  // Implements whether one can start/shut down the plant.
+  CP(dc_can);
+  CP(dc_force);
+  CP(is_profitable);
+  CP(do_action);
+
+  do_start_shut_internal_simple((short *) CN(dc_can),
+                         (short *) CN(dc_force),
+                         (short *) CN(is_profitable),
+                         (bool *) CN(do_action),
+                         nb_sim);
+}
+
+
 void do_start_shut_simple(PO *dc_can
                           , PO *dc_force
                           , PO *is_profitable
                           , PO *do_action
                           , int nb_sim) {
-  CPN(bool , dc_can);
-  CPN(short, dc_force);
-  CPN(bool , is_profitable);
-  CPN(bool, do_action);
+  bool *npy_dc_can        = CPN(bool , dc_can);
+  short *npy_dc_force      = CPN(short, dc_force);
+  bool *npy_is_profitable = CPN(bool , is_profitable);
+  bool *npy_do_action     = CPN(bool, do_action);
 
   for (size_t idx=0; idx < nb_sim; idx += 1)
     CN(do_action)[idx] = CN(dc_can)[idx] & ( (CN(dc_force)[idx] == 2) || (CN(is_profitable)[idx] & (CN(dc_force)[idx] == 1)));
@@ -374,10 +411,10 @@ void startup_cost(PO *is_cold_start,
                   PO *res,
                   int nSize) {
 
-  CPN(short,  is_cold_start);  // constructs npy_is_cold_start of type short
-  CPN(short,  starts);
-  CPN(double, fuel_prices);
-  CPN(double, res);
+  short *npy_is_cold_start = CPN(short,  is_cold_start);  // constructs npy_is_cold_start of type short
+  short *npy_starts        = CPN(short,  starts);
+  double *npy_fuel_prices      = CPN(double, fuel_prices);
+  double *npy_res              = CPN(double, res);
 
   for (size_t idx=0; idx < nSize; idx += 1)
     npy_res[idx] = npy_starts[idx] ? (npy_is_cold_start[idx] ?
