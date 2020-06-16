@@ -14,7 +14,7 @@ class LMP:
 
     def __init__( self
                 , generation : List[Tuple[str, float, float, float]]
-                , network : List[Tuple[str, str, float]]):
+                , network    : List[Tuple[str, str, float]]):
         """ Nodes in the network are buses.
 
         :param generation: generation list in the form (node, generation, load, price of generation)
@@ -55,8 +55,9 @@ class LMP:
         return self.__all_nodes.index(node)
 
     def __integers_to_nodes(self, node_int : int) -> str:
-        """
+        """ Returns the node name from its integer number.
 
+        :param node_int: integer number of the node.
         """
 
         return self.__all_nodes[node_int]
@@ -65,7 +66,7 @@ class LMP:
         """ Find the position of (node_1, node_2) connection in generation list generation.
 
         :param node_1: origin node that we are searching in self.network
-        :param
+        :param node_2: destination node we are searching the connection from.
         """
 
         n1, n2, _ = self.network[0]
