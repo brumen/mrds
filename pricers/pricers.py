@@ -78,7 +78,7 @@ def bvnu(dh, dk, r):
     2-dimensional distribution function, from
         Alan Genz
         described in "On the computation of the bivariate normal integral",
-        Journal of Statist. Comput. Simul. 35, pp 101-107
+        Journal of Statist. Comput. Simul. 35, power_prices 101-107
 
     """
 
@@ -189,7 +189,7 @@ def black_greeks_local( S_0   : float
       Black ... value of the option
       Delta, Gamma, Vega, Theta, Rho
       call_put_ind == c for CALL
-                      p for PUT
+                      network_struct for PUT
                       b for BINARY
     """
 
@@ -219,7 +219,7 @@ def black_greeks_local( S_0   : float
             r * S_0 * disc * n11 - r * K * disc * n22
     rho = K * T * disc * n22
 
-    if cp_ind == 'p':
+    if cp_ind == 'network_struct':
         # TODO: FINISH HERE!!!
         delta = delta - disc
         theta = -S_0 * n1 * sigma / (2 * sqrtt) + \

@@ -1,4 +1,4 @@
-import config  # very general config
+# spikes model
 import numpy as np
 import scipy
 import scipy.optimize
@@ -10,29 +10,35 @@ import scipy.interpolate  # spline package
 import openopt
 import matplotlib
 matplotlib.use('TkAgg')
-import ds
-import abs_class  # imports abstract classes
+
 import pricers  # imports the black's pricers, etc.
 import spikes_fast
 import vols
 
+from mrds import ComSkew
 
-class spikes_model(abs_class.market_model):
-    def __init__(self, date_, lam, delta, eta):
-        self.date_ = date_
+
+# TODO: REFACTOR ComSkew to fit with this model.
+class ComSpikes(ComSkew):
+
+    def __init__(self, mkt_date, lam, delta, eta):
+        self.date_ = mkt_date
+
+        # parameters
         self.lam = lam  # frequency of jumps
         self.delta = delta  # length of jump
         self.eta = eta  # jump in prices
-        self.DF = ds.DF
 
     def europe_price(self, S_0, K, sigma, T):
         """
         # price of the european call option in the spike model
         # there exists a fast function called europe_price_spike in spikes_fast module
         """
+
         d_1 = np.log(S_0/K * (1. + self.eta)) + 0.5*sigma**2 * T
         disc_fact = self.DF(self.date_, T)
         r = - np.log(disc_fact) / T
+
         return (1. - self.lam * self.delta) * pricers.black_greeks(S_0, K, r, sigma, T, price_only=True) \
             + self.lam * self.delta * pricers.black_greeks(S_0, K/(1. + self.eta), r, sigma, T, price_only=True) + \
             disc_fact * self.lam * self.delta * self.eta * S_0 * scipy.stats.norm.cdf(d_1)
@@ -53,14 +59,18 @@ class spikes_model(abs_class.market_model):
 
     def impl_vol(self, option_price, S_0, K_v, sigma, T):
         """
-        computes the implied vol
-        option_price is a function of (S_0, K, sigma, T)
+        Computes the implied vol, option_price is a function of (S_0, K, sigma, T)
+
+
         """
-        disc_fact = self.DF(self.date_, T)
-        theta = 1  # call options
-        p_v = np.array([option_price(S_0, K, sigma, T) for K in K_v])
-        iv_v = vols.black_vol_inverse_vec(S_0, K_v, p_v, T, disc_fact, theta, 1.e-4)
-        return iv_v 
+
+        return vols.black_vol_inverse_vec( S_0
+                                         , K_v
+                                         , np.array([option_price(S_0, K, sigma, T) for K in K_v])
+                                         , T
+                                         , self.DF(self.date_, T)
+                                         , 1
+                                         , 1.e-4 )
 
     def apo_price(self, S0, K, sigma, T):
         """
@@ -75,20 +85,15 @@ class spikes_model(abs_class.market_model):
                     x = scipy.special.hyp1f1(-mu, 1.5, 2. * z * np.sinh(u)**2) * \
                         np.exp(-z * np.cosh(2. * u) - u**2/y) * \
                         np.sinh(2.*u) * np.sin(np.pi * u / y)
-                    if np.isnan(x):  # same exp(- ) reasoning
-                        return 0.
-                    else: 
-                        return x
+                    return 0. if np.isnan(x) else x  # same exp(- ) reasoning
 
             return 8. * z**(1.5) * scipy.special.gamma(mu + 1.5) * np.exp(np.pi**2 / (4.*y)) / \
                 (np.pi * np.sqrt(2 * np.pi * y)) * \
                 scipy.integrate.quad(lambda u: int1(u), 0., np.inf)[0]
 
         def dens(y):
-            # x = log (S0)/sigma # CHECK IF THIS IS CORRECT
-            x = S0
-            return 1./(np.sqrt(2.) * y) * np.exp(- sigma**2 * T / 8. - x/(sigma**2 * y)) * \
-                m_fct(sigma**2 * T/2., -1., x/sigma**2/y)
+            return 1./(np.sqrt(2.) * y) * np.exp(- sigma**2 * T / 8. - S0/(sigma**2 * y)) * \
+                m_fct(sigma**2 * T/2., -1., S0/sigma**2/y)
 
         def apo_cond(K):
             return scipy.integrate.quad(lambda y: (y-K) * dens(y), max(K, 0.), np.inf)[0]

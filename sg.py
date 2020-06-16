@@ -1,7 +1,7 @@
 import numpy as np
 import quad1d
 
-from scipy.misc import comb
+from scipy.special import comb
 
 from tolling.opd import opd_avx
 
