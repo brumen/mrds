@@ -25,6 +25,12 @@ void do_start_shut_simple(PyObject *dc_can
                    , PyObject *do_action
                    , int nb_sim );
 
+void do_start_shut2(PyObject *dc_can,
+                    PyObject *dc_force,
+                    PyObject *is_profitable,
+                    PyObject *do_action,
+                    int nb_sim);
+
 
 void startup_cost(PyObject *is_cold_start,
 		  PyObject *starts,

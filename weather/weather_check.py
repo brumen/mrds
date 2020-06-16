@@ -127,7 +127,7 @@ class weather():
         date_p ... pricing date (datetime format)
         date_s ... start date, 
         date_o ... origin date (check what that really is)
-        nb. months ... number of months of the HDD
+        nb_sims. months ... number of months of the HDD
         """
 
         mi = self.months_index (HDD_date_l, sp_l[0]) # just need month_decom 
@@ -344,7 +344,7 @@ class weather():
         # v = np.append ( T_0, ( T_m_d + a * T_m_v  - sigma_lam ) * dt )
 
         inn_d = self.Z_m_d * (sigma * np.sqrt (dt)) # mult. _has_ to be on the right (problems with pycuda)
-        vtpm_cols ( v, inn_d, 'p' ) # inn_d <- v_d + inn_d 
+        vtpm_cols ( v, inn_d, 'network_struct' ) # inn_d <- v_d + inn_d 
 
         return inn_d
 
@@ -374,7 +374,7 @@ class weather():
         # this implements ( *a _has_ be on the right )
         v = (T_m_d_v + T_m_v_v * a - sigma_lam ) * t_step
         T_s_1_d = self.Z_m_d * (sigma * np.sqrt (t_step)) # mult. _has_ to be on the right (problems with pycuda)
-        vtpm_cols ( v, T_s_1_d, 'p' ) # inn_d <- v_d + inn_d 
+        vtpm_cols ( v, T_s_1_d, 'network_struct' ) # inn_d <- v_d + inn_d 
 
         # appending from T_sim_inn is done in T_par_inn_d directly 
         # implements: T_s_1_d =  (1-a * t_step)**arange(N_step,-1,-1) * T_s_1_d 

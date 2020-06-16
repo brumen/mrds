@@ -66,10 +66,10 @@ vtm_f = vtpm_module.get_function ("vtm") # vector + matrix function
 
 
 
-def vtpm(v,m, tm_ind = 'p'):
+def vtpm(v,m, tm_ind = 'network_struct'):
     """ 
     vector times matrix, by rows 
-    tm_ind = p ... for summation (plus)
+    tm_ind = network_struct ... for summation (plus)
     tm_ind = t ... for multiplication (times)
     """
     m_cols = m.shape[1]
@@ -77,7 +77,7 @@ def vtpm(v,m, tm_ind = 'p'):
     nb_launches = m_rows / 65535 +1 # this is an integer
 
     block_dims = (m_cols,1,1)
-    vtpm_f = {'t': vtm_f, 'p': vpm_f} # for a single launch this works best
+    vtpm_f = {'t': vtm_f, 'network_struct': vpm_f} # for a single launch this works best
 
     if m_rows / 65535 > 0: 
         grid_dims = (65535, 1)
@@ -440,7 +440,7 @@ def month_into_sigma(n, mi_dec):
 # date_p ... pricing date (datetime format)
 # date_s ... start date, 
 # date_o ... origin date (check what that really is)
-# nb. months ... number of months of the HDD
+# nb_sims. months ... number of months of the HDD
 def HDD_real (date_p, date_s, nb_months, sp_l, hp, HDD_date_l, date_o, Z_m, Z_m_d, range_gpu, range_gpum1, range_gpu_inv, gpu_ind = False):
 
     mi = months_index (HDD_date_l, sp_l[0]) # just need month_decom 
@@ -617,8 +617,8 @@ def write_vec_in_mat_col ( rowsum_vec_d, hdd_sim_d, n):
     implements the following: hdd_sim[:,n] = rowsum_vec_d
     """
 
-    nb_sims = hdd_sim_d.shape[0] # nb. rows, simulations in rows 
-    nb_days = hdd_sim_d.shape[1] # nb. cols, days are in cols
+    nb_sims = hdd_sim_d.shape[0] # nb_sims. rows, simulations in rows
+    nb_days = hdd_sim_d.shape[1] # nb_sims. cols, days are in cols
 
     wohdd_f (rowsum_vec_d, hdd_sim_d, np.int32(n), np.int32(nb_sims), np.int32(nb_days),
              block=(nb_sims / 65535 +1,1,1), grid= (65535,1) )
@@ -800,7 +800,7 @@ def T_par_inn_d ( T_m_v_d, T_m_d_d, dt, sp, hp, Z_m_d1, date_p, date_o):
     #t4_d = time.time() - t4_d
 
     #t5_d = time.time()
-    vtpm ( v_d, inn_d, 'p' ) # inn_d <- v_d + inn_d 
+    vtpm ( v_d, inn_d, 'network_struct' ) # inn_d <- v_d + inn_d 
     #t5_d = time.time() - t5_d
     #t1_d = time.time() - t1_d
     #print "gpu t = ", (t1_d, t2_d, t3_d, t4_d, t5_d)
@@ -834,7 +834,7 @@ def T_sim_inn_d (T_m_v_d, T_m_d_d, t_step, N_step, sp, hp, Z_m_d1,
     # this implements ( *a _has_ be on the right )
     v_d = (T_m_d_d + T_m_v_d * a - sigma_lam ) * t_step
     T_s_1_d = Z_m_d1 * (sigma * sqrt (t_step)) # mult. _has_ to be on the right (problems with pycuda)
-    vtpm ( v_d, T_s_1_d, 'p' ) # inn_d <- v_d + inn_d 
+    vtpm ( v_d, T_s_1_d, 'network_struct' ) # inn_d <- v_d + inn_d 
 
     # appending from T_sim_inn is done in T_par_inn_d directly 
     # a = hp[5]

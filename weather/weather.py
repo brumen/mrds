@@ -1,30 +1,28 @@
 #
-# weather model, as described in
+# weather model, as described in TODO:
 
 import numpy as np
-import openopt  # optimization solver
-import pycuda.curandom
+import openopt
 import pycuda.gpuarray as gpa
-import pycuda.cumath
-import pycuda.reduction
-from pycuda.compiler import SourceModule
-#from cudanormal import cudanormal
 import datetime
 import calendar
 
-import cublas
-from cuda_ops import *
 
+class WeatherModel(object):
 
-class weather():
-    def __init__(self, sim_size, hp, date_l, sp=np.array([3.3, 3.3]),
-                 gpu_ind=False):
+    def __init__( self
+                , sim_size
+                , hp
+                , date_l
+                , sp      = np.array([3.3, 3.3])
+                , gpu_ind = False):
         """
         sim_size ... simulation size
         hp ... historical parameters
         sp ... simulation parameters
         date_l ... date list of [date_o, date_p, date_s]
         """
+
         self.sim_size = sim_size
         self.N_step = 31
         self.gpu_ind = gpu_ind  # True for CUDA, False for CPU
@@ -120,9 +118,10 @@ class weather():
     def month_into_sigma(self, n, mi_dec):
         """
         maps month n = 0, 1, 2, 3 into sp_l index when mi_dec is given
+
         """
-        np1 = n + 1
-        return sum([m[1] <= np1 for m in mi_dec.values()])
+
+        return sum([m[1] <= n+1 for m in mi_dec.values()])
 
     def HDD_real(self, nb_months, sp_l, HDD_date_l):
         """
@@ -131,7 +130,7 @@ class weather():
         date_p ... pricing date (datetime format)
         date_s ... start date,
         date_o ... origin date (check what that really is)
-        nb. months ... number of months of the HDD
+        nb_sims. months ... number of months of the HDD
         """
 
         mi = self.months_index(HDD_date_l, sp_l[0])  # just need month_decom
@@ -208,6 +207,7 @@ class weather():
         """
         calibrates everything
         """
+
         mi = self.months_index(HDD_date_l, self.sp)  # mi ... month index
         # mi_dec = month_decomp (mi["month_decomp"])
 
@@ -215,8 +215,6 @@ class weather():
 
         for nb_idx in np.arange(len(self.sp)):  # go over all contracts
             # do the calibration of sigma_lambda
-            print "calibrating ", nb_idx
-
             def opt_fct(sl):
                 sl_calib[nb_idx] = sl
                 nb_months = mi["month_decomp"][nb_idx][1] - 1
@@ -361,7 +359,7 @@ class weather():
 
         # mult. _has_ to be on the right (problems with pycuda)
         inn_d = self.Z_m_d * (sigma * np.sqrt(dt))
-        vtpm_cols(v, inn_d, 'p')  # inn_d <- v_d + inn_d
+        vtpm_cols(v, inn_d, 'network_struct')  # inn_d <- v_d + inn_d
 
         return inn_d
 
@@ -390,7 +388,7 @@ class weather():
         v = (T_m_d_v + T_m_v_v * a - sigma_lam) * t_step
         # mult. _has_ to be on the right (problems with pycuda)
         T_s_1_d = self.Z_m_d * (sigma * np.sqrt(t_step))
-        vtpm_cols(v, T_s_1_d, 'p')  # inn_d <- v_d + inn_d
+        vtpm_cols(v, T_s_1_d, 'network_struct')  # inn_d <- v_d + inn_d
 
         # appending from T_sim_inn is done in T_par_inn_d directly
         # implements: T_s_1_d =  (1-a * t_step)**arange(N_step,-1,-1) * T_s_1_d
