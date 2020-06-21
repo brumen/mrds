@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 
 from typing import Dict, List, Tuple
 
-from data import ds_data
-from data.discount_data import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
-from vols.fwd_codes     import fwd_mth_codes
+from mrds.data               import ds_data
+from mrds.data.discount_data import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
+from mrds.vols.fwd_codes     import fwd_mth_codes
 
 
 # mapping of commodity names to vol parametrization

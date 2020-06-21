@@ -8,8 +8,8 @@ from scipy.optimize import linprog
 
 from typing import Dict, List, Callable
 
-from discount import DF
-from pricers.pricers import spread_option_kirk
+from mrds.discount import DF
+from mrds.pricers.pricers import spread_option_kirk
 
 
 class FreightException(Exception):
@@ -309,19 +309,19 @@ class Freight:
 
         hedge = self.freight_hedge
 
-        tanker_locations = {self._time_grid[t]: {self._nbs_to_locations[i]: hedge[self._N(i, t)] for i in range(self._nb_locations)}
+        locations = {self._time_grid[t]: {self._nbs_to_locations[i]: hedge[self._N(i, t)] for i in range(self._nb_locations)}
+                     for t in range(self._nb_time_periods)}
+
+        movements_cond = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._X(i, j, t, u)])
+                                                                           for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
+                                               for i in range(self._nb_locations)}
+                          for t in range(self._nb_time_periods)}
+
+        movements_uncond = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._Y(i, j, t, u)])
+                                                                             for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
+                                                 for i in range(self._nb_locations)}
                             for t in range(self._nb_time_periods)}
 
-        tanker_movements_conditional = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._X(i, j, t, u)])
-                                                                                         for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
-                                                             for i in range(self._nb_locations)}
-                                        for t in range(self._nb_time_periods)}
-
-        tanker_movements_un_conditional = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._Y(i, j, t, u)])
-                                                                                            for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
-                                                                for i in range(self._nb_locations)}
-                                           for t in range(self._nb_time_periods)}
-
         return { 'portfolioValue': - np.sum(np.array(self._value) * np.array(hedge))  # self.valueVec is negative, cuase linprog is minimized
-               , 'locations'     : tanker_locations
-               , 'movements'     : (tanker_movements_conditional, tanker_movements_un_conditional)}
+               , 'locations'     : locations
+               , 'movements'     : (movements_cond, movements_uncond)}

@@ -8,7 +8,7 @@ import QuantLib as ql
 
 from scipy.interpolate import splrep, splev
 
-from ds import get_forward_curve
+from mrds.ds import get_forward_curve
 
 
 class DiscountCurve:
@@ -29,7 +29,15 @@ class DiscountCurve:
 
         interpolated_curve = splrep(disc_tenors_numeric, np.exp(-disc_tenors_numeric * discount_yields))  # interpolation function
 
-        return lambda time_diff: splev(time_diff, interpolated_curve)
+        def discount_interp_fct(time_diff):
+            if isinstance(time_diff, float):
+                time_diff_format = time_diff
+            elif isinstance(time_diff, datetime.date):
+                time_diff_format = float((time_diff - mkt_date).days) / dcf
+
+            return splev(time_diff_format, interpolated_curve)
+
+        return discount_interp_fct
 
     @staticmethod
     def discount_function_ql(mkt_date : datetime.date):

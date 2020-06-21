@@ -1,8 +1,11 @@
-import config 
+# 1d integration.
+
+import mrds.config as config
 import numpy as np
 from numpy import sqrt, arange, diag, prod, pi, array, maximum, kron
 from scipy.linalg import eig
 import math
+
 if config.CUDA_PRESENT:
     from pycuda import gpuarray as gpa
 

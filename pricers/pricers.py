@@ -1,23 +1,22 @@
-from config import CUDA_PRESENT
-
-from typing import Tuple, Union
-
+# Pricers file.
 import numpy as np
 import scipy.integrate
 import scipy.stats
 import scipy.interpolate
 import logging
-
 import QuantLib as ql
 
+from typing import Tuple, Union
+
+from mrds.config import CUDA_PRESENT
 if CUDA_PRESENT:
     import pycuda.autoinit
     import cuda.cuda_ops as co
 
-import sg
-import pricers.pricers_fast as pricers_fast
+import mrds.sg as sg
+import mrds.pricers.pricers_fast as pricers_fast
 
-from vols.vols_basic import sam_int
+from mrds.vols.vols_basic import sam_int
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

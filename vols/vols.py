@@ -1,6 +1,5 @@
 # Implements base volatility class
 
-import config
 import logging
 import datetime
 import scipy
@@ -21,9 +20,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 # if config.CUDA_PRESENT:
 #     import pycuda.autoinit  # this needs to be here.
 
-import ds
-from pricers.pricers import black_greeks
-from forward_curve   import FwdCurve
+import mrds.ds as ds
+from mrds.pricers.pricers import black_greeks
+from mrds.forward_curve   import FwdCurve
 
 mpl.use('TkAgg')
 

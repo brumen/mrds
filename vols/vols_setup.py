@@ -1,13 +1,11 @@
-from config import cython_include_dirs, cython_extra_link_args
+import sys
 
 from distutils.core      import setup
 from distutils.extension import Extension
 from Cython.Distutils    import build_ext
+from Cython.Build        import cythonize
 
 
 setup( name        = 'volatility functions fast'
      , cmdclass    = {'build_ext': build_ext}
-     , ext_modules = [Extension( "vols_fast"
-                               , sources         = ["vols_fast.pyx"]
-                               , include_dirs    = cython_include_dirs
-                               , extra_link_args = cython_extra_link_args) ] )
+     , ext_modules = cythonize('vols_fast.pyx', compiler_directives={'language_level': '3'}) )

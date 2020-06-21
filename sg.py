@@ -1,15 +1,14 @@
 import numpy as np
-import quad1d
-
 from scipy.special import comb
 
-from tolling.opd import opd_avx
+import mrds.quad1d as quad1d
+from mrds.tolling.opd import opd_avx
 
 
 #
 # My own sparse grid implementation
 #
-# Abbreviations: 
+# Abbreviations:
 #   sparse_grid abbreviated with sg
 #   points ... network_struct
 #   weights ... w

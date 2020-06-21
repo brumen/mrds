@@ -1,9 +1,9 @@
 # Fast version of the vol functions
 
 cimport numpy as np
-import pricers.pricers_fast  # This _HAS_ to be import and _not_ cimport
+from mrds.pricers.pricers_fast import cdf  # This _HAS_ to be import and _not_ cimport
 
-# declarations of external functions 
+# declarations of external functions
 cdef extern from "math.h":
     double sqrt(double)
 
@@ -49,7 +49,7 @@ cdef double b(double x, double sigma, double theta):
         d1 = x/sigma + sigma /2.
         return theta * e1 * pricers.pricers_fast.cdf(theta * d1) - theta/e1 * pricers.pricers_fast.cdf(theta*(d1 - sigma))
 
-    if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0): # d1 = +infty or d1 = -infty
+    if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0):  # d1 = +infty or d1 = -infty
         return theta * e1 - theta / e1
 
     return 0.
@@ -69,7 +69,7 @@ cdef b_c(x, theta):
 cdef double one_step(x, sigma, theta, beta):
     cdef double b_der
     b_der = exp(-0.5 * (x/sigma)**2 - 0.5 * (sigma/2)**2) / sqrt(2. * 3.1415)
-    
+
     if (beta < b_c(x, theta) ):
         return log((beta - iota(x, theta)) / (b(x, sigma, theta) - iota(x, theta))) * \
             (b(x, sigma, theta) - iota(x, theta)) / b_der
@@ -78,10 +78,10 @@ cdef double one_step(x, sigma, theta, beta):
 
 
 def black_vol_inverse_normalized(double beta, double x, double theta, double tol):
-    """ 
-    solving for sigma: b_fct (x, sigma, theta ) = beta 
-    tol ... tolerance level
-    result: sigma * sqrt (t)
+    """ Solving for sigma: b_fct (x, sigma, theta ) = beta
+
+    @param tol: tolerance level
+    @returns: sigma * sqrt (t)
     """
 
     cdef double sigma, sigma_new, delta_sigma, e1
@@ -95,7 +95,7 @@ def black_vol_inverse_normalized(double beta, double x, double theta, double tol
                                          pricers.pricers_fast.cdf (-sqrt(fabs(x)/2.0)))
 
     sigma_new = sigma * (1. + 2. * tol )
-    delta_sigma = 2. * tol 
+    delta_sigma = 2. * tol
 
     # TODO: possibly correct here
     if npy_isnan(sigma):

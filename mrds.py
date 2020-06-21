@@ -15,18 +15,18 @@ from functools       import lru_cache
 from typing          import List, Dict, Tuple
 
 # mrds imports
-from mrds_maths    import ComMathsMixin
-from mrds_defaults import ComSkewDefaultsMixin
-from correlations  import corr_hyp_sec_mat
-from near_corr     import near_corr_simple
-from vols.vols     import Volatility
-from vols.vols_get import get_vol_object
-from vols.vols_basic import black_vol_inverse
+from mrds.mrds_maths    import ComMathsMixin
+from mrds.mrds_defaults import ComSkewDefaultsMixin
+from mrds.correlations  import corr_hyp_sec_mat
+from mrds.near_corr     import near_corr_simple
+from mrds.vols.vols     import Volatility
+from mrds.vols.vols_get import get_vol_object
+from mrds.vols.vols_basic import black_vol_inverse
 
-from forward_curve       import FwdCurve
-from discount            import DiscountCurve
-from quartic.quartic_cy  import QuadRoots, CubicRoots, QuarticRoots
-from tolling.opd.opd_avx import skew_fom
+from mrds.forward_curve       import FwdCurve
+from mrds.discount            import DiscountCurve
+from mrds.quartic.quartic_cy  import QuadRoots, CubicRoots, QuarticRoots
+from mrds.tolling.opd.opd_avx import skew_fom
 
 
 logger = Logger(__name__)

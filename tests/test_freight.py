@@ -147,9 +147,7 @@ class FreightTest(TestCase):
         self.assertTrue(True)
 
     def test_freight_display(self):
-        """
-        Demonstrates the usage of the display class.
-
+        """ Demonstrates the usage of the display class.
         """
 
         freight1 = FreightDisplay(mktDate
@@ -164,3 +162,7 @@ class FreightTest(TestCase):
         freight1.display_movement()
 
         self.assertTrue(True)
+
+
+if __name__ == '__main__':
+    unittest.main(argv=['first-arg-is-ignored'], exit=False)

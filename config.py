@@ -19,9 +19,5 @@ if CUDA_PRESENT:
 prod_dir = '/home/brumen/work/mrds/'
 work_dir = prod_dir
 
-# cython params
-cython_include_dirs    = []
-cython_extra_link_args = []
-
 # for One-period dispatch
 opd_1_fuel_cuda_code = 'opd_1fuel_cu_by_block_new.c'
