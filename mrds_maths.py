@@ -66,3 +66,18 @@ class ComMathsMixin:
         """
 
         return ComMathsMixin._trunc_normal_above(b) - ComMathsMixin._trunc_normal_above(a)
+
+    @staticmethod
+    def __simulate_std_normal( nb_factors     : int
+                             , corr_mtx       : np.array
+                             , nb_simulations : int ) -> np.ndarray:
+        """ Simulates the standard normal random variables with specified correlations, and returns the
+        matrix of size (nb_factors x nb_correlations)  # TODO: CHECK IF THIS IS NOT REVERSED.
+
+        :param corr_mtx: correlation matrix, a nb_factors x nb_factors matrix.
+        :param nb_simulations: number of simulations from the factors.
+        """
+
+        return np.random.multivariate_normal( np.zeros(nb_factors)
+                                            , corr_mtx
+                                            , size = nb_simulations )

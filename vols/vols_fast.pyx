@@ -47,7 +47,7 @@ cdef double b(double x, double sigma, double theta):
 
     if sigma != 0.:
         d1 = x/sigma + sigma /2.
-        return theta * e1 * pricers.pricers_fast.cdf(theta * d1) - theta/e1 * pricers.pricers_fast.cdf(theta*(d1 - sigma))
+        return theta * e1 * cdf(theta * d1) - theta/e1 * cdf(theta*(d1 - sigma))
 
     if (theta >= 0 and x >= 0) or (theta <= 0 and x <= 0):  # d1 = +infty or d1 = -infty
         return theta * e1 - theta / e1
@@ -91,8 +91,7 @@ def black_vol_inverse_normalized(double beta, double x, double theta, double tol
                                                                  (b_c(x,theta) - iota(x, theta)))))
     else:
         e1 = exp(theta * x / 2.0)
-        sigma = - 2. * normal_ppf((e1 - beta) / (e1 - b_c(x,theta)) * \
-                                         pricers.pricers_fast.cdf (-sqrt(fabs(x)/2.0)))
+        sigma = - 2. * normal_ppf((e1 - beta) / (e1 - b_c(x,theta)) * cdf (-sqrt(fabs(x)/2.0)))
 
     sigma_new = sigma * (1. + 2. * tol )
     delta_sigma = 2. * tol

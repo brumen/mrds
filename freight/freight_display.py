@@ -4,12 +4,11 @@
 #
 
 import logging
-
-import networkx as nx
+import networkx          as nx
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
-from freight import Freight
+from mrds.freight.freight import Freight
 
 
 logger = logging.getLogger(__name__)

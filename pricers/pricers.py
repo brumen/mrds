@@ -34,9 +34,8 @@ def cdf_vec(x, ci=False):
 
 
 def cdf_vec_cpu(x: np.array) -> np.array:
-    """
-    Computes the cdf of the standard normal random variable of a vector x.
-    Works for both vectors and matrices
+    """ Computes the cdf of the standard normal random variable of a vector x.
+        Works for both vectors and matrices
 
     :param x: vector/matrix to compute the standard normal variable of.
     :returns: vector/matrix of results
@@ -282,7 +281,7 @@ def trivariate_spread_kirk( F       : np.array
     mu_2_d = lambda x_3: mu[1] + rho[2] * x_3 * nu[1]
     k_1 = lambda x_3: K + F[2] * np.exp(x_3 * nu[2] + mu[2])
     rho_Y1_Y2 = (rho[0] - rho[1]*rho[2])/np.sqrt(1.-rho[1]**2) / np.sqrt(1. - rho[2]**2)
-    
+
     kirk_integ = lambda x_3: spread_option_kirk(F[0] * np.exp(mu_1_d(x_3) + 0.5 * nu_1_d**2),
                                                 F[1] * np.exp(mu_2_d(x_3) + 0.5 * nu_2_d**2),
                                                 k_1(x_3),
@@ -376,7 +375,7 @@ def multivariate_spread_mm(multi_option_fct, l, K, sim_t_i, T, mm, fwd_idx):
     if multi_nb != mm.nb_assets:
         logger.info("Multiplier vector does not equal the number of assets.")
         return -1  # return the error message -1
-    
+
     F_v_mat = np.kron(l.reshape (multi_nb,1), np.ones(mm.simulated_curves[0].shape[2])) * \
               np.array([mm.simulated_curves[asset][sim_t_i, fwd_idx, :]
                         for asset in range(mm.nb_assets)])
@@ -420,7 +419,7 @@ def d11_helper(params, z):
     """ returns the value of the spread option
     """
     S_1, S_2, K, sigma_1, sigma_2, rho, T, DF = params
-  
+
     # accessory variables
     nu_1 = sigma_1 * np.sqrt(T)
     nu_2 = sigma_2 * np.sqrt(T)

@@ -1,17 +1,17 @@
 # basic volatility functions
 
-import mrds.config as config
 import logging
-import numpy as np
+import mrds.config as config
+import numpy       as np
+import matplotlib  as mpl
 
-from numpy import double, log, exp, sqrt
-
-from scipy.interpolate import splev, splrep  # spline package
-from openopt import NLP
-import matplotlib as mpl
-mpl.use('TkAgg')
-
+from typing              import List
+from numpy               import double, log, exp, sqrt
+from scipy.interpolate   import splev, splrep  # spline package
+from openopt             import NLP
 from mrds.vols.vols_fast import black_vol_inverse_normalized
+
+mpl.use('TkAgg')
 
 
 if config.CUDA_PRESENT:
@@ -135,10 +135,10 @@ def sam_int(s : float, t : float, T_i : float, beta : float, sigma_L : float) ->
     return sqrt((t1 + t2 + t3) / (t - s))
 
 
-def forward_vols_sam( sigma   : np.array[float]
+def forward_vols_sam( sigma   : np.array
                     , T       : float
-                    , Ti      : np.array[float]
-                    , taui    : np.array[float]
+                    , Ti      : np.array
+                    , taui    : np.array
                     , beta    : float
                     , sigma_L : float) -> List[float]:
     """ Forward vols in the Samuelson model.

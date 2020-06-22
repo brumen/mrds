@@ -5,8 +5,7 @@
 import datetime
 from scipy.interpolate import splev, splrep
 from typing            import List, Tuple, Union
-
-import ds
+from mrds.ds           import read_data_matched_tenors
 
 
 class FwdCurveException(Exception):
@@ -118,9 +117,9 @@ class FwdCurve:
         :returns: FwdCurve object for market date and curve.
         """
 
-        fwd_vol_matched = ds.read_data_matched_tenors( mkt_date
-                                                     , fwd_curve_name
-                                                     , fwd_curve_name)
+        fwd_vol_matched = read_data_matched_tenors( mkt_date
+                                                  , fwd_curve_name
+                                                  , fwd_curve_name)
 
         return cls(mkt_date
                    , fwd_curve_name

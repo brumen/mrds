@@ -3,8 +3,8 @@
 import datetime
 import logging
 
-from ds          import vol_hash
-from vols.vols   import Volatility
+from mrds.ds        import vol_hash
+from mrds.vols.vols import Volatility
 
 logger = logging.getLogger(__name__)
 

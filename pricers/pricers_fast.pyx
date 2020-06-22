@@ -86,4 +86,3 @@ cdef double spread_option_kirk_fast (double F_1, double F_2, double K,
     cdef double d_1 = ( log (F_1 / (F_2+K) ) + 0.5 * sigma_K**2 * T ) / (sigma_K * sqrt (T) )
 
     return  DF * (F_1 * cdf(d_1) - (F_2+K)*cdf(d_1 - sigma_K * sqrt (T)))
-

@@ -93,9 +93,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         self.__black_vol_inverse_tol = 1e-4  # default value of the black vol inverse parameter
 
-        # hashed values
-        self.__com_curve_names      = None
-        self.__vol_curve_names      = None
+        # hashed variables
+        self.__com_curve_names = None
+        self.__vol_curve_names = None
         self.__factor_corr_mtx = dict()  # to keep track of the factor correlation matrices.
         self.__market_corr_mtx = dict()  # track of the market correlation matrix
         self.__complete_corr_mtx            = None  # complete correlation matrix hash
@@ -1078,16 +1078,16 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                   , self.__difference_to_market_date(option_tenor))
                          for strike, cp in zip(strikes, cp_ind)]
 
-        df = self.DF(option_tenor)
+        discount_fact = self.DF(option_tenor)
 
         return np.array([black_vol_inverse( fwd_value
                                           , strike
                                           , opt_price
                                           , self.__difference_to_market_date(option_tenor)
-                                          , df
-                                          , cp
+                                          , discount_fact
+                                          , call_put_ind
                                           , self.black_vol_inverse_tol)
-                         for opt_price, strike, cp in zip( option_prices, strikes, cp_ind ) ] )
+                         for opt_price, strike, call_put_ind in zip( option_prices, strikes, cp_ind ) ] )
 
     def _opt_fct_skew( self
                      , asset     : str
@@ -1197,21 +1197,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self._V_cross_factor(asset_nb, i, j, fwd_idx, fwd_idx, t_prev, t_next)
 
-    @staticmethod
-    def __simulate_std_normal( nb_factors     : int
-                             , corr_mtx       : np.array
-                             , nb_simulations : int ) -> np.ndarray:
-        """ Simulates the standard normal random variables with specified correlations, and returns the
-        matrix of size (nb_factors x nb_correlations)  # TODO: CHECK IF THIS IS NOT REVERSED.
-
-        :param corr_mtx: correlation matrix, a nb_factors x nb_factors matrix.
-        :param nb_simulations: number of simulations from the factors.
-        """
-
-        return np.random.multivariate_normal( np.zeros(nb_factors)
-                                            , corr_mtx
-                                            , size = nb_simulations )
-
     def simulate_curves( self
                        , assets           : List[str]
                        , nb_simulations   : int
@@ -1298,9 +1283,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     #                c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
                     #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
                     # self.simulated_curves[asset][sim_time_idx, tenor_idx, :] = F_res
+
                     c1, c2, c3 =  self._c_vec(asset, tenor_nb)
-                    # TODO: REMOVE THIS LINE LATER!
-                    print('C0, C1, C2: {0}, {1}, {2}'.format(c1, c2, c3))
                     skew_fom( self.fwd_curve_names(asset).fwd_value(tenor_nb)
                             , X[asset][tenor_idx, :]  # delta_X
                             , 0.5 * c1

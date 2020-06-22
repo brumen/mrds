@@ -5,11 +5,12 @@ import datetime
 import numpy as np
 import logging
 from scipy.optimize import linprog
+from functools      import lru_cache
+from typing         import Dict, List, Callable
 
-from typing import Dict, List, Callable
-
-from mrds.discount import DF
-from mrds.pricers.pricers import spread_option_kirk
+from mrds.discount        import DiscountCurve
+# TODO: FIX THIS BOTTOM LINE AND REMOVE THE FUNCTION FROM HERE.
+# from mrds.pricers.pricers import spread_option_kirk
 
 
 class FreightException(Exception):
@@ -17,6 +18,41 @@ class FreightException(Exception):
 
 
 logger = logging.getLogger(__name__)
+
+
+def cdf_vec(x : np.array) -> np.array:
+    """ Computes the cdf of the standard normal random variable of a vector x.
+        Works for both vectors and matrices
+
+    :param x: vector/matrix to compute the standard normal variable of.
+    :returns: vector/matrix of results
+    """
+
+    l  = np.abs(x)
+    k  = 1. / (1. + 0.2316419 * l)
+    k2 = k**2
+    k4 = k2**2
+
+    # 0.39 = 1/sqrt(2*pi)
+    w = 1. - 0.3989422804 * np.exp(-l*l / 2) * (0.31938153 * k -0.356563782 * k2 +
+                                                1.781477937 * k2 * k + -1.821255978 * k4 + 1.330274429 * k4 * k)
+
+    xPos = x >= 0.
+    return w * xPos + (1. - w) * (~xPos)
+
+
+def spread_option_kirk(F_1, F_2, K, sigma_1, sigma_2, rho, T, df):
+    """ Kirk formula for bivariate spread option when strike K = 0
+    TODO: IMPORT IT FROM mrds.pricers.pricers when this all works.
+
+    """
+
+    sigma_K = np.sqrt(sigma_1**2 - 2 * F_2 / (F_2 + K) * rho * sigma_1 * sigma_2 +
+                      (F_2 / (F_2 + K)) ** 2 * sigma_2**2)
+    d_1 = (np.log(F_1/(F_2+K)) + 0.5 * sigma_K**2 * T) / (sigma_K * np.sqrt(T))
+    d_2 = d_1 - sigma_K * np.sqrt(T)
+
+    return  df * (F_1 * cdf_vec(d_1) - (F_2+K) * cdf_vec(d_2))
 
 
 class Freight:
@@ -51,15 +87,15 @@ class Freight:
         :param dcf: day count factor, used for discounting and option evaluation.
         """
 
-        self.mkt_date       = mkt_date
-        self.fwd_curve_fct  = fwd_curve_fct
-        self.vol_curve_fct  = vol_curve_fct
-        self._corr_matrix   = corr_matrix
-        self._travel_matrix = travel_matrix   # number of periods between different locations
-        self._cost_matrix   = cost_matrix     # same as travel matrix, costs between locations
-        self._time_grid     = time_grid       # grid used to compute the value of the freight portfolio.
-        self._dcf           = dcf            # day count factor
-        self._initial_locations = initial_locations  # initial locations of the portfolio
+        self.mkt_date          = mkt_date
+        self.initial_locations = initial_locations  # initial locations of the portfolio
+        self.fwd_curve_fct     = fwd_curve_fct
+        self.vol_curve_fct     = vol_curve_fct
+        self._corr_matrix      = corr_matrix
+        self._travel_matrix    = travel_matrix   # number of periods between different locations
+        self._cost_matrix      = cost_matrix     # same as travel matrix, costs between locations
+        self._time_grid        = time_grid       # grid used to compute the value of the freight portfolio.
+        self._dcf              = dcf             # day count factor
 
         # simple derived variables
         self._locations         = list(initial_locations.keys())  # locations considered are given in initial_locations
@@ -75,6 +111,7 @@ class Freight:
         self.__EV          = None
         self.__lower_bound = None
         self.__freight_hedge_result = None
+        self.__discount_factor = None
 
     def fwd_vol_curves(self
                        , location : str
@@ -89,6 +126,28 @@ class Freight:
         """
 
         return (self.fwd_curve_fct if fwd_vol_ind == 'fwd' else self.vol_curve_fct)(self.mkt_date, location, future_date)
+
+    @property
+    def _discount_factor(self) -> Callable:
+        """ Constructs the discount function for market date.
+
+        @param mkt_date: market date of the discount function.
+        """
+
+        if self.__discount_factor:
+            return self.__discount_factor
+
+        self.__discount_factor = DiscountCurve.discount_function(self.mkt_date)  # this is a function
+        return self.__discount_factor
+
+    def DF(self, future_date : datetime.date) -> float:
+        """ Computes the discount factor from self.mkt_date to future_date
+
+        @param future_date: future date to which the discounting is computed
+        @returns: discount factor from mkt date until future_date
+        """
+
+        return self._discount_factor(future_date)
 
     @property
     def lower_bound(self):
@@ -117,7 +176,7 @@ class Freight:
                                  , self.fwd_vol_curves(city2, t2, fwd_vol_ind='vol')
                                  , self._corr_matrix[(city1, city2) if (city1, city2) in self._corr_matrix else (city2, city1)]
                                  , (t2 - t1).days / self._dcf
-                                 , DF(self.mkt_date, t2) )
+                                 , self.DF(t2) )
 
     def _X(self, i : int, j : int, t : int, u :int) -> int:
         """ Conditional transport variable.
@@ -135,7 +194,7 @@ class Freight:
         return self._nb_locations ** 2 * self._nb_time_periods * (self._nb_time_periods - 1) // 2 \
                + self._X(i, j, t, u)
 
-    def _N(self, i, t) -> int:
+    def _N(self, i : int, t : int) -> int:
         """ Number of tankers in city i at time t. Location of the variable n_(i,t) in the vector of all variables.
         """
 
@@ -203,15 +262,15 @@ class Freight:
         for i in range(self._nb_locations):
             constraints_vec = np.zeros(self.__nb_lp_variables)
             constraints_vec[self._N(i, 0)] = 1.
-            equality_vector.append(self._initial_locations[self._nbs_to_locations[i]])
+            equality_vector.append(self.initial_locations[self._nbs_to_locations[i]])
             equality_matrix.append(constraints_vec)
 
-        # sum_i n_i,t = K 
+        # sum_i n_i,t = K
         for t in range(1, self._nb_time_periods):  # t=0 already given above
             constraints_vec = np.zeros(self.__nb_lp_variables)
             for i in range(self._nb_locations):
                 constraints_vec[self._N(i, t)] = 1.
-            equality_vector.append(sum(self._initial_locations.values()))  # number of tankers, ships
+            equality_vector.append(sum(self.initial_locations.values()))  # number of tankers, ships
             equality_matrix.append(constraints_vec)
 
         # constraint n_i,t = n_i,t-1 + sum_{j, u<t} (X(j, i, u, t) + Y(j,i,t,u)) - sum _{u>t-1, j} (X(i,j,t-1, u) + Y(i,j,t-1,u))
@@ -273,7 +332,7 @@ class Freight:
                          , A_ub  = self.__lm_mat  # inequality condition A_ub * x <= b_ub
                          , b_ub = np.zeros(self.__lm_mat.shape[0])  # zeros the shape of LMMat
                          , A_eq = em
-                         , b_eq = ev)
+                         , b_eq = ev )
 
         if result.success:
             self.__freight_hedge_result = result.x
@@ -303,25 +362,96 @@ class Freight:
                                      , self._time_grid.index(start_date)
                                      , self._time_grid.index(end_date) )
 
-    def represent_hedge(self):
+    def _hedge_locations(self, ignore_small_nbs = .0001):
+        """ Represents the hedge locations of the optimization problem.
+
+        @param ignore_small_nbs: ignore hedges below this number
+        """
+
+        freight_hedge = self.freight_hedge
+
+        locations = {}
+        for period_nb in range(self._nb_time_periods):
+            time_period = self._time_grid[period_nb]
+            locations[time_period] = {}
+            for location in self._locations:
+                hedge = freight_hedge[self._N(self._locations.index(location), period_nb)]
+                if hedge > ignore_small_nbs:
+                    locations[time_period][location] = hedge
+            if locations[time_period] == {}:
+                locations.pop(time_period)
+
+        return locations
+
+    def _hedge_movements_cond_uncond(self, cond_uncond : str, ignore_small_nbs = 0.001):
+        """ Conditional or unconditional representation of hedge movements.
+
+        @param cond_uncond: 'cond' if conditional movments, else 'uncond'
+        @param ignore_small_nbs: number below which the hedge positions are ignored.
+        @returns: value of the conditional movements of freight. TODO: EXPLAIN THIS BETTER.
+        """
+
+        hedge           = self.freight_hedge
+        cond_uncond_var = self._X if cond_uncond == 'cond' else self._Y
+
+        hm_cond = {}
+        for time_period in range(self._nb_time_periods):  # time_period was t
+            grid_period = self._time_grid[time_period]
+            hm_cond[grid_period] = {}
+            for location in self._locations: # for i in range(self._nb_locations)}  # location was i = self._locations.index(location)
+                i = self._locations.index(location)
+                hm_cond[grid_period][location] = []
+                for j in range(self._nb_locations):
+                    for u in range(time_period + 1, self._nb_time_periods):
+                        hedged_value = hedge[cond_uncond_var(i, j, time_period, u)]
+                        if hedged_value > ignore_small_nbs:
+                            hm_cond[grid_period][location].append((self._nbs_to_locations[j], self._time_grid[u], hedged_value))
+                if hm_cond[grid_period][location] == []:
+                    hm_cond[grid_period].pop(location)  # remove location
+            if hm_cond[grid_period] == {}:
+                hm_cond.pop(grid_period)
+
+        return hm_cond
+
+    @staticmethod
+    def pretty_dict(d : Dict, indent : int = 0 ):
+        """ Pretty print dictionary d.
+
+        @param d: dictionary to be printed.
+        @returns: prints the dict and returns None
+        """
+
+        for key, value in d.items():
+            curr_key = '\t' * indent + str(key)
+            if not isinstance(value, dict):
+                print(curr_key + ': ' + str(value))
+            else:
+                print(curr_key)
+                Freight.pretty_dict(value, indent+1)
+
+    def represent_hedge(self, ignore_small_nbs = .0001 ):
         """ Represents the hedge obtained from optimization.
+
+        @param ignore_small_nbs: ignore all hedges below a certain threshold, e.g. 1e-4
         """
 
         hedge = self.freight_hedge
 
-        locations = {self._time_grid[t]: {self._nbs_to_locations[i]: hedge[self._N(i, t)] for i in range(self._nb_locations)}
-                     for t in range(self._nb_time_periods)}
+        # TODO: REMOVE THESE STUFF HERE
+        #locations = {self._time_grid[period_nb]: {self._nbs_to_locations[loc_nb]: hedge[self._N(loc_nb, period_nb)]
+        #                                          for loc_nb in range(self._nb_locations) }
+        #             for period_nb in range(self._nb_time_periods) }
+        # movements_cond = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._X(i, j, t, u)])
+        #                                                                    for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
+        #                                        for i in range(self._nb_locations)}
+        #                   for t in range(self._nb_time_periods)}
+        # movements_uncond = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._Y(i, j, t, u)])
+        #                                                                      for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
+        #                                          for i in range(self._nb_locations)}
+        #                     for t in range(self._nb_time_periods)}
 
-        movements_cond = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._X(i, j, t, u)])
-                                                                           for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
-                                               for i in range(self._nb_locations)}
-                          for t in range(self._nb_time_periods)}
-
-        movements_uncond = {self._time_grid[t]: {self._nbs_to_locations[i]: [(self._nbs_to_locations[j], self._time_grid[u], hedge[self._Y(i, j, t, u)])
-                                                                             for j in range(self._nb_locations) for u in range(t + 1, self._nb_time_periods)]
-                                                 for i in range(self._nb_locations)}
-                            for t in range(self._nb_time_periods)}
-
-        return { 'portfolioValue': - np.sum(np.array(self._value) * np.array(hedge))  # self.valueVec is negative, cuase linprog is minimized
-               , 'locations'     : locations
-               , 'movements'     : (movements_cond, movements_uncond)}
+        return { 'portfolioValue'  : - np.sum(self._value * np.array(hedge))  # self._value is negative, cause linprog is minimized
+               , 'locations'       : self._hedge_locations(ignore_small_nbs)
+               , 'movements_cond'  : self._hedge_movements_cond_uncond('cond', ignore_small_nbs)
+               , 'movements_uncond': self._hedge_movements_cond_uncond('uncond', ignore_small_nbs)
+               , }
