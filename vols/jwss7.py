@@ -9,9 +9,9 @@ from typing  import List, Dict, Tuple
 from tkinter import Scale, Button, HORIZONTAL
 from scipy.interpolate import splev, splrep
 
-import ds
-from forward_curve import FwdCurve
-from vols.vols     import Volatility, VolatilityDrawMixin
+from mrds.ds            import get_vol_curve
+from mrds.forward_curve import FwdCurve
+from mrds.vols.vols     import Volatility, VolatilityDrawMixin
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class JWSS7Volatility(Volatility):
 
     @classmethod
     def from_db(cls, com_name : str, mkt_date : datetime.date):
-        vol_type, vol_params = ds.get_vol_curve(com_name, mkt_date)
+        vol_type, vol_params = get_vol_curve(com_name, mkt_date)
         if vol_type != 'JWSS7':
             raise RuntimeError('Fetching the wrong curve. {0} has type {1}'.format(com_name, vol_type))
 
