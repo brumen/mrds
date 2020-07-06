@@ -47,6 +47,19 @@ class TestMrds(TestCase):
 
         self.assertEqual(sim_curves['WTI'].shape, (len(sim_times), len(tenor_list), nb_sims) )
 
+    def test_simulate_curves_cpu_more(self):
+        """ Tests whether the simulate curves actually runs on the cpu. This should always work.
+        """
+
+        m1         = ComSkew.from_db(datetime.date(2015, 4, 1), ['WTI',])
+        nb_sims    = 1000  # number of simulations
+        sim_times  = [datetime.date(2015, 8, 1), datetime.date(2015, 9 , 1), datetime.date(2015, 10, 1)]  # simulation times
+        tenor_list = [datetime.date(2015, 11, 1) , datetime.date(2015, 12, 1), datetime.date(2016, 1, 1), datetime.date(2016, 2, 1), datetime.date(2016, 3, 1)]  # tenors to simulate
+
+        sim_curves = m1.simulate_curves( ['WTI'], nb_sims, sim_times, tenor_list = tenor_list, multi_thread_calib=True )
+
+        self.assertEqual(sim_curves['WTI'].shape, (len(sim_times), len(tenor_list), nb_sims) )
+
     def test_simulate_curves_1nb(self):
         """ Tests whether the 1nb simulate curves.
         """

@@ -39,11 +39,11 @@ class ComSkewError(Exception):
     pass
 
 
-def opt_fct_skew_wrap(arg, **kwarg):
+def calibrate_skew_dates_wrap(arg, **kwarg):
     """ Wrapper for the skew MRD model calibration function.
     """
 
-    return ComSkew._opt_fct_skew(*arg, **kwarg)
+    return ComSkew._calibrate_skew_one_date(*arg, **kwarg)
 
 
 class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
@@ -78,10 +78,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self._calcDate         = calc_date if calc_date else mkt_date
         self._com_fwd_curves   = fwd_curves
         self._com_vol_curves   = vol_curves
-        self._discount_curve   = discount_curve if discount_curve else DiscountCurve.discount_function(mkt_date)
+        self._discount_curve   = discount_curve if discount_curve else DiscountCurve(mkt_date).discount_function_2  #discount_function_local(mkt_date)  # DiscountCurve.discount_function(mkt_date)
         nb_assets              = len(self._com_fwd_curves)
 
         # initial value of the calibrated params
+        # __C_vec is in the form of {'asset': {fwd_date (datetime.date): [1.2, 3.,4.5]} }
         self.__C_vec = None
 
         # indicator functions - whether the values are updated
@@ -114,6 +115,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return cls( mkt_date
                   , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
                   , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
+
+    def object_identifier(self) -> Tuple[datetime.date, List[str]]:
+        """ Object identifier for the purposes of pickling. returns a tuple which can be used for storing objects.
+
+        :returns: tuple which identifies the curve - market date of the curve, followed by a list of curves stored in the object.
+        """
+
+        return (self.mkt_date, [fwd_curve.fwd_name for fwd_curve in self.fwd_curves()])
+
 
     @property
     def mkt_date(self) -> datetime.date:
@@ -201,17 +211,20 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         if not self.__C_vec:
             logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
-            self.__C_vec = {asset: {fwd_date: self._opt_fct_skew(asset, [fwd_date])[fwd_date]}}
+            self.__C_vec = {asset: {fwd_date: self._calibrate_skew_one_date(asset, fwd_date)}}
+
             return self.__C_vec[asset][fwd_date]
 
         if asset not in self.__C_vec:
             logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
-            self.__C_vec[asset] = {fwd_date: self._opt_fct_skew(asset, [fwd_date])[fwd_date]}
+            self.__C_vec[asset] = {fwd_date: self._calibrate_skew_one_date(asset, fwd_date) }
+
             return self.__C_vec[asset][fwd_date]
 
         if fwd_date not in self.__C_vec[asset]:
             logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
-            self.__C_vec[asset][fwd_date] = self._opt_fct_skew(asset, [fwd_date])[fwd_date]
+            self.__C_vec[asset][fwd_date] = self._calibrate_skew_one_date(asset, fwd_date)
+
             return self.__C_vec[asset][fwd_date]
 
         return self.__C_vec[asset][fwd_date]  # already computed, just return it.
@@ -656,14 +669,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param t_1: integrated vol end time (float)
         """
 
-        kappa_1 = self._kappa_vec(asset)[factor_1]
-        kappa_2 = self._kappa_vec(asset)[factor_2]
+        kappa_1  = self._kappa_vec(asset)[factor_1]
+        kappa_2  = self._kappa_vec(asset)[factor_2]
         kappa_12 = kappa_1 + kappa_2
-        sigma_1 = self._sigma_vec(asset)[factor_1]
-        sigma_2 = self._sigma_vec(asset)[factor_2]
-        rho_12 = self._factor_corr_mat(asset, asset)[factor_1, factor_2]
-        beta_1 = self._beta_T(asset, [fwd_date_1])[0]  # one forward date
-        beta_2 = self._beta_T(asset, [fwd_date_2])[0]
+        sigma_1  = self._sigma_vec(asset)[factor_1]
+        sigma_2  = self._sigma_vec(asset)[factor_2]
+        rho_12   = self._factor_corr_mat(asset, asset)[factor_1, factor_2]
+        beta_1   = self._beta_T(asset, [fwd_date_1])[0]  # one forward date
+        beta_2   = self._beta_T(asset, [fwd_date_2])[0]
 
         if kappa_12 == 0.:
             return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 * (t_1 - t_0)
@@ -1111,10 +1124,39 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                  , self.black_vol_inverse_tol)
                 for opt_price, strike, call_put_ind in zip( option_prices, strikes, cp_ind ) ]
 
-    def _opt_fct_skew( self
-                     , asset     : str
-                     , fwd_dates : List[datetime.date]
-                     , deltas = None  ):
+    def _calibrate_skew_one_date(self, asset : str, fwd_date : datetime.date, deltas : List[float] = None ) -> np.array:
+        """ Optimization function to minimize over the fwd_dates.
+
+        :param asset: asset for which the skew function is calibrates, e.g. ('WTI')
+        :param fwd_date: forward date for which the skew calibration is done.
+        :param deltas: deltas for which to calibrate the skew
+        """
+
+        deltas_used = deltas if deltas else self._default_deltas_for_skew()
+
+        diff_to_mkt_date = self.__difference_to_market_date(fwd_date)
+        fwd_value    = self.fwd_curve_names(asset).fwd_value(fwd_date)
+        implied_vols = np.array([self.vol_curve_names(asset).implied_vol( fwd_date
+                                                                        , np.exp(delta) * fwd_value
+                                                                        , diff_to_mkt_date)
+                                 for delta in deltas_used ])
+
+        try:
+            c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
+                           , np.array([1., 0., 0.]))\
+                           .solve(self.__class__.NLP_SOLVER)
+        except Exception as e:
+            raise ComSkewError('Error in finding skew parameters, method _calibrate_skew_one_date: {0}'.format(str(e)))
+
+        # TODO: FIX THIS HERE!!!
+        logger.info('Finding skew parameters did not finish properly: {0}'.format(c_vec_sol.msg))
+
+        return c_vec_sol.xf  # return whatever you get back
+
+    def _calibrate_skew_dates( self
+                             , asset     : str
+                             , fwd_dates : List[datetime.date]
+                             , deltas    : List[float] = None ) -> Dict[datetime.date, np.array]:
         """ Optimization function to minimize over the fwd_dates.
 
         :param asset: asset for which the skew function is calibrates, e.g. ('WTI')
@@ -1122,58 +1164,42 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param deltas: deltas for which to calibrate the skew
         """
 
-        # penalize the calibrated funtion for values of C where positive forward prices.
-        # penalization level is 10000
-
-        deltas_used = deltas if deltas else self._default_deltas_for_skew()
-
-        C_calib = {}
-        for fwd_date in fwd_dates:
-            diff_to_mkt_date = self.__difference_to_market_date(fwd_date)
-            fwd_value    = self.fwd_curve_names(asset).fwd_value(fwd_date)
-            implied_vols = np.array([self.vol_curve_names(asset).implied_vol( fwd_date
-                                                                            , np.exp(delta) * fwd_value
-                                                                            , diff_to_mkt_date)
-                                     for delta in deltas_used ])
-
-            try:
-                c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
-                               , np.array([1., 0., 0.]))\
-                               .solve(self.__class__.NLP_SOLVER)
-            except Exception as e:
-                raise ComSkewError('Error in finding skew parameters, method _opt_fct_skew: {0}'.format(str(e)))
-
-            # TODO: FIX THIS HERE!!!
-            logger.info('Finding skew parameters did not finish properly: {0}'.format(c_vec_sol.msg))
-
-            C_calib[fwd_date] = c_vec_sol.xf  # return whatever you get back
-
-        return C_calib
+        return { fwd_date: self._calibrate_skew_one_date(asset, fwd_date, deltas=deltas)
+                 for fwd_date in fwd_dates }
 
     def __c_vec_calibrate( self
-                         , asset     : str
-                         , fwd_dates : List[datetime.date]
-                         , multi_thread_ind = False ):
-        """ Returns the skew parameters for asset. If done the first time, it calibrates the parameters,
-            otherwise it returns the stored value.
+                         , asset            : str
+                         , fwd_dates        : List[datetime.date]
+                         , multi_thread_ind : bool = False ):
+        """ Calibrates the dates that are not yet calibrated for the asset.
 
         :param asset: the asset to calibrate, such as 'wti'
         :param fwd_dates: forward dates for which to calibrate
         :param multi_thread_ind: indicator whether to use multiple threads
         """
 
+        if self.__C_vec:
+            if asset in self.__C_vec:
+                already_calibrated_dates = set(self.__C_vec[asset].keys())
+                to_be_calibrated = set(fwd_dates).difference(already_calibrated_dates)
+            else:
+                to_be_calibrated = fwd_dates
+        else:  # self.__C_vec == None
+            to_be_calibrated = fwd_dates
+
         if not multi_thread_ind:
-            return np.array(self._opt_fct_skew(asset, fwd_dates))
+            for calib_date, calib_vec in self._calibrate_skew_dates(asset, to_be_calibrated).items():
+                self._set_c_vec( asset, calib_date, calib_vec) # adding this to the __C_vec
 
-        # using multithreading
-        with Pool(processes=cpu_count()) as pool:
-            curr_nb_tenors = len(fwd_dates)
-            C = pool.map( opt_fct_skew_wrap
-                        , zip( [self] * curr_nb_tenors
-                             , [asset] * curr_nb_tenors
-                             , fwd_dates ) )
-
-            return np.array(C)
+        else:  # multithreaded part
+            with Pool(processes=cpu_count()) as pool:
+                nb_tenors = len(to_be_calibrated)
+                C_res = pool.map( calibrate_skew_dates_wrap
+                                , zip( [self] * nb_tenors
+                                     , [asset] * nb_tenors
+                                     , to_be_calibrated ) )
+            for calib_date, calib_vec in zip(to_be_calibrated, C_res):
+                self._set_c_vec( asset, calib_date, calib_vec)
 
     def _complete_corr_mtx(self, nb_steps=300) -> np.ndarray:
         """  Generates the factor correlation matrix from a list of list of corr. matrices
@@ -1231,7 +1257,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                        , nb_simulations   : int
                        , simulation_times : List[datetime.date]
                        , tenor_list       : List[datetime.date]
-                       , set_seed         = None) -> Dict[str, np.array]:
+                       , set_seed         = None
+                       , multi_thread_calib = False  ) -> Dict[str, np.array]:
         """ Simulate curves in assets for desired simulation times in simulation_times.
 
         Generates a dictionary of 3-dimensional arrays:
@@ -1246,6 +1273,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param simulation_times: simulation times for the forwards.
         :param tenor_list: list of tenors which to simulate
         :param set_seed: seed, if needed, can be left to None
+        :param multi_thread_calib: indicator whether to use multi-threaded calibration
         :returns: a dictionary where keys are simulated asset names, and values arrays as described above.
         """
 
@@ -1285,11 +1313,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             sims_Z_unit = np.dot( np.linalg.inv(np.linalg.cholesky(factor_corr_mat))
                                 , simulated_rn.transpose())
 
-            for asset in assets:
-                for tenor_idx, tenor_nb in enumerate(tenor_list):
+            for asset in assets:  # asset like 'WTI'...
+                if multi_thread_calib:  # calibration in parallel, otherwise on the fly below in self._c_vec
+                    self.__c_vec_calibrate(asset, tenor_list, multi_thread_ind=multi_thread_calib)
+
+                for tenor_idx, tenor in enumerate(tenor_list):  # tenor is a datetime.date format
                     # prepare cov mtx
                     nb_factors_asset = self.nb_factors_for_asset(asset)
-                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor_nb, i, j, sim_time_idx, sim_times_numeric)
+                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor, i, j, sim_time_idx, sim_times_numeric)
                                                              for j in range(nb_factors_asset)]
                                                             for i in range(nb_factors_asset)]))
                     delta_X = np.sum(np.dot(cov_chol, sims_Z_unit), axis=0)
@@ -1297,8 +1328,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     qv = np.sum([[self._V_cross_factor( asset
                                                       , factor_1
                                                       , factor_2
-                                                      , tenor_nb
-                                                      , tenor_nb
+                                                      , tenor
+                                                      , tenor
                                                       , 0. if sim_time_idx == 0 else sim_times_numeric[sim_time_idx - 1]
                                                       , sim_time_value )
                                   for factor_1 in range(nb_factors_asset)]
@@ -1312,9 +1343,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                     #                c2 * (X_u**3 - 3. * X_u * V_u) / 6. +
                     #                c3 * (X_u**4 - 6. * V_u * X_u**2 + 3. * V_u**2) / 24.)
                     # self.simulated_curves[asset][sim_time_idx, tenor_idx, :] = F_res
-
-                    c1, c2, c3 =  self._c_vec(asset, tenor_nb)
-                    skew_fom( self.fwd_curve_names(asset).fwd_value(tenor_nb)
+                    c1, c2, c3 =  self._c_vec(asset, tenor)
+                    skew_fom( self.fwd_curve_names(asset).fwd_value(tenor)
                             , X[asset][tenor_idx, :]  # delta_X
                             , 0.5 * c1
                             , qv  # V_u, quadratic variation
@@ -1324,6 +1354,31 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                             , nb_simulations )
 
         return simulated_curves
+
+    def simulate_curves_nicer( self
+                             , assets           : List[str]
+                               , nb_simulations   : int
+                               , simulation_times : List[datetime.date]
+                               , tenor_list       : List[datetime.date]
+                               , set_seed         = None) -> Dict[str, Dict[datetime.date, Dict[datetime.date, np.array]]]:
+        """ Reformats the simulate_curves into a more readable dictionary
+
+        Parameters the same as in simulate_curves_nicer.
+        """
+
+        sc = self.simulate_curves(assets, nb_simulations, simulation_times, tenor_list, set_seed=set_seed)
+
+        sc_nice = {}
+        for asset in assets:
+            sc_asset = sc[asset]
+            sc_nice[asset] = {}
+            for sim_time_idx, sim_time in enumerate(simulation_times):
+                sc_asset_sim_time = sc_asset[sim_time_idx]
+                sc_nice[asset][sim_time] = { tenor: sc_asset_sim_time[tenor_idx]
+                                             for tenor_idx, tenor in enumerate(tenor_list) }
+
+        return sc_nice
+
 
     def simulate_1nb( self
                     , assets           : List[str]
