@@ -5,7 +5,7 @@ import logging
 
 from scipy.stats import norm
 
-from typing  import List, Dict, Tuple
+from typing  import List, Dict, Tuple, Union
 from tkinter import Scale, Button, HORIZONTAL
 from scipy.interpolate import splev, splrep
 
@@ -16,11 +16,16 @@ from mrds.vols.vols     import Volatility, VolatilityDrawMixin
 logger = logging.getLogger(__name__)
 
 
+class JWSS7Exception(Exception):
+    pass
+
+
 class JWSS7Volatility(Volatility):
     """ Jump-wing parametrization.
     """
 
     INTERPOLATION_DEGREE = 2
+    SCIPY_SOLVER = 'scipy_cobyla'
 
     def __init__( self
                 , com_name : str
@@ -67,13 +72,18 @@ class JWSS7Volatility(Volatility):
 
         return self.__atm_vol_curve_interp
 
-    def atm_vol(self, fwd_date : datetime.date) -> float:
+    def atm_vol(self, fwd_date : Union[datetime.date, List[datetime.date]]) -> Union[float, List[float]]:
         """ Returns the atm forward for the fwd date fwd_date.
 
-        :param fwd_date: forward date for which the ATM is constructed
+        :param fwd_date: forward date for which the ATM is constructed.
         """
 
-        return splev((fwd_date - self.mkt_date).days / self.__dcf, self.__atm_vol_curve )
+        to_return = splev((fwd_date - self.mkt_date).days / self.__dcf, self.__atm_vol_curve )
+
+        if isinstance(fwd_date, datetime.date):
+            return float(to_return)
+
+        return to_return
 
     @classmethod
     def from_db(cls, com_name : str, mkt_date : datetime.date):
@@ -141,19 +151,19 @@ class JWSS7Volatility(Volatility):
         return sigma_0 * np.sqrt(1. + A * np.log(B * np.exp(C * (z / (1.0 + z * z) ** (alpha_C/2))) +
                                           (1. - B) * np.exp(- P * (z / (1.0 + z * z) ** (alpha_P/2)))))
 
-    def implied_vol(self, fwd_date : [datetime.date, int], K : float, ttm : float) -> float:
+    def implied_vol(self, fwd_date : Union[datetime.date, int], strike : float, ttm : float) -> float:
         """ Implied vol for the fwd_date.
 
         :param fwd_date: date for which the volatility is to be computed.
-        :param K: strike price
+        :param strike: strike price
         :param ttm: time to maturity
         """
 
         return self._vol_compute( fwd_date
                                 , JWSS7Volatility.normalized_strike(self._fwd_params.fwd_value(fwd_date)
-                                                                    , np.array([K])
+                                                                    , np.array([strike])
                                                                     , self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)][0]  # atm vol is the first element
-                                                                    , ttm) )
+                                                                    , ttm)[0] )
 
     def local_vol(self, fwd_date : datetime.date, T : float, S: float, ttm : float) -> float:
         """ Local volatility of the JWSS7 parametrization.
@@ -350,17 +360,20 @@ class JWSS7Volatility(Volatility):
                             , quantile
                             , lb = 0.01
                             , ub = np.inf
-                            , maxIter = 150
-                            , iprint  = -9 ):
+                            , maxIter = 150):
         """ Function finds K such that: skewed_cdf_analy(K, quantile) = 0
+
+        :param maxIter: maximum number of iterations for the iteration solver.
         """
 
-        return NLP( lambda K: (self.skewed_distribution(fwdDate, S0, K, ttm) - quantile)**2
+        try:
+            return NLP( lambda K: (self.skewed_distribution(fwdDate, S0, K, ttm) - quantile)**2
                       , S0
                       , lb      = lb
                       , ub      = ub
-                      , maxIter = maxIter
-                      , iprint  = iprint ).solve('scipy_cobyla').xf[0]
+                      , maxIter = maxIter).solve(self.__class__.SCIPY_SOLVER).xf[0]
+        except Exception as e:
+            raise JWSS7Exception('Couldnt compute inversion_skewed_cdf: {0}'.format(str(e)))
 
 
 class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):

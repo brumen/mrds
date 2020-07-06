@@ -12,7 +12,7 @@ from openopt         import NLP, NSP
 from logging         import Logger
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
-from typing          import List, Dict, Tuple
+from typing          import List, Dict, Tuple, Union
 
 # mrds imports
 from mrds.mrds_maths    import ComMathsMixin
@@ -349,23 +349,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self.__market_corr_mtx[asset_1][asset_2]
 
-    @staticmethod
-    def _construct_corr(mtx_size, theta_vector):
+    def _construct_corr_asset(self, asset_nb, theta_vector : np.array ):
         """ Constructs and upper triangular matrix from a vector theta_vector, first row is from the rho matrix.
 
-        :param mtx_size: matrix size.
+        :param asset_nb: asset for which correlation is required.
         :param theta_vector:
         """
 
+        mtx_size = self.nb_factors_for_asset(asset_nb)
+
         utm = np.triu(np.ones((mtx_size, mtx_size)))  # upper triangular matrix
         utm_diag_ones = np.diag(np.diag(utm))
-        utm = utm - utm_diag_ones
+        utm -= utm_diag_ones
         utm[utm == 1] = theta_vector
 
         return utm + utm.transpose() + utm_diag_ones
-
-    def _construct_corr_asset(self, asset_nb, theta_vector):
-        return self.__class__._construct_corr(self.nb_factors_for_asset(asset_nb), theta_vector)
 
     def __black_corr_within_curve(self
                                   , asset: str
@@ -577,7 +575,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                           , kappa_vec   : np.array
                           , sigma_vec   : np.array
                           , corr_matrix : np.array
-                          , fwd_date_1: datetime.date
+                          , fwd_tenor   : datetime.date
+                          , fwd_date_1  : datetime.date
                           , fwd_date_2  : datetime.date ):
         """ Computes forward integrated square vol (function V) from fwd_date_1 to fwd_date_2.
 
@@ -585,9 +584,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param kappa_vec: vec of kappas
         :param sigma_vec: vector of sigmas
         :param corr_matrix: correlation matrix for asset
+        :param fwd_tenor: tenor for which this forward volatility is computed.
         :param fwd_date_1: start of forward volatility computation
-        :param fwd_date_2: end of forward vol computation
+        :param fwd_date_2: end of forward vol computation, fwd_date_2 > fwd_date_1
         """
+
+        assert fwd_date_1 <= fwd_date_2, 'Integration between {0} and {1} is wrong. {0} should be smaller than {1}'.format(fwd_date_1, fwd_date_2)
+        assert fwd_tenor >= max(fwd_date_1, fwd_date_2), 'Forward tenor {0} should be bigger than both integration tenors {1}, {2}'.format(fwd_tenor, fwd_date_1, fwd_date_2)
 
         nb_factors = self.nb_factors_for_asset(asset)
 
@@ -601,11 +604,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         cross_1 = sigma_vec_row * corr_matrix * sigma_vec_col
         cross_2 = kappa_vec_row + kappa_vec_col
 
+        time_to_fwd_tenor  = self.__difference_to_market_date(fwd_tenor)
         time_to_fwd_date_1 = self.__difference_to_market_date(fwd_date_1)
         time_to_fwd_date_2 = self.__difference_to_market_date(fwd_date_2)
 
-        return np.sum(cross_1 * (np.exp(-cross_2 * ( time_to_fwd_date_2 - time_to_fwd_date_1)) -
-                                 np.exp(-cross_2 * time_to_fwd_date_2)) / cross_2)
+        return np.sum(cross_1 * (np.exp(-cross_2 * ( time_to_fwd_tenor - time_to_fwd_date_2)) -
+                                 np.exp(-cross_2 * ( time_to_fwd_tenor - time_to_fwd_date_1)) / cross_2) )
 
     def __V_one_factor( self
                       , asset      : str
@@ -671,25 +675,32 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                 np.exp(-kappa_1 * (self.__difference_to_market_date(fwd_date_2) - t_0) - kappa_2 * (T_2-t_0)))
 
     def black_vol(self
-                  , asset      : str
-                  , fwd_date: datetime.date
-                  , kappa_vec
-                  , sigma_vec
-                  , corr_matrix ):
-        """ Computes the model black vol until fwd_date
+                  , asset       : str
+                  , fwd_date    : datetime.date
+                  , kappa_vec   : np.array
+                  , sigma_vec   : np.array
+                  , corr_matrix : np.array ):
+        """ Computes the model black vol until fwd_date.
+
+        :param asset: asset for which this is computed, e.g. 'WTI'
+        :param fwd_date: forward date for which the vol is computed.
+        :param kappa_vec: kappa of the model.
+        :param sigma_vec: sigma of the model.
+        :param corr_matrix: corrlation of the model.
         """
 
         return np.sqrt(self.__fwd_square_vol( asset
                                              , kappa_vec
                                              , sigma_vec
                                              , corr_matrix
-                                             , fwd_date  # TODO: THE NEXT ARGUMENT IS WRONG
+                                             , fwd_date
+                                             , self.mkt_date
                                              , fwd_date) / self.__difference_to_market_date(fwd_date))
 
-    def black_vol_current(self, asset_nb : str, fwd_date : datetime.date) -> float:
+    def black_vol_current(self, asset : str, fwd_date : datetime.date) -> float:
         """ Computes black vol until option maturity for the given model parameters.
 
-        :param asset_nb: asset number (e.g. 'WTI')
+        :param asset: asset number (e.g. 'WTI')
         :param fwd_date: forward date
         :returns: black volatility for the model TODO: REWRITE THESE DESCRIPTIONS
         """
@@ -700,10 +711,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         #                       , self._factor_corr_mat(asset, asset)
         #                       , fwd_date)
 
-        return np.sqrt(self.__fwd_square_vol( asset_nb
-                                            , self._kappa_vec(asset_nb)
-                                            , self._sigma_vec(asset_nb)
-                                            , self._factor_corr_mat(asset_nb, asset_nb)
+        return np.sqrt(self.__fwd_square_vol( asset
+                                            , self._kappa_vec(asset)
+                                            , self._sigma_vec(asset)
+                                            , self._factor_corr_mat(asset, asset)
+                                            , fwd_date
                                             , self.mkt_date
                                             , fwd_date) / self.__difference_to_market_date(fwd_date))
 
@@ -736,20 +748,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return fwd_tenor
 
     def __distance_model_market_black_vol( self
-                                         , asset
-                                         , kappa_vec
-                                         , sigma_vec
-                                         , rho_vec
+                                         , asset     : str
+                                         , kappa_vec : np.array
+                                         , sigma_vec : np.array
+                                         , rho_vec   : np.array
                                          , fwd_tenors = None ) -> float:
         """ Distance between model & market black volatility, used for calibration of the entire curve.
             Produces a sqaure sum of distance elements.
 
-       :param asset: asset to consider, e.g. 'WTI'
-       :param kappa_vec: kappa vector to calibrate
-       :param sigma_vec: sigma vector to calibrate for asset asset
-       :param rho_vec: correlation _vector_ to calibrate
-       :param fwd_tenors: perhaps you want to restrict the forward tenors to a pre-defined set. If None,
+        :param asset: asset to consider, e.g. 'WTI'
+        :param kappa_vec: kappa vector to calibrate
+        :param sigma_vec: sigma vector to calibrate for asset asset
+        :param rho_vec: correlation _vector_ to calibrate
+        :param fwd_tenors: perhaps you want to restrict the forward tenors to a pre-defined set. If None,
                           fwd tenors from the forward curve are used.
+        :returns: square root of the distance between market and model numbers.
         """
 
         # either use fwd_tenors provided, or use the fwd tenors from the fwd curve.
@@ -768,25 +781,34 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return sum([(market_vol_elt - model_vol_elt)**2
                     for market_vol_elt, model_vol_elt in zip(market_vol, model_vol)])
 
+    def __convert_rho_vec_into_matrix(self, rho_vec :np.array) -> np.array:
+        """ Converts the vector rho_vec into a symmetric matrix rho, which can be used as a correlation matrix.
+
+        """
+
     @lru_cache(maxsize=MAX_ASSETS)
-    def __kappa_sigma_rho(self, asset : str):
+    def __kappa_sigma_rho(self, asset : str) -> Tuple[np.array, np.array, np.array]:
         """ Calibrates kappa and sigma and rho parameters of the log-normal part of the model.
 
         :param asset: asset to be calibrated
+        :returns: tuple of calibrated kappa, sigma and correlation. kappa, sigma are vectors, rho is a matrix (upper triangular).
         """
 
         nbf = self.nb_factors_for_asset(asset)
 
-        # extracting the upper triangular part of the correlation matrix 
-        fcm_init = self._factor_corr_mat(asset, asset)
-        fcm_lb   = self._factor_corr_mat(asset, asset, lb_ub_ind='lb')
-        fcm_ub   = self._factor_corr_mat(asset, asset, lb_ub_ind='ub')
+        # extracting the upper triangular part of the correlation matrix
+        fcm_init = self._factor_corr_mat(asset, asset)  # initial value of the factor correlation.
+        fcm_lb   = self._factor_corr_mat(asset, asset, lb_ub_ind='lb')  # lower bound of the factor corr. mtx.
+        fcm_ub   = self._factor_corr_mat(asset, asset, lb_ub_ind='ub')  # upper bound of the factor corr. mtx.
 
         # optimization run
-        return NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
-                                                                                      , kappa_sigma_rho_vec[0:nbf]
-                                                                                      , kappa_sigma_rho_vec[nbf:(2*nbf)]
-                                                                                      , kappa_sigma_rho_vec[(2*nbf):] )
+        # THIS MIGHT OR MIGHT NOT RUN
+        logger.info('Calibrating the log-normal part of the model for asset {0}'.format(asset))
+        try:
+            return NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
+                                                                                          , kappa_sigma_rho_vec[:nbf]
+                                                                                          , kappa_sigma_rho_vec[nbf:(2*nbf)]
+                                                                                          , kappa_sigma_rho_vec[(2*nbf):] )
                        , np.concatenate([ self._kappa_default(nbf, 'init')
                                         , self._sigma_default(nbf, 'init')
                                         , np.triu(fcm_init, 1)[np.triu(fcm_init, 1) != 0] ])
@@ -795,9 +817,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                               np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ])
                        , ub = np.concatenate([self._kappa_default(nbf, 'ub'),
                                               self._sigma_default(nbf, 'ub'),
-                                              np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ])
-                       , iprint = -1 )\
+                                              np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
                        .solve(self.__class__.NLP_SOLVER)
+        except Exception as e:
+            raise ComSkewError('Calibration of kappa, sigma, rho failed in method __kappa_sigma_rho: {0}'.format(str(e)))
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.
@@ -1017,6 +1040,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         # obtaining the coefficients
         A0, A1, A2, A3, A4, V = self._skew_params(asset, C_vec, fwd_date)
+
         if call_put_ind == 1:
             A0 -= strike
         else:  # put
@@ -1028,6 +1052,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         if debug_mode:
             poly_roots = np.sort(np.poly1d([A4, A3, A2, A1, A0]).roots)
+
         else:
             if A4 == 0. and A3 == 0. and A2 == 0.:
                 poly_roots = [-A0 / A1]
@@ -1054,40 +1079,37 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return np.linspace(0.1, 0.9, 10)
 
-    def __model_vol_surface(self, asset : str, C_vec, fwd_date : datetime.date, deltas = None):
-        """ Computes model vols for asset, C_vec, fwd_idx.
+    def __model_vol_surface(self, asset : str, C_vec, fwd_date : datetime.date, deltas : Union[np.array, None] = None ) -> List[float]:
+        """ Computes model vols for asset, C_vec and forward date fwd_date.
 
         :param asset: commodity considered.
         :param C_vec: skew vector
+        :param fwd_date: forward date for which the model vols are computed.
         :param deltas: deltas to be used for calibration.
+        :returns: list of volatilities for deltas for the particular parameters.
         """
 
         deltas_used = deltas if deltas else self._default_deltas_for_skew()
 
-        strikes = self.__deltas_to_strikes(asset, fwd_date, deltas_used)
+        strikes   = self.__deltas_to_strikes(asset, fwd_date, deltas_used)
         fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
-        cp_ind = np.array([1 if strike >= fwd_value else -1 for strike in strikes])
+        cp_ind    = np.array([1 if strike >= fwd_value else -1 for strike in strikes])
 
         # TODO: check if self.__difference_to ... is the correct parameter.
-        option_tenor = self.__option_tenor_for_fwd_tenor(asset, fwd_date)  # option tenor corresponding to fwd_date
-        option_prices = [self._polynomial_european( asset
-                                                  , C_vec
-                                                  , fwd_date
-                                                  , strike
-                                                  , cp
-                                                  , self.__difference_to_market_date(option_tenor))
+        option_tenor  = self.__option_tenor_for_fwd_tenor(asset, fwd_date)  # option tenor corresponding to fwd_date
+        ttm_numerical = self.__difference_to_market_date(option_tenor)
+        option_prices = [self._polynomial_european( asset, C_vec, fwd_date, strike, cp, ttm_numerical)
                          for strike, cp in zip(strikes, cp_ind)]
-
         discount_fact = self.DF(option_tenor)
 
-        return np.array([black_vol_inverse( fwd_value
-                                          , strike
-                                          , opt_price
-                                          , self.__difference_to_market_date(option_tenor)
-                                          , discount_fact
-                                          , call_put_ind
-                                          , self.black_vol_inverse_tol)
-                         for opt_price, strike, call_put_ind in zip( option_prices, strikes, cp_ind ) ] )
+        return [black_vol_inverse( fwd_value
+                                 , strike
+                                 , opt_price
+                                 , self.__difference_to_market_date(option_tenor)
+                                 , discount_fact
+                                 , call_put_ind
+                                 , self.black_vol_inverse_tol)
+                for opt_price, strike, call_put_ind in zip( option_prices, strikes, cp_ind ) ]
 
     def _opt_fct_skew( self
                      , asset     : str
@@ -1108,16 +1130,23 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         C_calib = {}
         for fwd_date in fwd_dates:
             diff_to_mkt_date = self.__difference_to_market_date(fwd_date)
-            fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
+            fwd_value    = self.fwd_curve_names(asset).fwd_value(fwd_date)
             implied_vols = np.array([self.vol_curve_names(asset).implied_vol( fwd_date
                                                                             , np.exp(delta) * fwd_value
                                                                             , diff_to_mkt_date)
                                      for delta in deltas_used ])
 
-            C_calib[fwd_date] = NLP( lambda C_vec: scipy.linalg.norm(self.__model_vol_surface(asset, C_vec, fwd_date) - implied_vols)
-                                   , np.array([1., 0., 0.])
-                                   , iprint = -1 )\
-                                   .solve(self.__class__.NLP_SOLVER).xf
+            try:
+                c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
+                               , np.array([1., 0., 0.]))\
+                               .solve(self.__class__.NLP_SOLVER)
+            except Exception as e:
+                raise ComSkewError('Error in finding skew parameters, method _opt_fct_skew: {0}'.format(str(e)))
+
+            # TODO: FIX THIS HERE!!!
+            logger.info('Finding skew parameters did not finish properly: {0}'.format(c_vec_sol.msg))
+
+            C_calib[fwd_date] = c_vec_sol.xf  # return whatever you get back
 
         return C_calib
 
@@ -1251,7 +1280,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             total_nb_factors = sum(nb_factors_by_asset)
 
             factor_corr_mat = self.__factor_corr_mat_multiple(assets)
-            simulated_rn    = self.__class__.__simulate_std_normal( total_nb_factors, factor_corr_mat, nb_simulations )
+            simulated_rn    = self.__class__._simulate_std_normal( total_nb_factors, factor_corr_mat, nb_simulations )
 
             sims_Z_unit = np.dot( np.linalg.inv(np.linalg.cholesky(factor_corr_mat))
                                 , simulated_rn.transpose())
@@ -1345,12 +1374,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             for tenor in tenors_to_process:
                 assets_to_rows_in_matrix[asset].append(tenors_from_all_curves.index(tenor))
 
-        new_simulated_curves = {}
-        for asset in assets:
-            # TODO: NOT ALL ASSETS ARE NEEDED FOR ALL SIMULATION TIMES - IMPROVE HERE
-            new_simulated_curves[asset] = simulated_curves[asset][ :, assets_to_rows_in_matrix[asset], : ]
-
-        return new_simulated_curves
+        # TODO: NOT ALL ASSETS ARE NEEDED FOR ALL SIMULATION TIMES - IMPROVE HERE
+        return { asset: simulated_curves[asset][ :, assets_to_rows_in_matrix[asset], : ]
+                 for asset in assets }
 
     @lru_cache(maxsize=20)  # TODO: THIS IS NOT RIGHT HERE!!!
     def __factor_positions(self, asset : str) -> slice:
@@ -1364,7 +1390,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fact_sum = np.zeros(len(cums)+1, dtype=np.int)
         fact_sum[1:(len(cums)+1)] = cums
 
-        return slice(fact_sum[asset_nb], fact_sum[asset_nb+1])
+        return slice(fact_sum[asset], fact_sum[asset+1])  # TODO: asset + 1 is wrong
 
 
 class ComSkewChecks(ComSkew):

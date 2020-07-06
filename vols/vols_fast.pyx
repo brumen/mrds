@@ -93,19 +93,20 @@ def black_vol_inverse_normalized(double beta, double x, double theta, double tol
         e1 = exp(theta * x / 2.0)
         sigma = - 2. * normal_ppf((e1 - beta) / (e1 - b_c(x,theta)) * cdf (-sqrt(fabs(x)/2.0)))
 
-    sigma_new = sigma * (1. + 2. * tol )
+    sigma_new   = sigma * (1. + 2. * tol )
     delta_sigma = 2. * tol
 
-    # TODO: possibly correct here
-    if npy_isnan(sigma):
-        return 1e-6
+    # TODO: ERROR HANDLING HAS TO BE HERE
 
-    if sigma == 0.:
+    if sigma <= 0.:
         sigma = 1.e-16
 
     while (delta_sigma / sigma > tol ):
-        sigma_new = sigma + one_step(x, sigma, theta, beta)
+        sigma_new   = sigma + one_step(x, sigma, theta, beta)
         delta_sigma = fabs(sigma_new - sigma)
-        sigma = sigma_new
+        sigma       = sigma_new
+
+    if sigma_new <= 0.:
+        return tol
 
     return sigma_new

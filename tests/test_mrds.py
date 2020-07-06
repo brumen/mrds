@@ -4,7 +4,7 @@
 import datetime
 from unittest import TestCase
 
-from mrds import ComSkew
+from mrds.mrds import ComSkew
 
 
 class TestMrds(TestCase):
@@ -45,7 +45,7 @@ class TestMrds(TestCase):
 
         sim_curves = m1.simulate_curves( ['WTI'], nb_sims, sim_times, tenor_list = tenor_list )
 
-        self.assertEqual(sim_curves.shape['WTI'], (len(sim_times), len(tenor_list), nb_sims) )
+        self.assertEqual(sim_curves['WTI'].shape, (len(sim_times), len(tenor_list), nb_sims) )
 
     def test_simulate_curves_1nb(self):
         """ Tests whether the 1nb simulate curves.

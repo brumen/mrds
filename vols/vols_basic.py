@@ -88,7 +88,14 @@ def black_vol_inverse( F         : float
                                        , tolerance) / sqrt(dt)
 
 
-def black_vol_inverse_naive(F : float, K : float, p : float, dt : float, DF : float, theta : int, tol : float, solver=None):
+def black_vol_inverse_naive( F      : float
+                           , K      : float
+                           , p      : float
+                           , dt     : float
+                           , DF     : float
+                           , theta  : int
+                           , tol    : float
+                           , solver : str = 'scipy_cobyla' ):
     """ Inverse black volatility computation.
 
     :param F: forward price
@@ -97,20 +104,22 @@ def black_vol_inverse_naive(F : float, K : float, p : float, dt : float, DF : fl
     :param dt: time to maturity
     :param DF: discount factor
     :param theta:  = 1 ... call option, -1 ... put option
-    :param tol: tolerance bound
+    :param tol: tolerance bound for the solver
     :param solver: which NLP solver to use, default scipy_cobyla
+    :returns:
     """
 
     x = log(double(F) / double(K))  # insuring that no integer division is made
     beta = p / (DF * sqrt(F * K))
 
     # optimization search, initial guess = sigma_c
+    # TODO: THIS IS NOT GOOD!!! LACKING A LOT
     optim_pr = NLP( lambda sigma: (b(x, sigma, theta) - beta)**2
                   , sqrt(2 * abs(x))  # inflection point function  (sigma_c)
-                  , lb = 1e-6
-                  , iprint = -1 )  # lower bound just above 0
+                  , lb = 1e-6 )\
+                  .solve(solver)  # lower bound just above 0
 
-    return optim_pr.solve('scipy_cobyla' if solver is None else solver).xf[0] / sqrt(dt)
+    return optim_pr.solve(solver).xf[0] / sqrt(dt)
 
 
 def sam_int(s : float, t : float, T_i : float, beta : float, sigma_L : float) -> float:

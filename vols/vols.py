@@ -119,7 +119,7 @@ class Volatility:
         :returns: normalized strike of the option
         """
 
-        return np.log(K_v.reshape(1, len(K_v)) / S0) / (sigma * np.sqrt(ttm_v))
+        return np.log(K_v / S0) / (sigma * np.sqrt(ttm_v))
 
     @staticmethod
     def normalized_strike_inv(delta_v: np.array
@@ -225,21 +225,25 @@ class Volatility:
     def inversion_skewed_cdf( self
                             , quantile : float
                             , ttm      : float
-                            , maxIter = 150
-                            , iprint  = -9 ):
+                              , maxIter = 150 ) -> float:
         """ Finds K such that: skewed_cdf_analy(K, quantile) = 0
 
         :param quantile: which quantile of the distribution you want to obtain.
         :param ttm: time to maturity
-        :param
+        :param maxIter: maximum number of iterations of the NLP solver.
         """
 
-        return NLP( lambda K: self.skewed_cdf_analy(K, quantile)
-                  , S0
-                  , lb      = 0.001
-                  , ub      = np.inf
-                  , maxIter = maxIter
-                  , iprint  = iprint ).solve(self.__class__.SOLVER).xf[0]
+        try:
+            nlp_solution = NLP( lambda K: self.skewed_cdf_analy(K, quantile)
+                              , S0
+                              , lb      = 0.001
+                              , ub      = np.inf
+                              , maxIter = maxIter).solve(self.__class__.SOLVER)
+
+        except Exception as e:
+            raise VolatilityException('Unable to invert the skewed cdf in inversion_skewed_cdf: {0}'.format(str(e)))
+
+        return nlp_solution.xf[0]
 
     def local_vol_generic(self, K, T, dT, dK):
         """
