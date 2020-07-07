@@ -7,8 +7,7 @@ import logging
 
 from typing import List, Tuple, Dict
 
-from config import CUDA_PRESENT
-
+from mrds.config   import CUDA_PRESENT
 from mrds_spot     import ComSkewSpot
 from vols.vols     import Volatility
 from forward_curve import FwdCurve
@@ -24,10 +23,6 @@ if CUDA_PRESENT:
 
 logger = logging.Logger(__name__)
 
-# if CUDA_PRESENT:
-#     F_skew_el = open(work_dir + 'cuda/skew_tsf.c', 'r').read()
-#     F_skew_mod = SourceModule(F_skew_el)
-#     F_skew_fct = F_skew_mod.get_function('F_skew_tsf')
 
 
 class ComSkewTolling(ComSkewSpot):
@@ -61,6 +56,11 @@ class ComSkewTolling(ComSkewSpot):
 
         self.days_partition  = days_partition
         self.hours_partition = hours_partition
+
+    def __F_skew_tsf_cuda(self):
+        # TODO: FIX work_dir here
+        with open(work_dir + 'cuda/skew_tsf.c', 'r') as F_skew_el:
+            return SourceModule(F_skew_el.read()).get_function('F_skew_tsf')
 
     def _generate_days_vecs(self, cuda_ind=False) -> Tuple:
         """ Generate days for simulate_spot_blocks.

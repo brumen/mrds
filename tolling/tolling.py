@@ -23,9 +23,9 @@ class TollingModel(ComSkewTolling):
     """
 
     def __init__(self
-                 , mkt_date   : datetime.date
-                 , fwd_curves : List[FwdCurve]
-                 , vol_curves : List[Volatility]
+                 , mkt_date        : datetime.date
+                 , fwd_curves      : List[FwdCurve]
+                 , vol_curves      : List[Volatility]
                  , days_partition  : List[List[int]]
                  , hours_partition : List[List[int]]
                  , toll_start      : datetime.date
