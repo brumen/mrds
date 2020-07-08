@@ -87,15 +87,21 @@ class JWSS7Volatility(Volatility):
 
     @classmethod
     def from_db(cls, com_name : str, mkt_date : datetime.date):
+        """ Obtains the volatility from database.
+
+        :param com_name: commodity name, e.g. 'WTI'
+        :param mkt_date: market date, e.g. datetime.date(2015, 4, 1)
+        """
+
         vol_type, vol_params = get_vol_curve(com_name, mkt_date)
+
         if vol_type != 'JWSS7':
             raise RuntimeError('Fetching the wrong curve. {0} has type {1}'.format(com_name, vol_type))
 
         return cls( com_name
                   , mkt_date
-                  , fwd_params = FwdCurve.from_db(mkt_date, com_name)  # ds.get_forward_curve(com_name, mkt_date)
-                  , vol_params = vol_params)  # TODO: FIX THE LINE BELOW.
-               #vol_params = cls._transform_from_jwss7(vol_params) )
+                  , fwd_params = FwdCurve.from_db(mkt_date, com_name)
+                  , vol_params = vol_params)
 
     @staticmethod
     def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, Tuple]:
@@ -393,14 +399,14 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
                                                  , dataPlot_canvas )
 
         # parameter tk.SCALEs
-        c1 = Scale(root, from_=80.0, to=120.0, resolution=0.1, label="S0", orient=HORIZONTAL,command=fct_update)
-        c2 = Scale(root, from_=0.05, to=0.8, resolution=0.05, label="sig", orient=HORIZONTAL,command=fct_update)
-        c3 = Scale(root, from_=0.0, to=5.0, resolution=0.25, label="A", orient=HORIZONTAL,command=fct_update)
-        c4 = Scale(root, from_=0.0, to=1.0, resolution=0.05, label="B", orient=HORIZONTAL,command=fct_update)
-        c5 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="C", orient=HORIZONTAL,command=fct_update)
-        c6 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="P", orient=HORIZONTAL,command=fct_update)
-        c7 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_C", orient=HORIZONTAL,command=fct_update)
-        c8 = Scale(root, from_=0.0, to=5.0, resolution=0.2, label="alpha_P", orient=HORIZONTAL,command=fct_update)
+        c1 = Scale(root, from_=80.0, to=120.0, resolution=0.1 , label='S0' , orient=HORIZONTAL,command=fct_update)
+        c2 = Scale(root, from_=0.05, to=0.8  , resolution=0.05, label='sig', orient=HORIZONTAL,command=fct_update)
+        c3 = Scale(root, from_=0.0 , to=5.0  , resolution=0.25, label='A'  , orient=HORIZONTAL,command=fct_update)
+        c4 = Scale(root, from_=0.0 , to=1.0  , resolution=0.05, label='B'  , orient=HORIZONTAL,command=fct_update)
+        c5 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='C'  , orient=HORIZONTAL,command=fct_update)
+        c6 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='P'  , orient=HORIZONTAL,command=fct_update)
+        c7 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='alpha_C', orient=HORIZONTAL,command=fct_update)
+        c8 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='alpha_P', orient=HORIZONTAL,command=fct_update)
 
         c1.grid(row=0, column=1)
         c2.grid(row=1, column=1)
@@ -412,7 +418,7 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
         c8.grid(row=7, column=1)
 
         # replot button
-        b1 = Button(root, text="replot", command=lambda: update_graph( fwd
+        b1 = Button(root, text='replot', command=lambda: update_graph( fwd
                                                                      , model
                                                                      , [c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]
                                                                      , ax

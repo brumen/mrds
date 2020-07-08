@@ -292,11 +292,45 @@ class VolatilityDrawMixin:
     """
 
     def draw_surface( self
-                    , fwd_date  : datetime.date
-                    , S_min_max : Tuple[float, float, float]
-                    , t_min_max : Tuple[float, float, float]
-                    , impl_local_ind = 'impl'
-                    , cuda_ind       = False ):
+                      , fwd_date  : datetime.date
+                      , S_min_max : Tuple[float, float, float]
+                      , t_min_max : Tuple[float, float, float] ):
+        """ Draws the implied/local vol surface from
+        [Sd, Su] x [Tmin, Tmax] with steps Sstep, Tstep
+
+        :param S_min_max: tuple of forward grid (low bound, high bound, step)
+        :param t_min_max: tuple of time grid (low_bound, high_bound, step)
+        """
+
+        t_min, t_max, t_step = t_min_max
+        S_min, S_max, S_step = S_min_max
+
+        K_grid   = np.arange(S_min, S_max, S_step)
+        K_len    = len(K_grid)
+        ttm_grid = np.arange(t_min, t_max, t_step)
+        ttm_len  = len(ttm_grid)
+
+        K_mesh, ttm_mesh = np.meshgrid(K_grid, ttm_grid)
+        vol_surf         = np.empty_like(K_mesh)
+
+        for K_idx, K in enumerate(K_grid):
+            for ttm_idx, ttm in enumerate(ttm_grid):
+                vol_surf[ttm_idx, K_idx] = self.implied_vol(fwd_date, K, ttm)
+
+        # plot machinery
+        # root = tk.Tk()
+        fig  = plt.figure()
+        #dataPlot_canvas = FigureCanvasTkAgg(fig, master=root)
+        #dataPlot_canvas.get_tk_widget().grid(row=0, column=0, rowspan=8)
+        ax = Axes3D(fig)  # plot it
+        ax.plot_surface(K_mesh, ttm_mesh, vol_surf)
+        plt.show()
+
+    def draw_surface_cuda( self
+                           , fwd_date  : datetime.date
+                           , S_min_max : Tuple[float, float, float]
+                           , t_min_max : Tuple[float, float, float]
+                           , impl_local_ind = 'impl' ):
         """ Draws the implied/local vol surface from
         [Sd, Su] x [Tmin, Tmax] with steps Sstep, Tstep
 
@@ -347,6 +381,7 @@ class VolatilityDrawMixin:
 
         # draw graphs
         self._draw_buttons()
+
 
     def _K_ttm_grid( self
                    , S_min_max : Tuple[float, float, float]

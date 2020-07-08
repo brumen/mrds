@@ -73,3 +73,5 @@ class TestMrds(TestCase):
         self.assertIn('WTI', res1)
 
         # TODO: TO ANOTHER CHECK ON THE RESULT MATRIX!!
+
+TestMrds().test_c_calibration()
