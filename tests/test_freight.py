@@ -49,8 +49,8 @@ class FreightTest(TestCase):
                     , mkt_date      : datetime.date
                     , location      : str
                     , future_date   : datetime.date
-                    , dcf = 365.25  : float
-                    , fwd_vol = 'fwd': str ):
+                    , dcf           : float = 365.25
+                    , fwd_vol       : str   = 'fwd' ):
         """ Sample forward/vol function.
 
         :param mkt_date: market date for which forwards/vols are given
@@ -137,6 +137,7 @@ class FreightTest(TestCase):
 
         allIndices = []
         nb_locations = len(freight_1.initial_locations)
+        nb_time_periods = freight_1._nb_time_periods
         for i in range(nb_locations):
             for t in range(nb_time_periods):
                 allIndices.append(freight_1._N(i, t))
@@ -154,7 +155,7 @@ class FreightTest(TestCase):
 
         freight_1 = Freight( self.mkt_date
                            , self.fwd_function
-                           , lambda mkt_date, location, futDate: self.fwd_function(mkt_date, location, futDate, fwd_vol ='vol')
+                           , lambda mkt_date, location, fut_date: self.fwd_function(mkt_date, location, fut_date, fwd_vol ='vol')
                            , self.corr_mtx
                            , self.travel_mtx
                            , self.cost_mtx

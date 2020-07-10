@@ -20,8 +20,9 @@ class DiscountCurve:
 
     @staticmethod
     def _discount_interp_fct2( time_diff : Union[float, datetime.date]
-                           , mkt_date : datetime.date
-                           , interpolated_curve ):
+                             , mkt_date  : datetime.date
+                             , interpolated_curve
+                             , dcf       : float = 365.25):
 
         if isinstance(time_diff, float):
             time_diff_format = time_diff

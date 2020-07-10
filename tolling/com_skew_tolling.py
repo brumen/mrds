@@ -62,30 +62,30 @@ class ComSkewTolling(ComSkewSpot):
         with open(work_dir + 'cuda/skew_tsf.c', 'r') as F_skew_el:
             return SourceModule(F_skew_el.read()).get_function('F_skew_tsf')
 
-    def _generate_days_vecs(self, cuda_ind=False) -> Tuple:
+    def _generate_days(self, nb_days : int) -> List[float]  # TODO: MAYBE List[int]
+        """ Generate days for simulate_spot_blocks.
+
+        :returns: list of floats TODO: INSERT HERE
+        """
+
+        days = [0.]
+        for day in range(nb_days):
+            day_week = np.mod(day, 7)
+            hours_for_day_week = [hp for (hp, dp) in zip(self.hours_partition, self.days_partition)
+                                  if day_week in dp][0]  # TODO: This is not good here.
+
+            days.append( days[-1] + np.cumsum(hours_for_day_week)/24./365.25) )  # TODO: THIS IS PROBABLY WRONG
+
+        return days
+
+    def _generate_days_vecs(self, nb_days: int, cuda_ind=False) -> Union[Tuple[List, List], Tuple[GPUArray, GPUArray]]:
         """ Generate days for simulate_spot_blocks.
 
         :param cuda_ind: Whether to use and generate objects on cuda, or on cpu.
         :returns: tuple of days TODO: FIX THIS
         """
 
-        # construct the equiv. of days = range(31)/365.25
-        days = np.array([0.])
-        for day in range(31):  # all possible days  # TODO: THIS IS WRONG 31 HERE
-            day_week = np.mod(day, 7)
-            hours_for_day_week = [hp for (hp, dp) in zip(self.hours_partition, self.days_partition)
-                                  if day_week in dp][0]
-            days = np.append(days, days[-1] + np.cumsum(hours_for_day_week)/24./365.25)
-
-        # gpu days
-        if cuda_ind:
-            days_diff = gpa.empty(len(days))
-            days_diff[0] = np.array(0.)
-            days_diff[1:] = np.diff(days)  # TODO: PROBABLY THIS IS INEFFICIENT, CHECK!!
-
-            return gpa.to_gpu(days), days_diff
-
-        # cpu generation
+        days = self._generate_days(nb_days)
         days_diff = np.empty(len(days))
         days_diff[0] = 0.
         days_diff[1:] = np.diff(days)
@@ -113,13 +113,8 @@ class ComSkewTolling(ComSkewSpot):
         # obtain the months corresponding to tolling_start and tolling_end.
         first_month = datetime.date(tolling_start.year, tolling_start.month, 1)  # first of first month
         last_month  = datetime.date(tolling_end.year  , tolling_end.month  , 1)  # first of last month
-
         months_to_use = 1  # TODO: dates of first of months between first_month and last_month
-
-
-
-        days, days_diff = self._generate_days_vecs(cuda_ind=cuda_ind)
-
+        days, days_diff = self._generate_days_vecs(nb_days)
         # construct the equiv. of days = range(31)/365.25
         fom_sims_fom = self.simulate_1nb(assets, nb_simulations, months_to_use, set_seed=set_seed)
 
@@ -204,3 +199,22 @@ class ComSkewTolling(ComSkewSpot):
                 spot_sims = np.transpose(fom_sims * np.exp(-0.5 * cv_m**2 * days + cv_m * w_days))
 
         return spot_sims
+
+
+class ComSkewTollingCuda(ComSkewTolling):
+    """ Cuda version of skew tolling model.
+    """
+
+    def _generate_days_vecs(self, nb_days: int, cuda_ind=False) -> Union[Tuple[List, List], Tuple[GPUArray, GPUArray]]:
+        """ Generate days for simulate_spot_blocks.
+
+        :param cuda_ind: Whether to use and generate objects on cuda, or on cpu.
+        :returns: tuple of days TODO: FIX THIS
+        """
+
+        days = self._generate_days(nb_days)
+        days_diff = gpa.empty(len(days))
+        days_diff[0] = np.array(0.)
+        days_diff[1:] = np.diff(days)  # TODO: PROBABLY THIS IS INEFFICIENT, CHECK!!
+
+        return gpa.to_gpu(days), days_diff

@@ -34,11 +34,11 @@ class FreightDisplay(Freight):
                              for location_2 in self._locations
                              for u in range(time_step + 1, self._nb_time_periods)
                              if self.freight_hedge_x(location_1, location_2, time_step, u) != 0.]
-        uncond_moves_active = [(self._nbs_to_locations[i], self._nbs_to_locations[j])
+        uncond_moves_active = [ ( location_1, location_2 )
                                for location_1 in self._locations
                                for location_2 in self._locations
-                               for u in range(time_step + 1, self._nb_time_periods)
-                               if self.freight_hedge_y(location_1, location_2, time_step, u) != 0.]
+                               for time_point in range(time_step + 1, self._nb_time_periods)
+                               if self.freight_hedge_y(location_1, location_2, time_step, time_point) != 0.]
 
         nx.draw_networkx_labels(fg, pos=pos, labels=dict(zip(tanker_locations, tanker_locations)), font_size=16)
         nx.draw_networkx_nodes(fg, pos=pos, ax = ax, node_color= 'black', node_size=50)
