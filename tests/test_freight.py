@@ -93,7 +93,7 @@ class FreightTest(TestCase):
                  , ('SHA', 'SHA'): 0.98}
 
     # amount of time to get from one location to the other
-    travel_mtx = {('AMS', 'NYC'): 1,
+    travel_times = {('AMS', 'NYC'): 1,
               ('AMS', 'MIA'): 1,
               ('AMS', 'LA') : 2,
               ('AMS', 'SHA'): 5,
@@ -124,7 +124,7 @@ class FreightTest(TestCase):
                       , self.fwd_function
                       , lambda mkt_date, location, futDate: self.fwd_function(mkt_date, location, futDate, fwd_vol ='vol')
                       , self.corr_mtx
-                      , self.travel_mtx
+                      , self.travel_times
                       , self.cost_mtx
                       , self.N_init
                       , [self.mkt_date + datetime.timedelta(days=30*idx) for idx in range(0, nb_time_periods)])
@@ -157,16 +157,20 @@ class FreightTest(TestCase):
                            , self.fwd_function
                            , lambda mkt_date, location, fut_date: self.fwd_function(mkt_date, location, fut_date, fwd_vol ='vol')
                            , self.corr_mtx
-                           , self.travel_mtx
+                           , self.travel_times
                            , self.cost_mtx
                            , self.N_init
                            , [self.mkt_date + datetime.timedelta(days=15*idx) for idx in range(0,10)])
 
         # rh ... hedge representation.
         rh = freight_1.represent_hedge()
+        print('LOCATIONS')
         Freight.pretty_dict(rh['locations'])
+        print('MOVEMENTS COND')
         Freight.pretty_dict(rh['movements_cond'])
+        print('MOVEMENTS UNCOND')
         Freight.pretty_dict(rh['movements_uncond'])
+        Freight.pretty_dict(freight_1.show_dynamics())
 
         self.assertTrue(True)
 
@@ -175,5 +179,75 @@ class FreightTest(TestCase):
         """
 
         self._simple_freight_object().display_movement()
+
+        self.assertTrue(True)
+
+
+class SmallFreightTest(FreightTest):
+    """ Class to test the Freight dispatch in a small setting.
+    """
+
+    mkt_date = datetime.date(2015, 4, 1)
+
+    # initial location of tankers.
+    N_init = { 'AMS': 3
+             , 'NYC': 0 }
+
+    fwd_curves = { 'AMS': np.array([95., 96., 97., 98.])
+                 , 'NYC': np.array([92., 93., 94., 95.]) }
+
+    fwd_dates_d = [ datetime.date(2015, 4, 1)
+                  , datetime.date(2015, 5, 1)
+                  , datetime.date(2015, 6, 1)
+                  , datetime.date(2015, 7, 1) ]
+
+    # future dates when the forward prices are given.
+    fwd_dates = { 'AMS': fwd_dates_d
+                , 'NYC': fwd_dates_d }
+
+    # volatility part of the model.
+    vol_adder = 0.
+    vol_curves = {  'AMS': np.array([0.3, 0.32, 0.35, 0.4]) + vol_adder
+                  , 'NYC': np.array([0.3, 0.32, 0.35, 0.4]) + vol_adder }
+    vol_dates = fwd_dates
+
+    # correlation matrix
+    corr_mtx = { ('AMS', 'AMS'): 0.98
+               , ('AMS', 'NYC'): 0.9
+               , ('NYC', 'NYC'): 0.95
+               , }
+
+    # amount of time to get from one location to the other
+    travel_times = { ('AMS', 'NYC'): 1
+                   , }
+
+    # how much it costs to transport between locations
+    cost_mtx = {('AMS', 'NYC'): 0.1, }
+
+    def test_just_run(self):
+        """ Runs the test and reports results.
+        NYC is low freigth
+        """
+
+        freight_1 = Freight( self.mkt_date
+                           , self.fwd_function
+                           , lambda mkt_date, location, fut_date: self.fwd_function(mkt_date, location, fut_date, fwd_vol ='vol')
+                           , self.corr_mtx
+                           , self.travel_times
+                           , self.cost_mtx
+                           , self.N_init
+                           , [self.mkt_date + datetime.timedelta(days=15*idx) for idx in range(0,10)])
+
+        # rh ... hedge representation.
+        rh = freight_1.represent_hedge()
+        print('VALUE')
+        print(rh['portfolio_value'])
+        print('LOCATIONS')
+        Freight.pretty_dict(rh['locations'])
+        print('MOVEMENTS COND')
+        Freight.pretty_dict(rh['movements_cond'])
+        print('MOVEMENTS UNCOND')
+        Freight.pretty_dict(rh['movements_uncond'])
+        Freight.pretty_dict(freight_1.show_dynamics())
 
         self.assertTrue(True)
