@@ -718,6 +718,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :returns: black volatility for the model TODO: REWRITE THESE DESCRIPTIONS
         """
 
+        # TODO: SWITCH THESE TWO STATEMENTS
         # return self.black_vol(asset
         #                       , self._kappa_vec(asset)
         #                       , self._sigma_vec(asset)

@@ -1,6 +1,7 @@
 # Freight model implementation
 #
 
+import copy
 import datetime
 import numpy as np
 import logging
@@ -66,7 +67,7 @@ class Freight:
                  , fwd_curves        : Callable
                  , vol_curves        : Callable
                  , corr_matrix       : Dict[Tuple[str, str], float]
-                 , travel_matrix     : Dict[Tuple[str, str], float]
+                 , travel_times      : Dict[Tuple[str, str], float]
                  , cost_matrix       : Dict[Tuple[str, str], float]
                  , initial_locations : Dict[str, int]
                  , time_grid         : List[datetime.date]
@@ -80,7 +81,7 @@ class Freight:
                                  {location: nb_ships }
         :param corr_matrix: correlation between individual locations, dictionary where keys are
                            city pairs (city_1, city_2) and values are correlations between cities.
-        :param travel_matrix: the amount of time it takes between different locations, a dictionary
+        :param travel_times: the amount of time it takes between different locations, a dictionary
                              where keys are location pairs (loc_1, loc_2) and values are time as fractions of
                              a year (i.e. 1. means 1 year).
         :param cost_matrix: same as travelMatrix, but refers to costs between cities.
@@ -93,7 +94,7 @@ class Freight:
         self._fwd_curves       = fwd_curves
         self._vol_curves       = vol_curves
         self._corr_matrix      = corr_matrix
-        self._travel_matrix    = travel_matrix   # number of periods between different locations
+        self._travel_times     = travel_times   # number of periods between different locations
         self._cost_matrix      = cost_matrix     # same as travel matrix, costs between locations
         self._time_grid        = time_grid       # grid used to compute the value of the freight portfolio.
         self._dcf              = dcf             # day count factor
@@ -193,24 +194,24 @@ class Freight:
         return self.__lower_bound
 
     def _spread_option( self
-                      , city1 : str
-                      , city2 : str
+                      , start_loc  : str
+                      , end_loc    : str
                       , start_date : datetime.date
                       , end_date   : datetime.date ) -> float:
-        """ Spread option value between city1, city2 and times start_date, end_date, start_date < end_date.
+        """ Spread option value between start_loc, end_loc and times start_date, end_date, start_date < end_date.
 
-        :param city1: start location of the tanker
-        :param city2: end location of the tanker
+        :param start_loc: start location of the tanker
+        :param end_loc: end location of the tanker
         :param start_date: start date for the travel between those locations
         :param end_date: end date for the travel between those locations.
         """
 
-        return spread_option_kirk( self.fwd_curves_curr(city1, start_date)
-                                 , self.fwd_curves_curr(city2, end_date)
-                                 , self._cost_matrix[(city1, city2) if (city1, city2) in self._cost_matrix else (city2, city1)] if city1 != city2 else 0.
-                                 , self.vol_curves_curr(city1, start_date)
-                                 , self.vol_curves_curr(city2, end_date)
-                                 , self._corr_matrix[(city1, city2) if (city1, city2) in self._corr_matrix else (city2, city1)]
+        return spread_option_kirk( self.fwd_curves_curr(start_loc, start_date)
+                                 , self.fwd_curves_curr(end_loc  , end_date  )
+                                 , self._cost_matrix[(start_loc, end_loc) if (start_loc, end_loc) in self._cost_matrix else (end_loc, start_loc)] if start_loc != end_loc else 0.
+                                 , self.vol_curves_curr(start_loc, start_date)
+                                 , self.vol_curves_curr(end_loc, end_date)
+                                 , self._corr_matrix[(start_loc, end_loc) if (start_loc, end_loc) in self._corr_matrix else (end_loc, start_loc)]
                                  , (end_date - start_date).days / self._dcf
                                  , self.DF(end_date) )  # TODO: Check if this is correct here
 
@@ -263,7 +264,7 @@ class Freight:
 
         city_i, city_j = self._nbs_to_locations[location_nb_1], self._nbs_to_locations[location_nb_2]
 
-        return time_period_2 - time_period_1 >= self._travel_matrix[(city_i, city_j) if (city_i, city_j) in self._travel_matrix else (city_j, city_i)]
+        return time_period_2 - time_period_1 >= self._travel_times[(city_i, city_j) if (city_i, city_j) in self._travel_times else (city_j, city_i)]
 
     @property
     def __lm_mat(self) -> np.array:
@@ -277,14 +278,14 @@ class Freight:
         constraints_mat = []  # constraint matrix
 
         # constraint n_{i,t} >= sum_{j,u} X(i,j,t,u) + Y(i,j,t,u)
-        for t in range(self._nb_time_periods):
-            for i in range(self._nb_locations):
+        for time_step_start in range(self._nb_time_periods):
+            for location_start  in range(self._nb_locations):
                 constraints_vec = np.zeros(self.__nb_lp_variables)
-                constraints_vec[self._N(i, t)] = -1.
-                for j in range(self._nb_locations):
-                    for u in range(t+1, self._nb_time_periods):
-                        constraints_vec[self._X(i, j, t, u)] = 1.
-                        constraints_vec[self._Y(i, j, t, u)] = 1.
+                constraints_vec[self._N(location_start, time_step_start)] = -1.
+                for location_end in range(self._nb_locations):
+                    for time_step_end in range(time_step_start + 1, self._nb_time_periods):
+                        constraints_vec[self._X(location_start, location_end, time_step_start, time_step_end)] = 1.
+                        constraints_vec[self._Y(location_start, location_end, time_step_start, time_step_end)] = 1.
                 constraints_mat.append(constraints_vec)
 
         self.__LM = np.array(constraints_mat)
@@ -391,13 +392,13 @@ class Freight:
 
         raise FreightException(result.message)
 
-    def freight_hedge_x(self, loc_1 : str, loc_2 : str, start_date: datetime.date, end_date: datetime.date):
-        """ Displays the hedge for locations loc_1 and loc_2 between dates start_date and end_date.
+    def freight_hedge_x(self, loc_start : str, loc_end : str, start_date: datetime.date, end_date: datetime.date):
+        """ Displays the hedge for locations loc_start and loc_end between dates start_date and end_date.
 
-        :param loc_1: start location, e.g. 'AMS'
-        :param loc_2: end location, e.g. 'NYC'
-        :param start_date: start of freight hedge between loc_1 and loc_2
-        :param end_date: end of freight hedge between loc_1 and loc_2
+        :param loc_start: start location, e.g. 'AMS'
+        :param loc_end: end location, e.g. 'NYC'
+        :param start_date: start of freight hedge between loc_start and loc_end
+        :param end_date: end of freight hedge between loc_start and loc_end
         """
 
         return self.freight_hedge_x(self._X( self._locations.index(loc_1)
@@ -405,17 +406,29 @@ class Freight:
                                            , self._time_grid.index(start_date)
                                            , self._time_grid.index(end_date) ) )
 
-    def freight_hedge_y(self, loc_1 : str, loc_2 : str, start_date: datetime.date, end_date: datetime.date):
+    def freight_hedge_y(self, loc_start : str, loc_end : str, start_date: datetime.date, end_date: datetime.date):
+        """ Returns the __conditional__ tanker allocation between loc_1 and loc_2 and start and end_date.
 
-        return self.freight_hedge_y( self._Y( self._locations.index(loc_1)
-                                            , self._locations.index(loc_2)
+        :param loc_start: start location of the tanker
+        :param loc_end: end location of the tanker.
+        :param start_date: start date of the tanker.
+        :param end_date: end date of the tanker.
+        :returns: the number of __conditional__ tanker movements between (loc_start, start_date) and (loc_end, end_date)
+        """
+
+        return self.freight_hedge_y( self._Y( self._locations.index(loc_start)
+                                            , self._locations.index(loc_end  )
                                             , self._time_grid.index(start_date)
-                                            , self._time_grid.index(end_date) ) )
+                                            , self._time_grid.index(end_date  ) ) )
 
-    def _hedge_locations(self, ignore_small_nbs = .0001):
-        """ Represents the hedge locations of the optimization problem.
+    def _hedge_locations(self, ignore_small_nbs = .0001) -> Dict[datetime.date, Dict[str, float]]:
+        """ Represents the hedge locations of the freight problem.
 
         @param ignore_small_nbs: ignore hedges below this number
+        @returns: two level dictionary where the first level is the time period, and the second level is the
+                  location of the tanker. The key is the number of tankers.
+                  e.g. {(2015, 1, 1): { 'AMS' : 2, 'MIA': 3},
+                        (2015, 1, 15): {'AMS': 3, 'MIA': 2} }
         """
 
         freight_hedge = self.freight_hedge
@@ -424,42 +437,60 @@ class Freight:
         for period_nb in range(self._nb_time_periods):
             time_period = self._time_grid[period_nb]
             locations[time_period] = {}
+
             for location in self._locations:
                 hedge = freight_hedge[self._N(self._locations.index(location), period_nb)]
+
                 if hedge > ignore_small_nbs:
                     locations[time_period][location] = hedge
+
             if locations[time_period] == {}:
                 locations.pop(time_period)
 
         return locations
 
-    def _hedge_movements_cond_uncond(self, cond_uncond : str, ignore_small_nbs = 0.001):
+    def _hedge_movements_cond_uncond( self
+                                    , cond_uncond      : str
+                                    , ignore_small_nbs : float = 0.001) -> Dict[datetime.date, Dict[str, Tuple[str, datetime.date, float]]]:
         """ Conditional or unconditional representation of hedge movements.
 
         @param cond_uncond: 'cond' if conditional movments, else 'uncond'
         @param ignore_small_nbs: number below which the hedge positions are ignored.
-        @returns: value of the conditional movements of freight. TODO: EXPLAIN THIS BETTER.
+        @returns: double dictionary where the first rank is the date of the start of the movement,
+                  the second key is location of start of the transport
+                  the list of tuples is where the distribution goes to e.g.
+                        (AMS, (2015, 6, 15), 3) means 3 tankers are going to AMS for delivery there at 6/15.
         """
 
         hedge           = self.freight_hedge
         cond_uncond_var = self._X if cond_uncond == 'cond' else self._Y
 
         hm_cond = {}
-        for time_period in range(self._nb_time_periods):  # time_period was t
-            grid_period = self._time_grid[time_period]
-            hm_cond[grid_period] = {}
-            for location in self._locations: # for i in range(self._nb_locations)}  # location was i = self._locations.index(location)
-                i = self._locations.index(location)
-                hm_cond[grid_period][location] = []
-                for j in range(self._nb_locations):
-                    for u in range(time_period + 1, self._nb_time_periods):
-                        hedged_value = hedge[cond_uncond_var(i, j, time_period, u)]
-                        if hedged_value > ignore_small_nbs:
-                            hm_cond[grid_period][location].append((self._nbs_to_locations[j], self._time_grid[u], hedged_value))
-                if hm_cond[grid_period][location] == []:
-                    hm_cond[grid_period].pop(location)  # remove location
-            if hm_cond[grid_period] == {}:
-                hm_cond.pop(grid_period)
+
+        for time_period_start in range(self._nb_time_periods):
+            start_time = self._time_grid[time_period_start]
+            hm_cond[start_time] = {}
+
+            for location_start in self._locations: # for i in range(self._nb_locations)}  # location was i = self._locations.index(location)
+                location_start_nb = self._locations.index(location_start)
+                hm_cond[start_time][location_start] = []
+
+                for location_end_nb in range(self._nb_locations):
+                    for time_period_end in range(time_period_start + 1, self._nb_time_periods):
+                        hedged_value = hedge[cond_uncond_var(location_start_nb, location_end_nb, time_period_start, time_period_end)]
+
+                        if hedged_value > ignore_small_nbs:  # only include if the numbers are sufficiently large
+                            location_end = self._nbs_to_locations[location_end_nb]
+                            end_time     = self._time_grid[time_period_end]
+                            hm_cond[start_time][location_start].append( ( location_end
+                                                                        , end_time
+                                                                        , hedged_value ) )
+
+                if hm_cond[start_time][location_start] == []:
+                    hm_cond[start_time].pop(location_start)  # remove location
+
+            if hm_cond[start_time] == {}:  # remove time period
+                hm_cond.pop(start_time)
 
         return hm_cond
 
@@ -473,20 +504,87 @@ class Freight:
 
         for key, value in d.items():
             curr_key = '\t' * indent + str(key)
+
             if not isinstance(value, dict):
                 print(curr_key + ': ' + str(value))
+
             else:
                 print(curr_key)
                 Freight.pretty_dict(value, indent+1)
 
-    def represent_hedge(self, ignore_small_nbs = .0001 ):
+    def represent_hedge(self, ignore_small_nbs = .0001 ) -> Dict:
         """ Represents the hedge obtained from optimization.
 
         @param ignore_small_nbs: ignore all hedges below a certain threshold, e.g. 1e-4
+        @returns:
         """
 
-        return { 'portfolioValue'  : - np.sum(self._value * np.array(self.freight_hedge))  # self._value is negative, cause linprog is minimized
+        return { 'portfolio_value' : - np.sum(self._value * np.array(self.freight_hedge))  # self._value is negative, cause linprog is minimized
                , 'locations'       : self._hedge_locations(ignore_small_nbs)
                , 'movements_cond'  : self._hedge_movements_cond_uncond('cond', ignore_small_nbs)
                , 'movements_uncond': self._hedge_movements_cond_uncond('uncond', ignore_small_nbs)
                , }
+
+    def __merge_dest_lists( dest_list_1 : List[Tuple[str, datetime.date, float]]
+                          , dest_list_2 : List[Tuple[str, datetime.date, float]]) -> List[Tuple[str, datetime.date, float]]:
+        """ Merges two destination lists
+
+        @param dest_list_1: destination list 1 of the form [('AMS', datetime.date(2015, 4, 1), 1),...]
+        @param dest_list_2: destination list 2 of the form [('AMS', datetime.date(2015, 4, 1), 1),...]
+        @returns: destination lists where things are merged.
+        """
+
+        result = copy.deepcopy(dest_list_1)
+
+        dest_dates_1 =  [(dest_1, dest_date_1) for dest_1, dest_date_1, nb_tankers_1 in dest_list_1]
+
+        for destination_2, dest_date_2, nb_tankers_2 in dest_list_2:
+            if (destination_2, dest_date_2) in dest_dates_1:
+                matching_idx = dest_dates_1.index((destination_2, dest_date_2))
+                _, _, nb_tankers_1 = result[matching_idx]
+                result[matching_idx] = (destination_2, dest_date_2, nb_tankers_2 + nb_tankers_1)
+
+            else:
+                result.append((destination_2, dest_date_2, nb_tankers_2))
+
+        return result
+
+
+    def show_dynamics(self, ignore_small_nbs : float = 0.0001):
+        """ Extract the tanker routes from the hedges.
+
+        @param ignore_small_nbs: ignore all hedges below a certain threshold, e.g. 1e-4
+        @returns:
+        """
+
+        rh          = self.represent_hedge()
+        move_cond   = rh['movements_cond'  ]
+        move_uncond = rh['movements_uncond']
+
+        cond_dates   = sorted(list(move_cond.keys()))
+        uncond_dates = sorted(list(move_uncond.keys()))
+        all_dates    = sorted(set(cond_dates).union(set(uncond_dates)))
+        overlapping_dates = sorted(set(cond_dates).intersection(set(uncond_dates)))
+
+        ship_schedule = {}
+
+        for start_date in all_dates:
+            if start_date in overlapping_dates:  # add from both.
+                ship_schedule[start_date] = move_cond[start_date]  # done w/ move_cond
+                curr_ship_schedule = ship_schedule[start_date]  #  {'NYC': [('AMS', dest_date, nb_tankers),...] }
+
+                # (destination, dest_date, nb_tankers)
+                for origin, dest_list in move_uncond[start_date].items():
+                    if origin not in curr_ship_schedule:
+                        curr_ship_schedule[origin] = dest_list
+                    else:  # origin is in ship_schedule, merge the two lists lists
+                        curr_ship_schedule[origin] = self.__merge_dest_lists(curr_ship_schedule[origin], dest_list)
+
+            elif start_date in move_cond and start_date not in move_uncond:
+                ship_schedule[start_date] = move_cond[start_date]
+
+            elif start_date in move_uncond and start_date not in move_cond:
+                ship_schedule[start_date] = move_uncond[start_date]
+
+        return { 'pv'      : rh['portfolio_value']
+               , 'schedule': ship_schedule }
