@@ -99,21 +99,9 @@ class Freight:
         self._time_grid        = time_grid       # grid used to compute the value of the freight portfolio.
         self._dcf              = dcf             # day count factor
 
-        # simple derived variables
-        self._locations         = list(initial_locations.keys())  # locations considered are given in initial_locations
-        self._nb_locations      = len(self._locations)     # number of different locations
-        self._nbs_to_locations  = {idx: loc for (idx, loc) in enumerate(self._locations)}
-        self._nbs_to_time_grid = {idx: time_step for (idx, time_step) in enumerate(self._time_grid)}
-        self._nb_time_periods   = len(self._time_grid)     # length of grid = number of time periods + 1
-
         # cached values, used as properties
-        self.__value_vec   = None  # vector of all individual values
-        self.__LM          = None
-        self.__EM          = None
-        self.__EV          = None
-        self.__lower_bound = None
-        self.__freight_hedge_result = None
         self.__discount_factor = None
+        self.__freight_hedge   = None
 
     @property
     def mkt_date(self) -> datetime.date:
@@ -138,6 +126,41 @@ class Freight:
     @vol_curves.setter
     def vol_curves(self, new_vol_curves):
         self._vol_curves = new_vol_curves
+
+    @property
+    def _locations(self) -> List[str]:
+        """ Locations used in the optimization problem.
+        """
+
+        return list(self.initial_locations.keys())
+
+    @property
+    def _nb_locations(self) -> int:
+        """ Number of different locations.
+        """
+
+        return len(self._locations)
+
+    @property
+    def _nb_time_periods(self) -> int:
+        """ Number of time periods used in the optimization problem.
+
+        length of grid = number of time periods + 1
+        """
+
+        return len(self._time_grid)
+
+    @property
+    def _nbs_to_locations(self) -> Dict[int, str]:
+        """ Each location is assigned a respective number. This is a mapping between the two.
+        """
+
+        return {idx: loc for (idx, loc) in enumerate(self._locations)}
+
+    @property
+    def _nbs_to_time_grid(self) -> Dict[int, int]:
+        return {idx: time_step for (idx, time_step) in enumerate(self._time_grid)}
+
 
     def fwd_curves_curr(self, location: str, future_date: datetime.date) -> float:
         """ Gets the forward curves for market date for the times requested in timeList.
@@ -181,23 +204,13 @@ class Freight:
 
         return self._discount_factor(future_date)
 
-    @property
-    def lower_bound(self):
-        """ Lower bound of the individual variables, which is 0, basically a vector of zeros.
-        """
-
-        if self.__lower_bound:
-            return self.__lower_bound
-
-        self.__lower_bound = np.zeros(self.__nb_lp_variables)
-
-        return self.__lower_bound
-
+    @lru_cache(maxsize=1000)
     def _spread_option( self
-                      , start_loc  : str
-                      , end_loc    : str
-                      , start_date : datetime.date
-                      , end_date   : datetime.date ) -> float:
+                      , market_date : datetime.date
+                      , start_loc   : str
+                      , end_loc     : str
+                      , start_date  : datetime.date
+                      , end_date    : datetime.date ) -> float:
         """ Spread option value between start_loc, end_loc and times start_date, end_date, start_date < end_date.
 
         :param start_loc: start location of the tanker
@@ -238,7 +251,6 @@ class Freight:
         return self._nb_locations ** 2 * self._nb_time_periods * (self._nb_time_periods - 1) \
                + i + t * self._nb_locations
 
-    @property
     def __nb_lp_variables(self) -> int:
         """ Number of variables for the Linear problem. (X, Y, Z, N)
         """
@@ -266,21 +278,17 @@ class Freight:
 
         return time_period_2 - time_period_1 >= self._travel_times[(city_i, city_j) if (city_i, city_j) in self._travel_times else (city_j, city_i)]
 
-    @property
     def __lm_mat(self) -> np.array:
         """ Constructs the inequality matrix self.__LM, i.e. for conditions:
                self.__LM * x <= 0. (0. is a vector)
         """
-
-        if self.__LM is not None:
-            return self.__LM
 
         constraints_mat = []  # constraint matrix
 
         # constraint n_{i,t} >= sum_{j,u} X(i,j,t,u) + Y(i,j,t,u)
         for time_step_start in range(self._nb_time_periods):
             for location_start  in range(self._nb_locations):
-                constraints_vec = np.zeros(self.__nb_lp_variables)
+                constraints_vec = np.zeros(self.__nb_lp_variables())
                 constraints_vec[self._N(location_start, time_step_start)] = -1.
                 for location_end in range(self._nb_locations):
                     for time_step_end in range(time_step_start + 1, self._nb_time_periods):
@@ -288,32 +296,28 @@ class Freight:
                         constraints_vec[self._Y(location_start, location_end, time_step_start, time_step_end)] = 1.
                 constraints_mat.append(constraints_vec)
 
-        self.__LM = np.array(constraints_mat)
+        return np.array(constraints_mat)
 
-        return self.__LM
-
-    @property
-    def __EMV_mat(self) -> (np.array, np.array):
+    def __EMV_mat(self) -> Tuple[np.array, np.array]:
         """ Sets the equality matrix (EM) and equality vector (EV), for constraints:
               EM * x = EV, EM is a matrix, EV is a vector.
-        """
 
-        if self.__EM is not None and self.__EV is not None:
-            return self.__EM, self.__EV
+        @returns: tuple of equality matrix and equality vector.
+        """
 
         equality_matrix = []
         equality_vector = []
 
         # initial setting of N: N(i,0) = initialLocation(i)
         for location_nb in range(self._nb_locations):
-            constraints_vec = np.zeros(self.__nb_lp_variables)
+            constraints_vec = np.zeros(self.__nb_lp_variables())
             constraints_vec[self._N(location_nb, 0)] = 1.
             equality_vector.append(self.initial_locations[self._nbs_to_locations[location_nb]])
             equality_matrix.append(constraints_vec)
 
         # sum_i n_i,t = K
         for time_period in range(1, self._nb_time_periods):  # t=0 already given above
-            constraints_vec = np.zeros(self.__nb_lp_variables)
+            constraints_vec = np.zeros(self.__nb_lp_variables())
             for location_nb in range(self._nb_locations):
                 constraints_vec[self._N(location_nb, time_period)] = 1.
             equality_vector.append(sum(self.initial_locations.values()))  # number of tankers, ships
@@ -322,7 +326,7 @@ class Freight:
         # constraint n_i,t = n_i,t-1 + sum_{j, u<t} (X(j, i, u, t) + Y(j,i,t,u)) - sum _{u>t-1, j} (X(i,j,t-1, u) + Y(i,j,t-1,u))
         for time_period_1 in range(1, self._nb_time_periods):
             for location_nb_1 in range(self._nb_locations):
-                constraints_vec = np.zeros(self.__nb_lp_variables)
+                constraints_vec = np.zeros(self.__nb_lp_variables())
                 constraints_vec[self._N(location_nb_1, time_period_1)]     =  1.
                 constraints_vec[self._N(location_nb_1, time_period_1 - 1)] = -1.
                 for location_nb_2 in range(self._nb_locations):
@@ -335,20 +339,14 @@ class Freight:
                 equality_matrix.append(constraints_vec)
                 equality_vector.append(0.)
 
-        self.__EM = np.array(equality_matrix)
-        self.__EV = np.array(equality_vector)
+        return np.array(equality_matrix), np.array(equality_vector)
 
-        return self.__EM, self.__EV
-
-    @property
     def _value(self):
         """ Setting the valuation vector - this is set for _MINIMIZING (COST) FUNCTION, therefore the values are negative.
         """
 
-        if self.__value_vec is not None:
-            return self.__value_vec
-
-        self.__value_vec = np.zeros(self.__nb_lp_variables)
+        value_vec = np.zeros(self.__nb_lp_variables())
+        mkt_date  = self.mkt_date
 
         for start_period in range(self._nb_time_periods):  # time period t = start_period
             for start_loc in range(self._nb_locations):  # cities  i = start_loc
@@ -360,66 +358,45 @@ class Freight:
                         start_time     = self._nbs_to_time_grid[start_period]
                         end_time       = self._nbs_to_time_grid[end_period]
 
-                        self.__value_vec[self._X(start_loc, end_loc, start_period, end_period)] = - self._spread_option( location_start
-                                                                                                                       , location_end
-                                                                                                                       , start_time
-                                                                                                                       , end_time ) if travel_allowed else self.LARGE_NUMBER
-                        self.__value_vec[self._Y(start_loc, end_loc, start_period, end_period)] = -(  self.fwd_curves_curr(location_end  , end_time)
-                                                                                                    - self.fwd_curves_curr(location_start, start_time)) \
+                        value_vec[self._X(start_loc, end_loc, start_period, end_period)] = - self._spread_option( mkt_date
+                                                                                                                , location_start
+                                                                                                                , location_end
+                                                                                                                , start_time
+                                                                                                                , end_time ) if travel_allowed else self.LARGE_NUMBER
+                        value_vec[self._Y(start_loc, end_loc, start_period, end_period)] = -(  self.fwd_curves_curr(location_end  , end_time)
+                                                                                             - self.fwd_curves_curr(location_start, start_time)) \
                                                               if travel_allowed  else self.LARGE_NUMBER
 
-        return self.__value_vec
+        return value_vec
 
-    @property
-    def freight_hedge(self):
+    def __freight_hedge_action(self):
         """ Find optimum freight hedge, solve the linear program.
         """
 
-        if self.__freight_hedge_result is not None:
-            return self.__freight_hedge_result
+        em, ev = self.__EMV_mat()  # equality matrix condition em * x = ev
 
-        em, ev = self.__EMV_mat  # equality matrix condition em * x = ev
-
-        result = linprog(self._value
-                         , A_ub  = self.__lm_mat  # inequality condition A_ub * x <= b_ub
-                         , b_ub = np.zeros(self.__lm_mat.shape[0])  # zeros the shape of LMMat
-                         , A_eq = em
-                         , b_eq = ev )
+        lm_mat = self.__lm_mat()
+        result = linprog( self._value()
+                        , A_ub = lm_mat  # inequality condition A_ub * x <= b_ub
+                        , b_ub = np.zeros(lm_mat.shape[0])  # zeros the shape of LMMat
+                        , A_eq = em
+                        , b_eq = ev )
 
         if result.success:
-            self.__freight_hedge_result = result.x
-            return self.__freight_hedge_result  # actual result
+            return result.x
 
         raise FreightException(result.message)
 
-    def freight_hedge_x(self, loc_start : str, loc_end : str, start_date: datetime.date, end_date: datetime.date):
-        """ Displays the hedge for locations loc_start and loc_end between dates start_date and end_date.
 
-        :param loc_start: start location, e.g. 'AMS'
-        :param loc_end: end location, e.g. 'NYC'
-        :param start_date: start of freight hedge between loc_start and loc_end
-        :param end_date: end of freight hedge between loc_start and loc_end
+    def freight_hedge(self, recompute=False):
+        """ Find optimum freight hedge, solve the linear program.
         """
 
-        return self.freight_hedge_x(self._X( self._locations.index(loc_1)
-                                           , self._locations.index(loc_2)
-                                           , self._time_grid.index(start_date)
-                                           , self._time_grid.index(end_date) ) )
+        if recompute or self.__freight_hedge is None:
+            self.__freight_hedge = self.__freight_hedge_action()
+            return self.__freight_hedge
 
-    def freight_hedge_y(self, loc_start : str, loc_end : str, start_date: datetime.date, end_date: datetime.date):
-        """ Returns the __conditional__ tanker allocation between loc_1 and loc_2 and start and end_date.
-
-        :param loc_start: start location of the tanker
-        :param loc_end: end location of the tanker.
-        :param start_date: start date of the tanker.
-        :param end_date: end date of the tanker.
-        :returns: the number of __conditional__ tanker movements between (loc_start, start_date) and (loc_end, end_date)
-        """
-
-        return self.freight_hedge_y( self._Y( self._locations.index(loc_start)
-                                            , self._locations.index(loc_end  )
-                                            , self._time_grid.index(start_date)
-                                            , self._time_grid.index(end_date  ) ) )
+        return self.__freight_hedge
 
     def _hedge_locations(self, ignore_small_nbs = .0001) -> Dict[datetime.date, Dict[str, float]]:
         """ Represents the hedge locations of the freight problem.
@@ -431,7 +408,7 @@ class Freight:
                         (2015, 1, 15): {'AMS': 3, 'MIA': 2} }
         """
 
-        freight_hedge = self.freight_hedge
+        freight_hedge = self.freight_hedge()
 
         locations = {}
         for period_nb in range(self._nb_time_periods):
@@ -462,7 +439,7 @@ class Freight:
                         (AMS, (2015, 6, 15), 3) means 3 tankers are going to AMS for delivery there at 6/15.
         """
 
-        hedge           = self.freight_hedge
+        hedge           = self.freight_hedge()
         cond_uncond_var = self._X if cond_uncond == 'cond' else self._Y
 
         hm_cond = {}
@@ -519,7 +496,7 @@ class Freight:
         @returns:
         """
 
-        return { 'portfolio_value' : - np.sum(self._value * np.array(self.freight_hedge))  # self._value is negative, cause linprog is minimized
+        return { 'portfolio_value' : - np.sum(self._value() * np.array(self.freight_hedge()))  # self._value is negative, cause linprog is minimized
                , 'locations'       : self._hedge_locations(ignore_small_nbs)
                , 'movements_cond'  : self._hedge_movements_cond_uncond('cond', ignore_small_nbs)
                , 'movements_uncond': self._hedge_movements_cond_uncond('uncond', ignore_small_nbs)
@@ -527,7 +504,7 @@ class Freight:
 
     def __merge_dest_lists( dest_list_1 : List[Tuple[str, datetime.date, float]]
                           , dest_list_2 : List[Tuple[str, datetime.date, float]]) -> List[Tuple[str, datetime.date, float]]:
-        """ Merges two destination lists
+        """ Merges two destination lists.
 
         @param dest_list_1: destination list 1 of the form [('AMS', datetime.date(2015, 4, 1), 1),...]
         @param dest_list_2: destination list 2 of the form [('AMS', datetime.date(2015, 4, 1), 1),...]
@@ -550,7 +527,7 @@ class Freight:
         return result
 
 
-    def show_dynamics(self, ignore_small_nbs : float = 0.0001):
+    def show_dynamics(self, ignore_small_nbs : float = 0.0001) -> Dict:
         """ Extract the tanker routes from the hedges.
 
         @param ignore_small_nbs: ignore all hedges below a certain threshold, e.g. 1e-4
@@ -586,5 +563,24 @@ class Freight:
             elif start_date in move_uncond and start_date not in move_cond:
                 ship_schedule[start_date] = move_uncond[start_date]
 
-        return { 'pv'      : rh['portfolio_value']
-               , 'schedule': ship_schedule }
+        return { 'pv'       : rh['portfolio_value']
+               , 'locations': rh['locations']
+               , 'schedule' : ship_schedule }
+
+    def show_dynamics_and_locations(self, ignore_small_nbs : float = 0.0001) -> None:
+        sd       = self.show_dynamics()
+        locs     = sd['locations']
+        schedule = sd['schedule']
+
+        locs_dates     = set(locs.keys())
+        schedule_dates = set(schedule.keys())
+
+        for start_date in sorted(schedule_dates.union(locs_dates)):
+            print('DATE: {0}'.format(start_date))
+            if start_date in locs_dates:
+                print('LOCATIONS')
+                self.pretty_dict(locs[start_date])
+            if start_date in schedule_dates:
+                print('SCHEDULE')
+                self.pretty_dict(schedule[start_date])
+            print('\n')
