@@ -171,6 +171,7 @@ class FreightTest(TestCase):
         print('MOVEMENTS UNCOND')
         Freight.pretty_dict(rh['movements_uncond'])
         Freight.pretty_dict(freight_1.show_dynamics())
+        freight_1.show_dynamics_and_locations()
 
         self.assertTrue(True)
 
