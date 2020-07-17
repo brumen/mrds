@@ -1,5 +1,6 @@
 # test for the freight model
 
+import time
 import datetime
 import numpy as np
 import scipy.interpolate
@@ -7,7 +8,7 @@ import logging
 
 from unittest import TestCase
 
-from mrds.freight.freight         import Freight
+from mrds.freight.freight         import Freight, FreightAdded
 from mrds.freight.freight_display import FreightDisplay
 
 logger = logging.getLogger(__name__)
@@ -21,15 +22,22 @@ class FreightTest(TestCase):
     mkt_date = datetime.date(2015, 4, 1)
 
     # initial location of tankers.
-    N_init = { 'AMS': 3
-             , 'NYC': 4
-             , 'MIA': 1
-             , 'LA' : 1
-             , 'SHA': 8 }
+    N_init = { 'AMS': (mkt_date, 3)
+             , 'NYC': (mkt_date, 4)
+             , 'MIA': (mkt_date, 1)
+             , 'LA' : (mkt_date, 1)
+             , 'SHA': (mkt_date, 8) }
 
     fwd_curves = { 'AMS': np.array([95., 96., 97., 98.])
                  , 'NYC': np.array([92., 93., 94., 95.])
                  , 'MIA': np.array([91., 92., 93., 94.])
+                 , 'LA' : np.array([90., 91., 95., 100.])
+                 , 'SHA': np.array([105., 106., 107., 109.]) }
+                 #, 'SHA': np.array([85., 90., 95., 100.]) }
+
+    fwd_curves_2 = { 'MIA': np.array([97., 98., 99., 100.])
+                 , 'NYC': np.array([92., 93., 94., 95.])
+                 , 'AMS': np.array([91., 92., 93., 94.])
                  , 'LA' : np.array([90., 91., 95., 100.])
                  , 'SHA': np.array([85., 90., 95., 100.]) }
 
@@ -96,12 +104,12 @@ class FreightTest(TestCase):
     travel_times = {('AMS', 'NYC'): 1,
               ('AMS', 'MIA'): 1,
               ('AMS', 'LA') : 2,
-              ('AMS', 'SHA'): 5,
+              ('AMS', 'SHA'): 2,
               ('NYC', 'MIA'): 1,
               ('NYC', 'LA') : 3,
-              ('NYC', 'SHA'): 6,
+              ('NYC', 'SHA'): 2,
               ('MIA', 'LA') : 2,
-              ('MIA', 'SHA'): 5,
+              ('MIA', 'SHA'): 1,
               ('LA', 'SHA') : 3}
 
     # how much it costs to transport between locations
@@ -113,7 +121,7 @@ class FreightTest(TestCase):
             ('NYC', 'LA') : 0.3,
             ('NYC', 'SHA'): 0.6,
             ('MIA', 'LA') : 0.2,
-            ('MIA', 'SHA'): 0.5,
+            ('MIA', 'SHA'): 0.6,
             ('LA', 'SHA') : 0.3 }
 
     def _simple_freight_object(self, nb_time_periods = 5):
@@ -174,6 +182,95 @@ class FreightTest(TestCase):
         freight_1.show_dynamics_and_locations()
 
         self.assertTrue(True)
+
+    def test_just_run_small(self):
+        """ Runs the test and reports results.
+        """
+
+        freight_1 = FreightAdded( self.mkt_date
+                           , self.fwd_function
+                           , lambda mkt_date, location, fut_date: self.fwd_function(mkt_date, location, fut_date, fwd_vol ='vol')
+                           , self.corr_mtx
+                           , self.travel_times
+                           , self.cost_mtx
+                           , self.N_init
+                           , self.mkt_date + datetime.timedelta(days=20) )
+
+        # rh ... hedge representation.
+        rh = freight_1.represent_hedge()
+        print('LOCATIONS')
+        Freight.pretty_dict(rh['locations'])
+        print('MOVEMENTS COND')
+        Freight.pretty_dict(rh['movements_cond'])
+        print('MOVEMENTS UNCOND')
+        Freight.pretty_dict(rh['movements_uncond'])
+        Freight.pretty_dict(freight_1.show_dynamics())
+        freight_1.show_dynamics_and_locations()
+
+        self.assertTrue(True)
+
+
+    def fwd_function_2( self
+                    , mkt_date      : datetime.date
+                    , location      : str
+                    , future_date   : datetime.date
+                    , dcf           : float = 365.25
+                    , fwd_vol       : str   = 'fwd' ):
+        """ Sample forward/vol function.
+
+        :param mkt_date: market date for which forwards/vols are given
+        :param location: location for the forward curve
+        :param future_date: future date for which forward is desired
+        :param dcf: day-count factor
+        :param fwd_vol: whether forward or vol curve is obtained.
+        """
+
+        diffs = [tenor - mkt_date for tenor in (self.fwd_dates if fwd_vol == 'fwd' else self.vol_dates)[location]]
+        disc_tenors_numeric = np.array([float(elt.days) for elt in diffs])/dcf
+        curve_numeric = scipy.interpolate.splrep(disc_tenors_numeric, (self.fwd_curves_2 if fwd_vol == 'fwd' else self.vol_curves)[location])
+
+        return scipy.interpolate.splev((future_date - mkt_date).days / dcf, curve_numeric)
+
+
+    def test_just_run_2(self):
+        """ Runs the test and reports results.
+        """
+
+        freight_1 = Freight( self.mkt_date
+                           , self.fwd_function
+                           , lambda mkt_date, location, fut_date: self.fwd_function(mkt_date, location, fut_date, fwd_vol ='vol')
+                           , self.corr_mtx
+                           , self.travel_times
+                           , self.cost_mtx
+                           , self.N_init
+                           , [self.mkt_date + datetime.timedelta(days=15*idx) for idx in range(0,10)])
+
+        # rh ... hedge representation.
+        rh = freight_1.represent_hedge()
+        print('LOCATIONS')
+        Freight.pretty_dict(rh['locations'])
+        print('MOVEMENTS COND')
+        Freight.pretty_dict(rh['movements_cond'])
+        print('MOVEMENTS UNCOND')
+        Freight.pretty_dict(rh['movements_uncond'])
+        Freight.pretty_dict(freight_1.show_dynamics())
+        freight_1.show_dynamics_and_locations()
+
+        freight_1.fwd_curves = self.fwd_function_2
+
+        rh = freight_1.represent_hedge()
+        print('LOCATIONS')
+        Freight.pretty_dict(rh['locations'])
+        print('MOVEMENTS COND')
+        Freight.pretty_dict(rh['movements_cond'])
+        print('MOVEMENTS UNCOND')
+        Freight.pretty_dict(rh['movements_uncond'])
+        Freight.pretty_dict(freight_1.show_dynamics())
+        freight_1.show_dynamics_and_locations()
+
+        self.assertTrue(True)
+
+
 
     def test_freight_display(self):
         """ Demonstrates the usage of the display class.
