@@ -634,7 +634,7 @@ class Freight:
                , 'schedule' : ship_schedule }
 
     def show_dynamics_and_locations(self, ignore_small_nbs : float = 0.0001) -> None:
-        sd       = self.show_dynamics()
+        sd       = self.show_dynamics(ignore_small_nbs=ignore_small_nbs)
         locs     = sd['locations']
         schedule = sd['schedule']
 
