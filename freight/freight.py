@@ -71,7 +71,7 @@ class Freight:
         self.__time_grid       = None  # time grid
 
     @property
-    def _time_grid(self) -> Union[set, None]:
+    def _time_grid(self) -> Union[List, None]:
         """ Generates the time grid between mkt_date and final date
         """
 
@@ -90,7 +90,7 @@ class Freight:
                     all_dates.add(curr_date)
                     curr_date += datetime.timedelta(days=frequency)
 
-        self.__time_grid = set(sorted(list(all_dates)))  # TODO: check if set if correct here???
+        self.__time_grid = list(sorted(list(all_dates)))  # TODO: check if set if correct here???
 
         return self.__time_grid
 
