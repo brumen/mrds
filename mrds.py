@@ -4,7 +4,6 @@
 
 import datetime
 import numpy  as np
-import pandas as pd
 import scipy
 import scipy.stats
 import scipy.interpolate  # spline package
@@ -13,6 +12,7 @@ from logging         import Logger
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
 from typing          import List, Dict, Tuple, Union
+from sqlalchemy.ext.declarative import declarative_base
 
 # mrds imports
 from mrds.mrds_maths    import ComMathsMixin
@@ -1477,3 +1477,21 @@ class ComSkewChecks(ComSkew):
                 logger.info('Calibration of ATM vols for asset {0} is LARGER than prescribed. Market - calibrated diff: {1}.'.format(asset, diff))
 
         logger.debug('Calibration of ATM vols for asset nb. {0} succeeded. Diff = {1}'.format(asset, str(diff)))
+
+
+ComORM = declarative_base()  # default sqlalchemy class
+
+
+class ComSkewORM(ComSkew, ComORM):
+    """ Commodity skew model with ORM baked in.
+    """
+
+    # sqlalchemy part
+    from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, Table, Float, SmallInteger, Enum, \
+        create_engine
+    from sqlalchemy.orm import relation, sessionmaker
+
+    __tablename__ = 'com_skew'
+
+    object_id = Column(String)
+    commodity = Column(String)
