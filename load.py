@@ -70,29 +70,32 @@ class Load:
 
         A_ineq = []
         b_ineq = []
-        A_eq = []
-        b_eq = []
+        A_eq   = []
+        b_eq   = []
 
         for node in self._all_nodes:
             if node in gen_load_nodes:  # some gen., load on these nodes
                 gen_load, price = self.__find_node(node)
                 row_gen_load = np.zeros(nb_vars)
                 row_gen_load2 = np.zeros(nb_vars)
+
                 for nb_conn, (orig, dst, cap, trans) in enumerate(self.__network_struct):
+                    nb_conn_2 = 2 * nb_conn
                     if orig is node:
                         if gen_load >= 0.:  # generation
-                            row_gen_load[2*nb_conn] = 1.
-                            row_gen_load2[2*nb_conn + 1] = 1.
+                            row_gen_load[nb_conn_2] = 1.
+                            row_gen_load2[nb_conn_2 + 1] = 1.
                         else:
-                            row_gen_load[2*nb_conn+1] = 1.
-                            row_gen_load2[2*nb_conn] = 1.
+                            row_gen_load[nb_conn_2+1] = 1.
+                            row_gen_load2[nb_conn_2] = 1.
                     if dst is node:
                         if gen_load >= 0.:
-                            row_gen_load[2*nb_conn+1] = 1.
-                            row_gen_load2[2*nb_conn] = 1.
+                            row_gen_load[nb_conn_2+1] = 1.
+                            row_gen_load2[nb_conn_2] = 1.
                         else:
-                            row_gen_load[2*nb_conn] = 1.
-                            row_gen_load2[2*nb_conn+1] = 1.
+                            row_gen_load[nb_conn_2] = 1.
+                            row_gen_load2[nb_conn_2+1] = 1.
+
                 A_ineq.append(row_gen_load)
                 b_ineq.append(np.abs(gen_load))
                 A_eq.append(row_gen_load2)
@@ -109,30 +112,31 @@ class Load:
 
         opt_vec = np.zeros(nb_vars)
         for nb_conn, (orig, dst, cap, trans) in enumerate(self.__network_struct):
+            nb_conn_2 = 2 * nb_conn
             lr_row = np.zeros(nb_vars)
-            lr_row[(2*nb_conn):(2*nb_conn + 2)] = (1, 1)
+            lr_row[nb_conn_2:(nb_conn_2 + 2)] = (1, 1)
             # TODO: check if this can be rewritten w/ equalities.
             A_ineq.append(lr_row)
             b_ineq.append(cap)
             A_ineq.append(-lr_row)
             b_ineq.append(cap)
-            opt_vec[(2*nb_conn):(2*nb_conn+2)] = (-trans, -trans)
+            opt_vec[nb_conn_2:(nb_conn_2+2)] = (-trans, -trans)
             orig_load_price = self.__find_node(orig)
             dest_load_price = self.__find_node(dst)
 
             if orig_load_price:
                 orig_load, orig_price = orig_load_price
                 if orig_load >= 0.:  # generation
-                    opt_vec[2*nb_conn] -= orig_price
+                    opt_vec[nb_conn_2] -= orig_price
                 else:
-                    opt_vec[2*nb_conn+1] += orig_price
+                    opt_vec[nb_conn_2+1] += orig_price
 
             if dest_load_price:
                 dst_load, dest_price = dest_load_price
                 if dst_load <= 0.:
-                    opt_vec[2*nb_conn] += dest_price
+                    opt_vec[nb_conn_2] += dest_price
                 else:
-                    opt_vec[2*nb_conn+1] -= dest_price
+                    opt_vec[nb_conn_2+1] -= dest_price
 
         problem = linprog( -opt_vec
                          , A_eq = np.array(A_eq)
@@ -167,6 +171,7 @@ class Load:
         g = nx.Graph()
         for node in nodes:
             g.add_node(node)
+
         for edge_start, edge_end in edges:
             g.add_edge(edge_start, edge_end)
 
