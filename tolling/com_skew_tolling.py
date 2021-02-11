@@ -20,8 +20,6 @@ import pycuda.curandom
 import pycuda.cumath
 import pycuda.gpuarray as gpa
 
-# from cuda import cuda_ops
-
 
 logger = getLogger(__name__)
 
@@ -32,6 +30,8 @@ class ComSkewTolling(ComSkewSpot):
 
     _CALENDAR     = Calendar()  # calendar object for generating days
     _SKEW_FCT_DIR = '/home/brumen'
+
+    _DCF = 365.25 * 24.  # number of hours in a year.
 
     def __init__(self
                  , mkt_date        : datetime.date
@@ -98,7 +98,7 @@ class ComSkewTolling(ComSkewSpot):
         :returns: partition name where the day is found.
         """
 
-        for partition_name, partition in self.days_partition:
+        for partition_name, partition in self.days_partition.items():
             if day_nb in partition:
                 return partition_name
 
@@ -118,18 +118,7 @@ class ComSkewTolling(ComSkewSpot):
             if year_ == start_year and month_ == start_month and day_ >= start_day_in_month.day:  # iterator gives days for other months too, to complete the week
                 hours.extend(self.hours_partition[self.__find_day_partition(day_in_week)])
 
-        # TODO: MAYBE FINISH HERE W/ SOMETHING.
         return hours
-
-        # days = [0.]
-        # for day in range(nb_days):
-        #     day_week = np.mod(day, 7)
-        #     hours_for_day_week = [hp for (hp, dp) in zip(self.hours_partition, self.days_partition)
-        #                           if day_week in dp][0]  # TODO: This is not good here.
-        #
-        #     days.append( days[-1] + np.cumsum(hours_for_day_week)/24./365.25) )  # TODO: THIS IS PROBABLY WRONG
-        #
-        # return days
 
     def _generate_days_vecs(self, nb_days: int) -> Union[Tuple[List, List], Tuple[GPUArray, GPUArray]]:
         """ Generate days for simulate_spot_blocks.
@@ -191,7 +180,6 @@ class ComSkewTolling(ComSkewSpot):
         fom_sims = self.simulate_1nb( assets
                                     , nb_simulations
                                     , self.__class__._create_first_of_months(tolling_start, tolling_end)
-                                    # , self.__generate_fom(tolling_start, tolling_end)
                                     , set_seed = set_seed )
 
         spot_sims = {}
@@ -199,40 +187,25 @@ class ComSkewTolling(ComSkewSpot):
             all_assets = list(sim_info.keys())  # keys is a generator
 
             # correlations
-            corr_mtx = np.array([ [ self._cash_correlation(asset_1, asset_2)
+            cash_corr_mtx = np.array([ [ self._cash_correlation(asset_1, asset_2)
                                     for asset_2 in all_assets ]
                                   for asset_1 in all_assets ])
-            corr_rns = self.__class__._cash_rns(corr_mtx, nb_simulations)
 
             days_within_month_sim = self._generate_hours(sim_date)
+            cash_vols = np.array([ self._cash_vol_curves(asset).atm_vol(sim_date) for asset in all_assets] )  # TODO: this is the same for all assets, OPTIMIZE
 
-            cash_vols = np.array([ self._cash_vol_curves(asset).implied_vol(sim_date, K, TTM)  # TODO: FIX THIS HERE
-                                   for asset in all_assets] )  # TODO: this is the same for all assets, OPTIMIZE
+            first_block_name, first_block_hour = days_within_month_sim[0]
+            spot_sim = [ (first_block_name, first_block_hour, sim_info[first_block_name][0]) ]  # TODO: THIS 0 HERE MIGHT BE WRONG
+            curr_asset_values = np.array([sim_info[asset][0] for asset in all_assets]).transpose()  # each asset sims in a row
 
-            # cash vol tenors
-            # cv_tenors = [cash_curves_asset.implied_vol(fwd_date, K, ttm)
-            #             for fwd_date in cash_curves_asset.vol_dates if not tenors_chosen else tenors_chosen]
+            for block_name, block_hours in days_within_month_sim:
+                block_hours_num = block_hours/self._DCF
+                cash_corr_rns = self.__class__._cash_rns(cash_corr_mtx, nb_simulations).transpose()
+                curr_asset_values *= np.exp(-0.5 * cash_vols**2 * block_hours_num + \
+                                            np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose())
+                spot_sim.append( (block_name, block_hours, curr_asset_values[:, all_assets.index(block_name)]) )
 
-
-            w_hours = np.cumsum( np.sqrt(days_within_month_sim) * corr_rns # [asset_nb][:, :days_diff_l]
-                              , axis=1)  # TODO: CHECK HTIS HERE
-
-            curr_spot_mtx = np.empty((len(all_assets), len(w_hours.columns)))
-            curr_spot_mtx[:,0] = np.array([ sim_info[asset][0] for asset in all_assets ])
-
-            for sim_nb in range(1, nb_simulations):
-                 curr_spot_mtx[:, sim_nb] = curr_spot_mtx[:, sim_nb-1] * np.exp(-0.5 * cash_vols**2 * np.sqrt(days_within_month_sim[sim_nb-1]) +\
-                                                                                cash_vols * w_hours[:, sim_nb-1])
-
-            spot_sims[sim_date] = curr_spot_mtx
-
-            # for fwd_tenor_nb, cash_vol_tenor in enumerate(cv_tenors):
-            #     # fom in column format
-            #     fom_sims_for_tenor = fom_sims_all[asset][fwd_tenor_nb, :]
-            #     fom_sims = fom_sims_for_tenor.reshape((len(fom_sims_for_tenor), 1))  # column vector
-            #     spot_sims[asset][fwd_tenor_nb] = np.transpose(fom_sims *
-            #                                            np.exp(-0.5 * cash_vol_tenor**2 * days +
-            #                                                   cash_vol_tenor * w_days))
+            spot_sims[sim_date] = spot_sim
 
         return spot_sims
 

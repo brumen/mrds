@@ -141,10 +141,9 @@ class ComSkewSpot(ComSkew):
 
     @staticmethod
     def _create_first_of_months( start_date : datetime.date
-                                , end_date   : datetime.date) -> List[datetime.date]:
+                               , end_date   : datetime.date) -> List[datetime.date]:
         """ Constructs a list of first of months between start_date and end_date (including the month where
             start_date is.
-            TODO: This can be computed from QuantLib.Schedule
 
         :param start_date: start date for the month range
         :param end_date: end date of the month range.
@@ -164,7 +163,7 @@ class ComSkewSpot(ComSkew):
         curr_month       = next_first_of_month
         curr_list_months = [first_of_month]
 
-        while curr_month != last_first_of_month:
+        while curr_month <= last_first_of_month:
             curr_list_months.append(curr_month)
             if curr_month.month != 12:
                 curr_month = datetime.date(curr_month.year, curr_month.month+1, 1)

@@ -22,6 +22,11 @@ class ComSkewTollingTest(TestCase):
                                          , hours_partition = { 'WEEKDAY': [('WTI', 8) , ('BRENT', 16), ]
                                                              , 'WEEKEND': [('WTI', 16), ('BRENT', 8 ), ] })
 
+        res1 = com_skew.simulate_spot_blocks( ('WTI', 'BRENT', )
+                                            , 1000
+                                            , datetime.date(2015, 5, 1)
+                                            , datetime.date(2015, 6, 20))
+
         print(1+1)
 
         self.assertTrue(True)
