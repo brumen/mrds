@@ -123,10 +123,14 @@ brent_curve_dates = [dt.date(2015, 4, 15),
 brent_curve_vals_init = [51.64, 53.51, 54.79, 55.51, 56.08, 56.58, 57.09, 57.61, 58.07, 58.44,
                          58.79, 59.14, 59.47, 59.79, 60.03, 60.29, 60.56, 60.84, 61.13, 61.41,
                          61.54, 61.68, 61.84, 62.01, 62.19, 62.4, 62.49]
+
+
 brent_spread = np.linspace(6, 7, len(brent_curve_vals_init))  # fictitious spread
 brent_curve_vals = [x + s for x, s in zip(brent_curve_vals_init, brent_spread)]
 brent_vol_dates = wti_vol_curve_dates
 brent_vol_vals = wti_vol_curve_vals
+brent_vol_curve_dates_vals = dict(zip(brent_vol_dates, brent_vol_vals))
+
 
 # ATSI-PEAK (as-of-date 2014-11-14)
 atsi_peak_curve_dates = [dt.date(2015, 4, 30),
