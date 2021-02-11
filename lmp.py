@@ -44,7 +44,9 @@ class LMP:
             self.__all_nodes_int.add(node_1)
             self.__all_nodes_int.add(node_2)
 
-        return list(self.__all_nodes_int)
+        self.__all_nodes_int = list(self.__all_nodes_int)
+
+        return self.__all_nodes_int
 
     def __nodes_to_integer(self, node : str) -> int:
         """ Returns the integer index of the node
@@ -164,8 +166,8 @@ class LMP:
                       , b_ub = np.array(b_ineq)
                       , bounds=list(zip(lb, ub)) )
 
-    def show_lmp(self):
-        """ Prints out the result of optimization.
+    def __repr__(self):
+        """ Prints out the result of optimization network.
         """
 
         problem = self.compute_load_distribution()

@@ -5,11 +5,11 @@
 
 import datetime
 import numpy as np
-import calendar
 import logging
 
-from config import CUDA_PRESENT
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Callable, Optional
+
+from mrds.config import CUDA_PRESENT
 
 # cuda (this can be imported even if cuda is not present)
 if CUDA_PRESENT:
@@ -20,10 +20,10 @@ if CUDA_PRESENT:
     from cuda import cuda_ops
     from cuda.cuda_ops import matmul
 
-from mrds          import ComSkew
-from vols.vols     import Volatility
-from forward_curve import FwdCurve
-from correlations  import corr_hyp_sec_two_fronts_time_diff
+from mrds.mrds          import ComSkew
+from mrds.vols.vols     import Volatility
+from mrds.forward_curve import FwdCurve
+from mrds.correlations  import corr_hyp_sec_two_fronts_time_diff
 
 
 logger = logging.Logger(__name__)
@@ -34,14 +34,13 @@ class ComSkewSpot(ComSkew):
     """
 
     def __init__(self
-                 , mkt_date        : datetime.date
-                 , fwd_curves      : List[FwdCurve]
-                 , vol_curves      : List[Volatility]
-                 , cash_vol_curves : List[Volatility]
-                 , cash_correlations = None
-                 , discount_curve    = None
-                 , calc_date         = None ):
-
+                 , mkt_date          : datetime.date
+                 , fwd_curves        : List[FwdCurve]
+                 , vol_curves        : List[Volatility]
+                 , cash_vol_curves   : List[Volatility]
+                 , cash_correlations : Callable      = None
+                 , discount_curve    : Callable      = None
+                 , calc_date         : datetime.date = None ):
         """ Initialization of the skew model for tolling simulation.
 
         :param mkt_date: market date
@@ -87,22 +86,28 @@ class ComSkewSpot(ComSkew):
     def _cash_correlation(self
                          , asset_1 : str
                          , asset_2 : str
-                         , fwd_date_1 : datetime.date
-                         , fwd_date_2 : datetime.date
+                         , fwd_date_1 : Optional[datetime.date] = None
+                         , fwd_date_2 : Optional[datetime.date] = None
                          , default_corr = 0.95 ):
         """ Cash correlations between asset_1 and asset_2.
 
         :param asset_1: first asset to get correlations. ('ERCOT-PEAK')
         :param asset_2: second asset to compute correlations. ('ERCOT-OFFPEAK')
-        :param fwd_date_1: date on the first curve (asset_1)
-        :param fwd_date_2: date on the second curve
+        :param fwd_date_1: date on the first curve (asset_1), possibly not needed,
+        :param fwd_date_2: date on the second curve, possibly not needed
         :param default_corr: default correlation between asset_1 & asset_2, in hyp_sec form
         """
 
         if self.__cash_correlations:  # cash correlation is a given function
             return self.__cash_correlations(asset_1, asset_2, fwd_date_1, fwd_date_2)
 
-        # else: default correlation
+        if fwd_date_1 is None or fwd_date_2 is None:  # ignoring the forward dates
+            if asset_1 == asset_2:
+                return 1.
+
+            return default_corr
+
+        # else: default correlation from the hyp-sec correlation structure.
         return corr_hyp_sec_two_fronts_time_diff(default_corr, fwd_date_1, fwd_date_2)
 
     @staticmethod
@@ -135,7 +140,7 @@ class ComSkewSpot(ComSkew):
                                             , size = nb_simulations )
 
     @staticmethod
-    def __create_first_of_months( start_date : datetime.date
+    def _create_first_of_months( start_date : datetime.date
                                 , end_date   : datetime.date) -> List[datetime.date]:
         """ Constructs a list of first of months between start_date and end_date (including the month where
             start_date is.
@@ -198,17 +203,18 @@ class ComSkewSpot(ComSkew):
         # create first of months - then use simulate_1nb
         sims_1nb = self.simulate_1nb( assets
                                     , nb_simulations
-                                    , self.__create_first_of_months(sim_dates[0], sim_dates[-1] ) )
+                                    , self._create_first_of_months(sim_dates[0], sim_dates[-1] ) )
 
         spot_sims = {}
         for sim_date in sim_dates:
             # get all asset simulations
             sims_for_date = sims_1nb[sim_date]
 
+            # TODO: CHECK THIS PART, MIGHT BE ALL WRONG
             spot_sims_curr = {}
             for asset in assets:
                 for fwd_tenor_nb, cash_vol_tenor in enumerate(self.cash_vol_list(asset)):
-                nb_days_m = self.nb_days_month[fwd_tenor_nb]
+                    nb_days_m = self.nb_days_month[fwd_tenor_nb]
                 forward_tenors_dates = self.forward_tenors_list[asset_nb]
 
                 if fwd_tenor_nb != (self.forward_curve_len[asset_nb] - 1):
@@ -240,7 +246,7 @@ class ComSkewSpot(ComSkew):
         :returns: matrix of simulations
         """
 
-        W_days = np.cumsum(np.sqrt(delta_t) * self._simulateTODO  # TODO: HERE FINISH THE SIMULATION
+        W_days = np.cumsum(np.sqrt(delta_t) * self._simulateTODO)  # TODO: HERE FINISH THE SIMULATION - IT'S WRONG
 
         return np.transpose(prev_sims.reshape((len(prev_sims), 1)) *
                                                np.exp(-0.5 * cash_vols ** 2 * delta_t + cash_vols * W_days))

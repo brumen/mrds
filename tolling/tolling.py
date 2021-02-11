@@ -1,19 +1,20 @@
 # Tolling model
-import config
+import mrds.config
 
 from typing import List, Tuple, Union, Dict
 
 import datetime
 import numpy as np
-import mrds
-import ds
 
-from tolling.opd              import opd_1fuel, opd_1fuel_cu
-from tolling.com_skew_tolling import ComSkewTolling
-from forward_curve            import FwdCurve
-from vols.vols                import Volatility
+import mrds.mrds as mrds  # TODO: CHECK HERE
+import mrds.ds   as ds
 
-if config.CUDA_PRESENT:
+from mrds.tolling.opd              import opd_1fuel, opd_1fuel_cu
+from mrds.tolling.com_skew_tolling import ComSkewTolling
+from mrds.forward_curve            import FwdCurve
+from mrds.vols.vols                import Volatility
+
+if mrds.config.CUDA_PRESENT:
     import pycuda.gpuarray as gpa
     import cuda.cuda_ops   as cuda_ops
 
@@ -80,7 +81,8 @@ class TollingModel(ComSkewTolling):
         """
 
         super().__init__( mkt_date
-                        , fwd_curves= )
+                        , fwd_curves= fwd_curves
+                        , vol_curves = vol_curves  )
 
         self.tolling_params      = tolling_params
         self.nb_days     = tolling_params.nb_days
@@ -154,7 +156,9 @@ class TollingModel(ComSkewTolling):
         :param day_week: day in the week
         :param days_partition: partition of the week, e.g.  [[0,1,2,3,4],[5,6]]
         """
+
         idx_nb = 0
+
         for k in days_partition:
             if day_week in k:
                 return idx_nb
