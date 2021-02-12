@@ -12,7 +12,7 @@ from mrds.vols.fwd_codes     import fwd_mth_codes
 
 # mapping of commodity names to vol parametrization
 vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals, ds_data.wti_vol_curve_dates_vals)
-           , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates, ds_data.brent_vol_vals)
+           , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates    , ds_data.brent_vol_vals    , ds_data.brent_vol_curve_dates_vals)
            , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals)
            , 'ATSI_7X8'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)
            , 'ATSI_2X16'         : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals)

@@ -1,18 +1,17 @@
 #
 #   skew model for forward curves
-#
+#   (see tests.test_mrds for examples, not everything works).
 
 import datetime
 import numpy  as np
-import pandas as pd
 import scipy
 import scipy.stats
 import scipy.interpolate  # spline package
 from openopt         import NLP, NSP
-from logging         import Logger
+from logging         import getLogger
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
-from typing          import List, Dict, Tuple, Union
+from typing          import List, Dict, Tuple, Union, Callable
 
 # mrds imports
 from mrds.mrds_maths    import ComMathsMixin
@@ -29,7 +28,7 @@ from mrds.quartic.quartic_cy  import QuadRoots, CubicRoots, QuarticRoots
 from mrds.tolling.opd.opd_avx import skew_fom
 
 
-logger = Logger(__name__)
+logger = getLogger(__name__)
 
 
 class ComSkewError(Exception):
@@ -58,11 +57,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
     _C_VEC_CACHE          = 100  # cache for C vector
 
     def __init__(self
-                 , mkt_date      : datetime.date
-                 , fwd_curves    : List[FwdCurve]
-                 , vol_curves    : List[Volatility]
-                 , discount_curve = None
-                 , calc_date      = None ):
+                 , mkt_date       : datetime.date
+                 , fwd_curves     : List[FwdCurve]
+                 , vol_curves     : List[Volatility]
+                 , discount_curve : Callable = None
+                 , calc_date      : datetime.date = None
+                 , dcf            : float = 365.25 ):
 
         """ Initialization of the skew model.
 
@@ -72,6 +72,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param vol_curves: commodity vol curves, in case they are different than forward curves.
         :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
         :param calc_date: calculation date.
+        :param dcf: day-count factor for computing numerical dates from actual.
         """
 
         self._mktDate          = mkt_date
@@ -79,6 +80,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self._com_fwd_curves   = fwd_curves
         self._com_vol_curves   = vol_curves
         self._discount_curve   = discount_curve if discount_curve else DiscountCurve(mkt_date).discount_function_2  #discount_function_local(mkt_date)  # DiscountCurve.discount_function(mkt_date)
+        self.dcf               = dcf
         nb_assets              = len(self._com_fwd_curves)
 
         # initial value of the calibrated params
@@ -102,10 +104,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self.__complete_corr_mtx            = None  # complete correlation matrix hash
         self.__regenerate_complete_corr_mtx = True  # indicator whether to regenerate the complete corr. mtx.
 
+        # some stored variables
+        self.__calib_multi_thread_ind = True  # indicator whether to use multi-threaded for calibration.
+
     @classmethod
-    def from_db(cls
-                , mkt_date   : datetime.date
-                , fwd_curves : List[str] ):
+    def from_db( cls
+               , mkt_date   : datetime.date
+               , fwd_curves : List[str] ):
         """ Constructs the class by reading forward and vol curves from the database.
 
         :param mkt_date: market date
@@ -116,14 +121,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                   , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
                   , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
 
-    def object_identifier(self) -> Tuple[datetime.date, List[str]]:
-        """ Object identifier for the purposes of pickling. returns a tuple which can be used for storing objects.
-
-        :returns: tuple which identifies the curve - market date of the curve, followed by a list of curves stored in the object.
-        """
-
-        return (self.mkt_date, [fwd_curve.fwd_name for fwd_curve in self.fwd_curves()])
-
+    # def object_identifier(self) -> Tuple[datetime.date, List[str]]:
+    #     """ Object identifier for the purposes of pickling. returns a tuple which can be used for storing objects.
+    #
+    #     :returns: tuple which identifies the curve - market date of the curve, followed by a list of curves stored in the object.
+    #     """
+    #
+    #     return (self.mkt_date, [fwd_curve.fwd_name for fwd_curve in self.fwd_curves])
 
     @property
     def mkt_date(self) -> datetime.date:
@@ -155,6 +159,23 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         self._calcDate = new_calc_date
+
+    @property
+    def multi_thread_calib(self) -> bool:
+        """ Indicator whether to calibrate the model using multi-threading.
+
+        """
+
+        return self.__calib_multi_thread_ind
+
+    @multi_thread_calib.setter
+    def multi_thread_calib(self, new_multi_thread_calib : bool):
+        """ Sets the new calculation date, updates all the curves accordingly.
+
+        :param new_calc_date: new caluclation date.
+        """
+
+        self.__calib_multi_thread_ind = new_multi_thread_calib
 
     @property
     def fwd_curves(self) -> List[FwdCurve]:
@@ -536,17 +557,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return 2
 
-    def simulation_times( self
-                        , sim_times : [np.ndarray, List[datetime.date], List[str], List[float] ]
-                        , dcf = 365.25 ):
+    def simulation_times( self, sim_times : [np.ndarray, List[datetime.date], List[str], List[float] ] ):
         """ Returns the simulation times from the list of sim_times.
 
         :param sim_times: new simulation times in one of the accepted formats
-        :param dcf: day-count-factor
         """
 
         if isinstance(sim_times, np.ndarray):
-            return sim_times, [self.mkt_date + datetime.timedelta(int(np.round(stf * dcf)))
+            return sim_times, [self.mkt_date + datetime.timedelta(int(np.round(stf * self.dcf)))
                                for stf in sim_times]
 
         if (type(sim_times) == list) and (type(sim_times[0]) == datetime.datetime):
@@ -557,31 +575,30 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             sim_times_normalized = np.array(sim_times)
             return sim_times_normalized, [self.mkt_date + datetime.timedelta(int(np.round(stf * 365.))) for stf in sim_times_normalized]
 
-    def DF( self
-          , fwd_time : [float, datetime.date]
-          , dcf = 365.25 ):
+    def DF( self, fwd_time : [float, datetime.date] ):
         """ Discount from self.mkt_date to fwd_time. Using basic discount curve.
 
         :param fwd_time: future time to discount to. can be '20140101', ...
-        :param dcf: day-count factor.
         """
 
         if (type(fwd_time) is np.double) or (type(fwd_time) is float):
             time_diff = fwd_time
 
         elif isinstance(fwd_time, datetime.date):
-            time_diff = self.__difference_to_market_date(fwd_time, dcf=dcf)
+            time_diff = self.__difference_to_market_date(fwd_time)
 
         else:
             raise ComSkewError('fwd_time given in function DF is not of form [float, datetime.date]')
 
         return self._discount_curve(time_diff)
 
-    def __difference_to_market_date(self, fwd_date : datetime.date, dcf=365.25) -> float:
-        """ Computes the difference to market date given the discount factor.
+    def __difference_to_market_date(self, fwd_date : datetime.date) -> float:
+        """ Computes the difference to market date.
+
+        :param fwd_date: date to compute the distance to market date.
         """
 
-        return (fwd_date - self.mkt_date).days / dcf
+        return (fwd_date - self.mkt_date).days / self.dcf
 
     def __fwd_square_vol (self
                           , asset       : str
@@ -890,11 +907,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                         , self._factor_corr_mat(asset, asset) )
                          for tenor in tenors_used])
 
-    def __numerical_dist_to_mktdate(self, fwd_date : datetime.date, dcf=365.25) -> float:
+    def __numerical_dist_to_mktdate(self, fwd_date : datetime.date) -> float:
         """ Numerical distance to market date from fwd_date.
         """
 
-        return (fwd_date - self.mkt_date).days / dcf
+        return (fwd_date - self.mkt_date).days / self.dcf
 
     def __deltas_to_strikes(self
                             , asset : str
@@ -1170,13 +1187,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def __c_vec_calibrate( self
                          , asset            : str
-                         , fwd_dates        : List[datetime.date]
-                         , multi_thread_ind : bool = False ):
+                         , fwd_dates        : List[datetime.date] ):
         """ Calibrates the dates that are not yet calibrated for the asset.
 
         :param asset: the asset to calibrate, such as 'wti'
         :param fwd_dates: forward dates for which to calibrate
-        :param multi_thread_ind: indicator whether to use multiple threads
         """
 
         if self.__C_vec:
@@ -1188,7 +1203,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         else:  # self.__C_vec == None
             to_be_calibrated = fwd_dates
 
-        if not multi_thread_ind:
+        if not self.multi_thread_calib:
             for calib_date, calib_vec in self._calibrate_skew_dates(asset, to_be_calibrated).items():
                 self._set_c_vec( asset, calib_date, calib_vec) # adding this to the __C_vec
 
@@ -1258,8 +1273,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                        , nb_simulations   : int
                        , simulation_times : List[datetime.date]
                        , tenor_list       : List[datetime.date]
-                       , set_seed         = None
-                       , multi_thread_calib = False  ) -> Dict[str, np.array]:
+                       , set_seed         = None ) -> Dict[str, np.array]:
         """ Simulate curves in assets for desired simulation times in simulation_times.
 
         Generates a dictionary of 3-dimensional arrays:
@@ -1267,14 +1281,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             values of the dictionary: 3 dimensional arrays where
                 1-st dimension: simulation times
                 2-nd dimension: forward date
-                3-rd dimension: repeats of the curve
+                3-rd dimension: simulations of the curve for that simulation time and forward date
 
         :param assets: list of assets for which to simulate
         :param nb_simulations: number of simulations
         :param simulation_times: simulation times for the forwards.
         :param tenor_list: list of tenors which to simulate
         :param set_seed: seed, if needed, can be left to None
-        :param multi_thread_calib: indicator whether to use multi-threaded calibration
         :returns: a dictionary where keys are simulated asset names, and values arrays as described above.
         """
 
@@ -1285,14 +1298,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         for com_curve in assets:
             com_fwd_curve = self.fwd_curve_names(com_curve)
             # TODO: CHANGE THIS TO MAKE IT A PANDAS DATA STRUCTURE - SO MUCH NICER!!!
-            simulated_curves[com_curve] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))  #  if not cuda_ind else gpa.zeros(sim_curves_shape, dtype=rn_type)
+            simulated_curves[com_curve] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))  #  if not cuda_ind else
             fwd_c_col[com_curve] = com_fwd_curve.fwd_value(tenor_list)
             simulated_curves[com_curve][0, :, :] = np.array(fwd_c_col[com_curve]).reshape((len(tenor_list), 1))
 
         # X and X_prev are simulated factors
-        X = {}
+        X      = {}
         X_prev = {}
-        # for com_curve in assets:  # self.fwd_curves:
+
         for asset in assets:
             X_mat_shape = (len(fwd_c_col[asset]), nb_simulations)
             X[asset] = np.zeros(X_mat_shape)
@@ -1311,20 +1324,21 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             factor_corr_mat = self.__factor_corr_mat_multiple(assets)
             simulated_rn    = self.__class__._simulate_std_normal( total_nb_factors, factor_corr_mat, nb_simulations )
 
+            # sims_Z_unit shape = ((nb_factors_per_asset, e.g. 2) * nb_assets) X nb_simulations, e.g. 4 X 1000
             sims_Z_unit = np.dot( np.linalg.inv(np.linalg.cholesky(factor_corr_mat))
                                 , simulated_rn.transpose())
 
-            for asset in assets:  # asset like 'WTI'...
-                if multi_thread_calib:  # calibration in parallel, otherwise on the fly below in self._c_vec
-                    self.__c_vec_calibrate(asset, tenor_list, multi_thread_ind=multi_thread_calib)
+            for asset_idx, asset in enumerate(assets):  # asset like 'WTI'...
+                if self.multi_thread_calib:  # calibration in parallel, otherwise on the fly below in self._c_vec
+                    self.__c_vec_calibrate(asset, tenor_list)  # a little redundant, but anyways
 
                 for tenor_idx, tenor in enumerate(tenor_list):  # tenor is a datetime.date format
                     # prepare cov mtx
                     nb_factors_asset = self.nb_factors_for_asset(asset)
-                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor, i, j, sim_time_idx, sim_times_numeric)
-                                                             for j in range(nb_factors_asset)]
-                                                            for i in range(nb_factors_asset)]))
-                    delta_X = np.sum(np.dot(cov_chol, sims_Z_unit), axis=0)
+                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor, factor_1, factor_2, sim_time_idx, sim_times_numeric)
+                                                             for factor_2 in range(nb_factors_asset)]
+                                                            for factor_1 in range(nb_factors_asset)]))
+                    delta_X = np.sum(np.dot(cov_chol, sims_Z_unit[2 * asset_idx: 2*asset_idx+2, :]), axis=0)
                     # quadratic variation of delta_X, also q_v = V_u
                     qv = np.sum([[self._V_cross_factor( asset
                                                       , factor_1
@@ -1358,11 +1372,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def simulate_curves_nicer( self
                              , assets           : List[str]
-                               , nb_simulations   : int
-                               , simulation_times : List[datetime.date]
-                               , tenor_list       : List[datetime.date]
-                               , set_seed         = None) -> Dict[str, Dict[datetime.date, Dict[datetime.date, np.array]]]:
-        """ Reformats the simulate_curves into a more readable dictionary
+                             , nb_simulations   : int
+                             , simulation_times : List[datetime.date]
+                             , tenor_list       : List[datetime.date]
+                             , set_seed         = None) -> Dict[str, Dict[datetime.date, Dict[datetime.date, np.array]]]:
+        """ Re-formats the simulate_curves into a more readable dictionary
 
         Parameters the same as in simulate_curves_nicer.
         """
@@ -1379,7 +1393,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                              for tenor_idx, tenor in enumerate(tenor_list) }
 
         return sc_nice
-
 
     def simulate_1nb( self
                     , assets           : List[str]
@@ -1431,8 +1444,29 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                 assets_to_rows_in_matrix[asset].append(tenors_from_all_curves.index(tenor))
 
         # TODO: NOT ALL ASSETS ARE NEEDED FOR ALL SIMULATION TIMES - IMPROVE HERE
-        return { asset: simulated_curves[asset][ :, assets_to_rows_in_matrix[asset], : ]
-                 for asset in assets }
+        # return { asset: simulated_curves[asset][:, assets_to_rows_in_matrix[asset], :]
+        #          for asset in assets }
+
+        return {sim_date: {asset: simulated_curves[asset][sim_idx, assets_to_rows_in_matrix[asset], :]
+                           for asset in assets}
+                for sim_idx, sim_date in enumerate(simulation_times) }
+
+    def simulate_1nb_nicer( self
+                          , assets           : List[str]
+                          , nb_simulations   : int
+                          , simulation_times : List[datetime.date]
+                          , set_seed         = None ) -> Dict[datetime.date, Dict[str, np.ndarray]]:
+        """ Simulate the first nearby (1NB) (rolling) contract. Generates a dictionary where keys are
+            assets and values are 2 dimensional arrays:
+               0-th dimension: simulation times
+               1-st dimension: repeats of the curve
+
+        :param assets: assets for which to generate first nearby.
+        :param nb_simulations: number of simulations to simulate.
+        :param simulation_times: times when to simulate curves, if None TODO: WHAT THEN???
+        :param set_seed: set the seed for simulations.
+        """
+
 
     @lru_cache(maxsize=20)  # TODO: THIS IS NOT RIGHT HERE!!!
     def __factor_positions(self, asset : str) -> slice:
@@ -1447,6 +1481,80 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fact_sum[1:(len(cums)+1)] = cums
 
         return slice(fact_sum[asset], fact_sum[asset+1])  # TODO: asset + 1 is wrong
+
+    def simulate_curves_fom(self
+                            , asset_nb       : str
+                            , nb_simulations : int
+                            , sim_times      : List[datetime.date]
+                            , tenors_list = None
+                            , rn_type     = np.float32):
+        """ Simulate first of month curves.
+
+        generates a list of 3 dim arrays:
+           1-st dim: tenor
+           2-nd dim: simulation
+
+        :param sim_times:
+
+        """
+
+        np.random.seed(set_seed)  # TODO: HERE
+        sim_times = self.option_tenors_list[asset_nb]
+        sim_fom = gpa.empty((self.forward_curve_len[asset_nb], nb_simulations), dtype=rn_type)
+
+        rng = self.__random_nb_generator()
+        f_skew_fct = self._f_skew_fct_cuda(int, self._rn_type)
+        # looping over tenors
+        #    t_i ... idx of sim_time (also tenor)
+        #    fact_sum ... factors of the individual assets
+        for t_i, t_curr in enumerate(sim_times):
+
+            tenor_nb = t_i
+            F_curr = self.forward_curve_list[asset_nb][tenor_nb].astype(rn_type)
+            nb_factors_asset = self.nb_factors_for_asset[asset_nb]
+
+            new_cov_mat = np.array([[self._var_covar_mtx_simple(asset_nb, tenor_nb, i, j, t_i, sim_times)
+                                    for j in range(nb_factors_asset)]
+                                        for i in range(nb_factors_asset)])
+            new_chol = np.linalg.cholesky(new_cov_mat)
+            old_cov_mat = self.__completeCorrMat[self.__factor_positions(asset_nb), self.__factor_positions(asset_nb)]
+            sims_Z = self.__random_nb_generator( nb_simulations, self.__completeCorrMat)\
+                                               .transpose()\
+                                               [:, self.__factor_positions(asset_nb)]\
+                                               .transpose()
+
+            sims_Z_unit = skcuda.linalg.dot( gpa.to_gpu(np.linalg.inv(np.linalg.cholesky(old_cov_mat))).astype(rn_type)
+                                           , sims_Z )
+
+            # TODO:  THIS IS SLOW - IMPROVE
+            delta_X = cuda_ops.colsum_cuda_last(cuda_ops.matmul(gpa.to_gpu(new_chol).astype(rn_type), sims_Z_unit))
+
+            qv = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2, tenor_nb, tenor_nb, 0., t_curr)
+                          for factor_1 in range(nb_factors_asset)]
+                         for factor_2 in range(nb_factors_asset)]).astype(rn_type)
+
+            if self.model_skew_ln_ind is 'ln_ln':
+                sim_fom[t_i, :] = F_curr * np.exp(delta_X - 0.5 * qv)
+            else:
+                # TODO: below change, use self._c_vec function
+                cVecCurr = self._CVecList[asset_nb][tenor_nb, :]
+                # new_sim = F_curr * \
+                #    (1. + delta_X + c1 * (delta_X**2 - qv) / 2. +
+                #     c2 * (delta_X**3 - delta_X * 3*qv) / 6. +
+                #     c3 * (delta_X**4 - delta_X**2 * 6*qv + s1) / 24.)
+                # sim_fom[t_i, :] = new_sim
+                f_skew_fct( F_curr
+                          , cVecCurr[0].astype(rn_type)
+                          , cVecCurr[1].astype(rn_type)
+                          , cVecCurr[2].astype(rn_type)
+                          , qv
+                          , delta_X
+                          , sim_fom[t_i, :]
+                          , np.int32(nb_simulations)
+                          , block = (1, 1, 1)
+                          , grid  = (nb_simulations, 1))
+
+        return sim_fom
 
 
 class ComSkewChecks(ComSkew):

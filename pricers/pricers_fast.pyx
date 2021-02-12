@@ -41,24 +41,25 @@ def black_greeks_fast(double S_0, double K, double r, double sigma, double T, in
     cdef double disc = exp ( - r * T)
     cdef double sqrtT = sqrt (T)
 
-    cdef double Black = disc * ( S_0 * N1 - K * N2 )
-    cdef double Delta = disc * N1
-    cdef double Gamma = disc * n1 / (S_0 * sigma * sqrtT )
-    cdef double Vega =  disc * S_0 * n1 * sqrtT
-    cdef double Theta = -S_0 * disc * n1 * sigma / ( 2 * sqrtT) + \
+    cdef double black = disc * ( S_0 * N1 - K * N2 )
+    cdef double delta = disc * N1
+    cdef double gamma = disc * n1 / (S_0 * sigma * sqrtT )
+    cdef double vega =  disc * S_0 * n1 * sqrtT
+    cdef double theta = -S_0 * disc * n1 * sigma / ( 2 * sqrtT) + \
             r * S_0 * disc * N1 - r * K * disc * N2
-    cdef double Rho = K * T * disc * N2
+    cdef double rho = K * T * disc * N2
 
-    if (call_put_ind == 1):
-        Black = Black + (K - S_0) * disc
-        Delta = disc * ( N1 -1 )
-        Gamma = disc * n1 / ( S_0 * sigma * sqrtT )
-        Vega =  disc *  S_0 * n1 * sqrtT
-        Theta = -S_0 * n1 * sigma / ( 2 * sqrtT ) + \
+    if call_put_ind == 1:
+        black += (K - S_0) * disc
+        delta = disc * ( N1 -1 )
+        gamma = disc * n1 / ( S_0 * sigma * sqrtT )
+        vega =  disc *  S_0 * n1 * sqrtT
+        theta = -S_0 * n1 * sigma / ( 2 * sqrtT ) + \
                 r * K * disc * cdf(-d2) - r * S_0 * disc * cdf(-d1)
-        Rho = - K * T * disc * cdf(-d2)
+        rho = - K * T * disc * cdf(-d2)
 
-    return [Black, Delta, Gamma, Vega, Theta, Rho]
+    return black, delta, gamma, vega, theta, rho
+
 
 # super fast black call option
 cpdef double black_call_fast(double S_0, double K, double r, double sigma, double T):
