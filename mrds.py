@@ -121,13 +121,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                   , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
                   , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
 
-    def object_identifier(self) -> Tuple[datetime.date, List[str]]:
-        """ Object identifier for the purposes of pickling. returns a tuple which can be used for storing objects.
-
-        :returns: tuple which identifies the curve - market date of the curve, followed by a list of curves stored in the object.
-        """
-
-        return (self.mkt_date, [fwd_curve.fwd_name for fwd_curve in self.fwd_curves()])
+    # def object_identifier(self) -> Tuple[datetime.date, List[str]]:
+    #     """ Object identifier for the purposes of pickling. returns a tuple which can be used for storing objects.
+    #
+    #     :returns: tuple which identifies the curve - market date of the curve, followed by a list of curves stored in the object.
+    #     """
+    #
+    #     return (self.mkt_date, [fwd_curve.fwd_name for fwd_curve in self.fwd_curves])
 
     @property
     def mkt_date(self) -> datetime.date:
