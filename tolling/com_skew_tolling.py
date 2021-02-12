@@ -5,13 +5,14 @@ import datetime
 import numpy as np
 
 from logging  import getLogger
-from typing   import List, Tuple, Dict, Union, Callable
+from typing   import List, Tuple, Dict, Union, Callable, Optional
 from calendar import Calendar
 
-from mrds.mrds_spot     import ComSkewSpot
+from mrds.mrds          import ComSkew
 from mrds.vols.vols     import Volatility
 from mrds.forward_curve import FwdCurve
 from mrds.vols.vols_get import get_vol_object
+from mrds.correlations  import corr_hyp_sec_two_fronts_time_diff
 
 from pycuda.gpuarray import GPUArray
 from pycuda.compiler import SourceModule
@@ -24,7 +25,7 @@ import pycuda.gpuarray as gpa
 logger = getLogger(__name__)
 
 
-class ComSkewTolling(ComSkewSpot):
+class ComSkewTolling(ComSkew):
     """ Adds the methods responsible only for tolling simulation, etc.
     """
 
@@ -36,12 +37,12 @@ class ComSkewTolling(ComSkewSpot):
                  , fwd_curves      : List[FwdCurve]
                  , vol_curves      : List[Volatility]
                  , cash_vol_curves : List[Volatility]
-                 , cash_corrs      : Callable
+                 , cash_corrs      : Optional[Callable]
                  , days_partition  : Dict[str, Tuple]
                  , hours_partition : Dict[str, List[Tuple[str, int]]]
-                 , discount_curve = None
-                 , calc_date      = None
-                 , dcf            : float = 365.25 ):
+                 , discount_curve  : Optional[Callable] = None
+                 , calc_date       : datetime.date      = None
+                 , dcf             : float              = 365.25 ):
 
         """ Initialization of the skew model for tolling simulation.
 
@@ -63,26 +64,45 @@ class ComSkewTolling(ComSkewSpot):
         super().__init__( mkt_date
                         , fwd_curves
                         , vol_curves
-                        , cash_vol_curves
-                        , cash_correlations = cash_corrs
-                        , discount_curve    = discount_curve
-                        , calc_date         = calc_date
-                        , dcf               = dcf )
+                        , discount_curve
+                        , calc_date = calc_date
+                        , dcf       = dcf )
 
-        self.days_partition  = days_partition
-        self.hours_partition = hours_partition
+        self.__cash_vol_curves   = cash_vol_curves
+        self.__cash_correlations = cash_corrs
+        self.days_partition     = days_partition
+        self.hours_partition    = hours_partition
 
-    # TODO: FIX THIS METHOD A BIT
     @classmethod
     def from_db( cls
                , mkt_date        : datetime.date
                , fwd_curves      : List[str]
                , vol_curves      : List[str]
                , cash_vol_curves : List[str]
-               , cash_corrs = None
-               , days_partition = {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,) }
+               , cash_corrs      = None
+               , days_partition  = {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,) }
                , hours_partition = { 'WEEKDAY': [('PJMW-PEAK', 8), ('PJMW-OFFPEAK', 16),]
-                                   , 'WEEKEND': [('PJMW-PEAK', 16), ('PJMW-OFFPEAK', 8),] } ):
+                                   , 'WEEKEND': [('PJMW-PEAK', 16), ('PJMW-OFFPEAK', 8),] }
+               , discount_curve: Optional[Callable] = None
+               , calc_date: datetime.date = None
+               , dcf: float = 365.25):
+        """ Obtains data from database.
+
+        :param mkt_date: market date
+        :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
+                     forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
+        :param vol_curves: commodity vol curves, same structure as fwd_curves, but the objects are volatility objects.
+        :param cash_vol_curves: cash vol curves, same structure as the vol_curves.
+        :param cash_corrs: cash correlations - double dictionary of numbers.
+        :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
+        :param calc_date: calculation date.
+        :param days_partition: partition of days,  Mon = 0, Sun = 6, e.g. [[0,1,2,3,4], [5,6]]  # TODO: MAYBE CHANGE THIS
+                               {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,)
+        :param hours_partition: partition of hours for each block, e.g { 'WEEKDAY': ((PJMW-PEAK, 8), (PJMW-OFFPEAK, 16),)
+                                                                       , 'WEEKEND': ((PJMW-PEAK, 16), (PJMW-OFFPEAK, 8),) }
+        :param dcf: day-count factor.
+
+        """
 
         return cls( mkt_date
                   , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
@@ -90,7 +110,123 @@ class ComSkewTolling(ComSkewSpot):
                   , [get_vol_object(cash_vol_curve, mkt_date) for cash_vol_curve in cash_vol_curves]
                   , cash_corrs
                   , days_partition  = days_partition
-                  , hours_partition = hours_partition )
+                  , hours_partition = hours_partition
+                  , discount_curve  = discount_curve
+                  , calc_date       = calc_date
+                  , dcf             = dcf )
+
+    def _cash_vol_curves(self, asset : Union[str, List[str]]) -> Union[Volatility, Dict[str, Volatility]]:
+        """ Returns the cash vol curve for the particular asset. If you enter the
+            wrong asset, None is returned.
+
+        :param asset: asset cash vol to be returned, or a list of asset cash vols
+        :returns: the Volatility subclass for that asset, or a dictionary where keys are assets, and
+                  values are Volatilities for those assets.
+        """
+
+        assert isinstance(asset, str) or isinstance(asset, list), 'asset parameter is either a string, or a list of strings.'
+
+        if isinstance(asset, str):
+            for fwd_curve, cash_vol_curve in zip(self.fwd_curves, self.__cash_vol_curves):
+                if fwd_curve.fwd_name == asset:
+                    return cash_vol_curve
+
+        # asset is List[str]
+        cash_vol_dict = {}
+        for fwd_curve, cash_vol_curve in zip(self.fwd_curves, self.__cash_vol_curves):
+            if fwd_curve.fwd_name in asset:
+                cash_vol_dict[fwd_curve.fwd_name] = cash_vol_curve
+
+        return cash_vol_dict
+
+    def _cash_correlation(self
+                         , asset_1 : str
+                         , asset_2 : str
+                         , fwd_date_1 : Optional[datetime.date] = None
+                         , fwd_date_2 : Optional[datetime.date] = None
+                         , default_corr = 0.95 ):
+        """ Cash correlations between asset_1 and asset_2.
+
+        :param asset_1: first asset to get correlations. ('ERCOT-PEAK')
+        :param asset_2: second asset to compute correlations. ('ERCOT-OFFPEAK')
+        :param fwd_date_1: date on the first curve (asset_1), possibly not needed,
+        :param fwd_date_2: date on the second curve, possibly not needed
+        :param default_corr: default correlation between asset_1 & asset_2, in hyp_sec form
+        """
+
+        if self.__cash_correlations:  # cash correlation is a given function
+            return self.__cash_correlations(asset_1, asset_2, fwd_date_1, fwd_date_2)
+
+        if fwd_date_1 is None or fwd_date_2 is None:  # ignoring the forward dates
+            if asset_1 == asset_2:
+                return 1.
+
+            return default_corr
+
+        # else: default correlation from the hyp-sec correlation structure.
+        return corr_hyp_sec_two_fronts_time_diff(default_corr, fwd_date_1, fwd_date_2)
+
+    @staticmethod
+    def _number_days_for_month(month_start_date : datetime.date) -> int:
+        """ Generates a dict of number of days per month for every tenor.
+
+        :param month_start_date: date of the start of that month
+        :returns: number of days for that month
+        """
+
+        if month_start_date.month == 12:
+            next_month_start = datetime.date(month_start_date.year + 1, 1, 1)
+        else:
+            next_month_start = datetime.date(month_start_date.year, month_start_date.month+1, 1)
+
+        return (next_month_start - month_start_date).days
+
+    @staticmethod
+    def _cash_rns( cash_corr : np.ndarray, nb_simulations : int ) -> np.array:
+        """ Generates the cash correlations
+
+        :param cash_corr: matrix of cash correlations
+        :param nb_simulations: number of simulations.
+        """
+
+        nb_assets = cash_corr.shape[0]  # cash_corr is a square matrix
+
+        return np.random.multivariate_normal( np.zeros(nb_assets)
+                                            , cash_corr
+                                            , size = nb_simulations )
+
+    @staticmethod
+    def _create_first_of_months( start_date : datetime.date
+                               , end_date   : datetime.date) -> List[datetime.date]:
+        """ Constructs a list of first of months between start_date and end_date (including the month where
+            start_date is.
+
+        :param start_date: start date for the month range
+        :param end_date: end date of the month range.
+        :returns: list of months between start and end date.
+        """
+
+        first_of_month = datetime.date(start_date.year, start_date.month, 1)
+
+        if start_date.month == 12:
+            next_first_of_month = datetime.date(start_date.year, 1, 1)
+        else:
+            next_first_of_month = datetime.date(start_date.year, start_date.month+1, 1)
+
+        last_first_of_month = datetime.date(end_date.year, end_date.month, 1)
+
+        # iterate between the next_first_of_month and last_first_of_month
+        curr_month       = next_first_of_month
+        curr_list_months = [first_of_month]
+
+        while curr_month <= last_first_of_month:
+            curr_list_months.append(curr_month)
+            if curr_month.month != 12:
+                curr_month = datetime.date(curr_month.year, curr_month.month+1, 1)
+            else:
+                curr_month = datetime.date(curr_month.year+1, 1, 1)
+
+        return curr_list_months
 
     def __find_day_partition(self, day_nb : int) -> str:
         """ Finds the day_nb in the partition.
@@ -121,52 +257,12 @@ class ComSkewTolling(ComSkewSpot):
 
         return hours
 
-    def _generate_days_vecs(self, nb_days: int) -> Union[Tuple[List, List], Tuple[GPUArray, GPUArray]]:
-        """ Generate days for simulate_spot_blocks.
-
-        :param cuda_ind: Whether to use and generate objects on cuda, or on cpu.
-        :returns: tuple of days TODO: FIX THIS
-        """
-
-        days = self._generate_days(nb_days)
-        days_diff = np.empty(len(days))
-        days_diff[0] = 0.
-        days_diff[1:] = np.diff(days)
-
-        return days, days_diff
-
-    @staticmethod
-    def __generate_fom(start_date : datetime.date, end_date: datetime.date) -> List[datetime.date]:
-        """ Generate all first-of-month between start_date and end_date, including month w/ start_date.
-
-        :param start_date: start date for FOM generation
-        :param end_date: end date for FOM generation
-        :returns:
-
-        """
-
-        foms = []
-
-        if start_date.day != 1:
-            foms.append(datetime.date(start_date.year, start_date.month, 1))
-
-        # go through the months, add first of month
-        start_year = start_date.year
-        end_year   = end_date.year
-        for year_ in range(start_year, end_year + 1):
-            start_month = start_date.month if year_ == start_year else 1
-            end_month   = end_date.month   if year_ == end_year   else 12
-            for month_ in range(start_month, end_month + 1):
-                foms.append(datetime.date(year_, month_, 1))
-
-        return foms
-
     def simulate_spot_blocks( self
                             , assets         : List[str]
                             , nb_simulations : int
                             , tolling_start  : datetime.date
                             , tolling_end    : datetime.date
-                            , set_seed      = None) -> Dict[str, np.ndarray]:
+                            , set_seed      = None) -> Dict[datetime.date, List[Tuple[str, int, np.array]]]:
         """ Same as simulate_spot_blocks, but for all blocks. TODO: DESCRIBE THIS BETTER
 
         :param assets: list of assets to which asset to simulate block prices for.
@@ -174,7 +270,9 @@ class ComSkewTolling(ComSkewSpot):
         :param tolling_start: start of the tolling simulations
         :param tolling_end: end of tolling sims.
         :param set_seed: optional param for debugging, so that simulations are always the same
-        :returns: dictionary, where keys are simulated assets, and values are TODO: FINISH HERE!!!
+        :returns: dictionary, where keys are simulated first-of-months, and values are:
+                    tuples, where the first is block name, second is block hours, and third is the simulations for that
+                            block.
         """
 
         # fom_sims type is: {date: {asset: sims}}
@@ -222,6 +320,28 @@ class ComSkewTollingCuda(ComSkewTolling):
 
         with open(self._SKEW_FCT_DIR + 'cuda/skew_tsf.c', 'r') as F_skew_el:
             return SourceModule(F_skew_el.read()).get_function('F_skew_tsf')
+
+    @staticmethod
+    def _cash_rns( cash_corr      : np.ndarray
+                 , nb_simulations : int
+                 , rn_type        = float ):
+        """ Generates the cash correlations
+
+        :param cash_corr: matrix of cash correlations
+        :param nb_simulations: number of simulations.
+        :param rn_type: type of random numbers to generate.
+        :param
+        """
+
+        nb_assets = cash_corr.shape[0]  # cash_corr is a square matrix
+
+        spot_rn_init  = gpa.empty( (nb_assets, nb_simulations), dtype=rn_type)
+        cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(cash_corr).astype(rn_type))
+        curand.gen_eff_dev_rns( spot_rn_init.size
+                              , np.longlong(spot_rn_init.ptr)
+                              , pycuda.curandom.XORWOWRandomNumberGenerator())
+
+        return cuda_ops.matmul(cash_corr_gpu, spot_rn_init)
 
     def _generate_days_vecs(self, nb_days: int, cuda_ind=False) -> Union[Tuple[List, List], Tuple[GPUArray, GPUArray]]:
         """ Generate days for simulate_spot_blocks.
@@ -281,15 +401,5 @@ class ComSkewTollingCuda(ComSkewTolling):
                 col_vec = pycuda.cumath.exp(days * mult_1 + w_days * mult_2)
                 # transpose is used
                 spot_sims[asset][fwd_tenor_nb] = cuda_ops.vtpv(fom_sims, col_vec, tm_ind='t', transpose_ind=True).transpose()
-            # else:  # no cuda
-            #     w_days = np.cumsum( np.sqrt(days_diff[:days_diff_l]) * self.spot_rn_a[asset_nb][:, :days_diff_l]
-            #                       , axis=1)
-            #     for fwd_tenor_nb, cash_vol_tenor in enumerate(cv_tenors):
-            #         # fom in column format
-            #         fom_sims_for_tenor = fom_sims_all[asset][fwd_tenor_nb, :]
-            #         fom_sims = fom_sims_for_tenor.reshape((len(fom_sims_for_tenor), 1))  # column vector
-            #         spot_sims[asset][fwd_tenor_nb] = np.transpose(fom_sims *
-            #                                                np.exp(-0.5 * cash_vol_tenor**2 * days +
-            #                                                       cash_vol_tenor * w_days))
 
         return spot_sims

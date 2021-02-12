@@ -1,7 +1,7 @@
 # Tolling model
 import mrds.config
 
-from typing import List, Tuple, Union, Dict, Callable, Optional
+from typing import List, Tuple, Union, Dict, Callable, Optional, Any
 
 import datetime
 import numpy as np
@@ -14,7 +14,7 @@ from mrds.forward_curve            import FwdCurve
 from mrds.vols.vols                import Volatility
 
 if mrds.config.CUDA_PRESENT:
-    import pycuda.autoinit
+    import pycuda.autoinit  # leave this here to initialize the GPU
     import pycuda.gpuarray as gpa
     import cuda.cuda_ops   as cuda_ops
 
@@ -25,50 +25,37 @@ class TollingModel(ComSkewTolling):
 
     def __init__(self
                  , mkt_date        : datetime.date
+                 , toll_start      : datetime.date
+                 , toll_end        : datetime.date
                  , fwd_curves      : List[FwdCurve]
                  , vol_curves      : List[Volatility]
                  , days_partition  : Dict[str, Tuple]
                  , hours_partition : Dict[str, List[Tuple[str, int]]]
-                 , toll_start      : datetime.date
-                 , toll_end        : datetime.date
-                 , power_blocks_names
-                 , fuel_idx_name
-                 , days_partition_names
-                 , hours_partition_names
                  , cash_vols       : List[Volatility]
-                 , tolling_params
-                 , discount_curve = None
-                 , calc_date     : Optional[datetime.date] = None
-                 , adj_fwd_tenors_days    = None
-                 , adj_vol_tenors_days    = None
-                 , cash_fwd_tenors_days   = None
-                 , cash_vol_tenors_days   = None
-                 , manual_adj             = None
-                 , cash_corr        : Callable  = None
-                 , cuda_ind               = False
-                 , dcf                   : float = 365.25 ):
-        """ Path per path tolling model. The optimal bounday is a function of the shadow costs
-            and other parameters.
+                 , cash_corr       : Callable                 = None
+                 , tolling_params  : Optional[Dict[str, Any]] = None
+                 , discount_curve  : Callable                 = None
+                 , calc_date       : Optional[datetime.date]  = None
+                 , cuda_ind        : bool                     = False
+                 , dcf             : float                    = 365.25 ):
+        """ Path per path tolling model. The optimal boundary is a function of the shadow costs and other parameters.
 
         :param mkt_date: market date
+        :param toll_start: start of the tolling deal.
+        :param toll_end: end of the tolling deal
         :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
                      forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
         :param vol_curves: commodity vol curves, same structure as fwd_curves, but the objects are volatility objects.
-        :param cash_vol_curves: cash vol curves, same structure as the vol_curves.
-        :param cash_corrs: cash correlations - double dictionary of numbers.
-        :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
-        :param calc_date: calculation date.
         :param days_partition: partition of days,  Mon = 0, Sun = 6, e.g. [[0,1,2,3,4], [5,6]]  # TODO: MAYBE CHANGE THIS
                                {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,)
         :param hours_partition: partition of hours for each block, e.g { 'WEEKDAY': ((PJMW-PEAK, 8), (PJMW-OFFPEAK, 16),)
                                                                        , 'WEEKEND': ((PJMW-PEAK, 16), (PJMW-OFFPEAK, 8),) }
-
-
-
-        :param calc_date: calculation date of the tolling model.
+        :param cash_vols: cash vol curves, same structure as the vol_curves.
+        :param cash_corr: cash correlations - double dictionary of numbers.
+        :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
+        :param calc_date: calculation date.
+        :param cuda_ind: indicator whether to use cuda
         :param dcf: day-count factor
-        :param toll_start: Start of the tolling deal.
-        :param toll_end: End of the tolling deal
         :param tolling_params: parameters of the tolling dispatch. This should have the
                                  following fields:  they are of different types
                                    hrAtMax,
@@ -114,23 +101,11 @@ class TollingModel(ComSkewTolling):
         self.calc_date          = calc_date
         self.toll_start         = toll_start
         self.toll_end           = toll_end
-        self.power_blocks_names = power_blocks_names
 
         self.cuda_ind = cuda_ind
 
         # these things are superflous
-        self.adj_fwd_tenors_days = adj_fwd_tenors_days
-        self.adj_vol_tenors_days = adj_vol_tenors_days
-        self.cash_fwd_tenors_days = cash_fwd_tenors_days
-        self.cash_vol_tenors_days = cash_vol_tenors_days
-        self.manual_adj = manual_adj
         self.cash_corr = cash_corr
-
-        self.fuel_idx_name = fuel_idx_name
-        self.days_partition = days_partition
-        self.days_partition_names = days_partition_names
-        self.hours_partition = hours_partition
-        self.hours_partition_names = hours_partition_names
         self.cash_vols = cash_vols
 
         fixed_monthly_val = None if self.fuel_idx_name is not 'FIXED' else self.tolling_params['fixedCostPerMonth']
