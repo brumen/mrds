@@ -31,8 +31,6 @@ class ComSkewTolling(ComSkewSpot):
     _CALENDAR     = Calendar()  # calendar object for generating days
     _SKEW_FCT_DIR = '/home/brumen'
 
-    _DCF = 365.25 * 24.  # number of hours in a year.
-
     def __init__(self
                  , mkt_date        : datetime.date
                  , fwd_curves      : List[FwdCurve]
@@ -42,7 +40,8 @@ class ComSkewTolling(ComSkewSpot):
                  , days_partition  : Dict[str, Tuple]
                  , hours_partition : Dict[str, List[Tuple[str, int]]]
                  , discount_curve = None
-                 , calc_date      = None ):
+                 , calc_date      = None
+                 , dcf            : float = 365.25 ):
 
         """ Initialization of the skew model for tolling simulation.
 
@@ -58,6 +57,7 @@ class ComSkewTolling(ComSkewSpot):
                                {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,)
         :param hours_partition: partition of hours for each block, e.g { 'WEEKDAY': ((PJMW-PEAK, 8), (PJMW-OFFPEAK, 16),)
                                                                        , 'WEEKEND': ((PJMW-PEAK, 16), (PJMW-OFFPEAK, 8),) }
+        :param dcf: day-count factor.
         """
 
         super().__init__( mkt_date
@@ -66,7 +66,8 @@ class ComSkewTolling(ComSkewSpot):
                         , cash_vol_curves
                         , cash_correlations = cash_corrs
                         , discount_curve    = discount_curve
-                        , calc_date         = calc_date )
+                        , calc_date         = calc_date
+                        , dcf               = dcf )
 
         self.days_partition  = days_partition
         self.hours_partition = hours_partition
@@ -199,7 +200,7 @@ class ComSkewTolling(ComSkewSpot):
             curr_asset_values = np.array([sim_info[asset][0] for asset in all_assets]).transpose()  # each asset sims in a row
 
             for block_name, block_hours in days_within_month_sim:
-                block_hours_num = block_hours/self._DCF
+                block_hours_num = block_hours / self.dcf
                 cash_corr_rns = self.__class__._cash_rns(cash_corr_mtx, nb_simulations).transpose()
                 curr_asset_values *= np.exp(-0.5 * cash_vols**2 * block_hours_num + \
                                             np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose())
@@ -208,53 +209,6 @@ class ComSkewTolling(ComSkewSpot):
             spot_sims[sim_date] = spot_sim
 
         return spot_sims
-
-    # # TODO: CHECK WHY THIS IS NECESSARY
-    # def simulate_spot_blocks_2( self
-    #                           , assets
-    #                           , month
-    #                           , nb_simulations
-    #                           , tenors_chosen = None
-    #                           , cuda_ind      = False ):
-    #     """ Generates spot blocks of month m from fom_sims_all (used for a tolling model)
-    #
-    #     :param m: month to simulate spot block from
-    #     :type m: int
-    #     """
-    #
-    #     # construct the equiv. of days = range(31)/365.25
-    #     days, days_d, days_diff, days_diff_l = self._generate_days_vecs(cuda_ind=cuda_ind)
-    #     self.gen_spot_rn(nb_simulations, cuda_ind=cuda_ind)
-    #
-    #     fom_sims_all = self.simulate_spot_blocks( assets
-    #                                             , nb_simulations
-    #                                             , tenors_chosen = tenors_chosen
-    #                                             , cuda_ind      = cuda_ind )
-    #
-    #     for asset in assets:
-    #         self._number_days_for_month(asset)
-    #         cv_m = self.cash_vol_curves(asset)[month]
-    #         fom_sims_used = fom_sims_all[asset]
-    #
-    #         if cuda_ind:  # cuda usage
-    #             w_days = pycuda.cumath.sqrt(days_diff[:days_diff_l]) * self.spot_rn_a[asset_nb][:, :days_diff_l]
-    #             cuda_ops.cumsum_cuda(w_days)
-    #             # fom in column format
-    #             fom_sims = fom_sims_used[tenors_chosen.index(m), :]   # row vec
-    #             mult_1 = np.float32(-0.5 * cv_m**2)
-    #             mult_2 = np.float32(cv_m)
-    #             col_vec = pycuda.cumath.exp(days_d * mult_1 + w_days * mult_2)
-    #             # transpose is used
-    #             spot_sims = cuda_ops.vtpv(fom_sims, col_vec, tm_ind='t', transpose_ind=True).transpose()
-    #
-    #         else:  # no cuda
-    #             w_days = np.cumsum(np.sqrt(days_diff[:days_diff_l]) * self.spot_rn_a[asset_nb][:, :days_diff_l],
-    #                                axis=1)
-    #             # fom in column format
-    #             fom_sims = fom_sims_used[m, :].reshape((len(fom_sims_used[tenors_chosen.index(m), :]), 1))
-    #             spot_sims = np.transpose(fom_sims * np.exp(-0.5 * cv_m**2 * days + cv_m * w_days))
-    #
-    #     return spot_sims
 
 
 class ComSkewTollingCuda(ComSkewTolling):

@@ -61,7 +61,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                  , fwd_curves     : List[FwdCurve]
                  , vol_curves     : List[Volatility]
                  , discount_curve : Callable = None
-                 , calc_date      : datetime.date = None ):
+                 , calc_date      : datetime.date = None
+                 , dcf            : float = 365.25 ):
 
         """ Initialization of the skew model.
 
@@ -71,6 +72,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param vol_curves: commodity vol curves, in case they are different than forward curves.
         :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
         :param calc_date: calculation date.
+        :param dcf: day-count factor for computing numerical dates from actual.
         """
 
         self._mktDate          = mkt_date
@@ -78,6 +80,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self._com_fwd_curves   = fwd_curves
         self._com_vol_curves   = vol_curves
         self._discount_curve   = discount_curve if discount_curve else DiscountCurve(mkt_date).discount_function_2  #discount_function_local(mkt_date)  # DiscountCurve.discount_function(mkt_date)
+        self.dcf               = dcf
         nb_assets              = len(self._com_fwd_curves)
 
         # initial value of the calibrated params
@@ -554,17 +557,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return 2
 
-    def simulation_times( self
-                        , sim_times : [np.ndarray, List[datetime.date], List[str], List[float] ]
-                        , dcf = 365.25 ):
+    def simulation_times( self, sim_times : [np.ndarray, List[datetime.date], List[str], List[float] ] ):
         """ Returns the simulation times from the list of sim_times.
 
         :param sim_times: new simulation times in one of the accepted formats
-        :param dcf: day-count-factor
         """
 
         if isinstance(sim_times, np.ndarray):
-            return sim_times, [self.mkt_date + datetime.timedelta(int(np.round(stf * dcf)))
+            return sim_times, [self.mkt_date + datetime.timedelta(int(np.round(stf * self.dcf)))
                                for stf in sim_times]
 
         if (type(sim_times) == list) and (type(sim_times[0]) == datetime.datetime):
@@ -575,31 +575,30 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             sim_times_normalized = np.array(sim_times)
             return sim_times_normalized, [self.mkt_date + datetime.timedelta(int(np.round(stf * 365.))) for stf in sim_times_normalized]
 
-    def DF( self
-          , fwd_time : [float, datetime.date]
-          , dcf = 365.25 ):
+    def DF( self, fwd_time : [float, datetime.date] ):
         """ Discount from self.mkt_date to fwd_time. Using basic discount curve.
 
         :param fwd_time: future time to discount to. can be '20140101', ...
-        :param dcf: day-count factor.
         """
 
         if (type(fwd_time) is np.double) or (type(fwd_time) is float):
             time_diff = fwd_time
 
         elif isinstance(fwd_time, datetime.date):
-            time_diff = self.__difference_to_market_date(fwd_time, dcf=dcf)
+            time_diff = self.__difference_to_market_date(fwd_time)
 
         else:
             raise ComSkewError('fwd_time given in function DF is not of form [float, datetime.date]')
 
         return self._discount_curve(time_diff)
 
-    def __difference_to_market_date(self, fwd_date : datetime.date, dcf=365.25) -> float:
-        """ Computes the difference to market date given the discount factor.
+    def __difference_to_market_date(self, fwd_date : datetime.date) -> float:
+        """ Computes the difference to market date.
+
+        :param fwd_date: date to compute the distance to market date.
         """
 
-        return (fwd_date - self.mkt_date).days / dcf
+        return (fwd_date - self.mkt_date).days / self.dcf
 
     def __fwd_square_vol (self
                           , asset       : str
@@ -908,11 +907,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                         , self._factor_corr_mat(asset, asset) )
                          for tenor in tenors_used])
 
-    def __numerical_dist_to_mktdate(self, fwd_date : datetime.date, dcf=365.25) -> float:
+    def __numerical_dist_to_mktdate(self, fwd_date : datetime.date) -> float:
         """ Numerical distance to market date from fwd_date.
         """
 
-        return (fwd_date - self.mkt_date).days / dcf
+        return (fwd_date - self.mkt_date).days / self.dcf
 
     def __deltas_to_strikes(self
                             , asset : str

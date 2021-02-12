@@ -40,7 +40,8 @@ class ComSkewSpot(ComSkew):
                  , cash_vol_curves   : List[Volatility]
                  , cash_correlations : Callable      = None
                  , discount_curve    : Callable      = None
-                 , calc_date         : datetime.date = None ):
+                 , calc_date         : datetime.date = None
+                 , dcf               : float         = 365.25):
         """ Initialization of the skew model for tolling simulation.
 
         :param mkt_date: market date
@@ -51,9 +52,10 @@ class ComSkewSpot(ComSkew):
         :param cash_correlations: cash correlation function between asset_1, asset_2, see _cash_correlation method below
         :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
         :param calc_date: calculation date.
+        :param dcf: day-count factor.
         """
 
-        super().__init__(mkt_date, fwd_curves, vol_curves, discount_curve=discount_curve, calc_date=calc_date)
+        super().__init__(mkt_date, fwd_curves, vol_curves, discount_curve=discount_curve, calc_date=calc_date, dcf=dcf)
 
         # new things in this class.
         self.__cash_vol_curves   = cash_vol_curves

@@ -1,13 +1,12 @@
 # Tolling model
 import mrds.config
 
-from typing import List, Tuple, Union, Dict
+from typing import List, Tuple, Union, Dict, Callable, Optional
 
 import datetime
 import numpy as np
 
-import mrds.mrds as mrds  # TODO: CHECK HERE
-import mrds.ds   as ds
+import mrds.ds as ds
 
 from mrds.tolling.opd              import opd_1fuel, opd_1fuel_cu
 from mrds.tolling.com_skew_tolling import ComSkewTolling
@@ -15,6 +14,7 @@ from mrds.forward_curve            import FwdCurve
 from mrds.vols.vols                import Volatility
 
 if mrds.config.CUDA_PRESENT:
+    import pycuda.autoinit
     import pycuda.gpuarray as gpa
     import cuda.cuda_ops   as cuda_ops
 
@@ -27,29 +27,46 @@ class TollingModel(ComSkewTolling):
                  , mkt_date        : datetime.date
                  , fwd_curves      : List[FwdCurve]
                  , vol_curves      : List[Volatility]
-                 , days_partition  : List[List[int]]
-                 , hours_partition : List[List[int]]
+                 , days_partition  : Dict[str, Tuple]
+                 , hours_partition : Dict[str, List[Tuple[str, int]]]
                  , toll_start      : datetime.date
                  , toll_end        : datetime.date
                  , power_blocks_names
                  , fuel_idx_name
                  , days_partition_names
                  , hours_partition_names
-                 , cash_vols
+                 , cash_vols       : List[Volatility]
                  , tolling_params
                  , discount_curve = None
-                 , calc_date      = None  # datetime.date format
+                 , calc_date     : Optional[datetime.date] = None
                  , adj_fwd_tenors_days    = None
                  , adj_vol_tenors_days    = None
                  , cash_fwd_tenors_days   = None
                  , cash_vol_tenors_days   = None
                  , manual_adj             = None
-                 , cash_corr_adj          = None
-                 , cuda_ind               = False ):
+                 , cash_corr        : Callable  = None
+                 , cuda_ind               = False
+                 , dcf                   : float = 365.25 ):
         """ Path per path tolling model. The optimal bounday is a function of the shadow costs
             and other parameters.
 
+        :param mkt_date: market date
+        :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
+                     forward curve names to be used in the model, e.g. ['WTI', 'BRENT']
+        :param vol_curves: commodity vol curves, same structure as fwd_curves, but the objects are volatility objects.
+        :param cash_vol_curves: cash vol curves, same structure as the vol_curves.
+        :param cash_corrs: cash correlations - double dictionary of numbers.
+        :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
+        :param calc_date: calculation date.
+        :param days_partition: partition of days,  Mon = 0, Sun = 6, e.g. [[0,1,2,3,4], [5,6]]  # TODO: MAYBE CHANGE THIS
+                               {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,)
+        :param hours_partition: partition of hours for each block, e.g { 'WEEKDAY': ((PJMW-PEAK, 8), (PJMW-OFFPEAK, 16),)
+                                                                       , 'WEEKEND': ((PJMW-PEAK, 16), (PJMW-OFFPEAK, 8),) }
+
+
+
         :param calc_date: calculation date of the tolling model.
+        :param dcf: day-count factor
         :param toll_start: Start of the tolling deal.
         :param toll_end: End of the tolling deal
         :param tolling_params: parameters of the tolling dispatch. This should have the
@@ -81,15 +98,22 @@ class TollingModel(ComSkewTolling):
         """
 
         super().__init__( mkt_date
-                        , fwd_curves= fwd_curves
-                        , vol_curves = vol_curves  )
+                        , fwd_curves
+                        , vol_curves
+                        , cash_vols
+                        , cash_corr
+                        , days_partition
+                        , hours_partition
+                        , discount_curve = discount_curve
+                        , calc_date      = calc_date
+                        , dcf            = dcf )
 
-        self.tolling_params      = tolling_params
-        self.nb_days     = tolling_params.nb_days
-        self.mkt_date     = mkt_date
-        self.calc_date    = calc_date
-        self.toll_start  = toll_start
-        self.toll_end    = toll_end
+        self.tolling_params     = tolling_params
+        self.nb_days            = tolling_params.nb_days
+        self.mkt_date           = mkt_date
+        self.calc_date          = calc_date
+        self.toll_start         = toll_start
+        self.toll_end           = toll_end
         self.power_blocks_names = power_blocks_names
 
         self.cuda_ind = cuda_ind
@@ -100,7 +124,7 @@ class TollingModel(ComSkewTolling):
         self.cash_fwd_tenors_days = cash_fwd_tenors_days
         self.cash_vol_tenors_days = cash_vol_tenors_days
         self.manual_adj = manual_adj
-        self.cash_corr_adj = cash_corr_adj
+        self.cash_corr = cash_corr
 
         self.fuel_idx_name = fuel_idx_name
         self.days_partition = days_partition
@@ -180,6 +204,7 @@ class TollingModel(ComSkewTolling):
 
         blocks_seq = []
         blocks_name_seq = []
+
         for day in range(nb_days):
             day_week = np.mod(day, 7)
             block_group_idx = TollingModel.__belongs_to_group(day_week, days_partition)
