@@ -83,10 +83,10 @@ class ComSkewTolling(ComSkew):
                , days_partition  = {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,) }
                , hours_partition = { 'WEEKDAY': [('PJMW-PEAK', 8), ('PJMW-OFFPEAK', 16),]
                                    , 'WEEKEND': [('PJMW-PEAK', 16), ('PJMW-OFFPEAK', 8),] }
-               , discount_curve: Optional[Callable] = None
-               , calc_date: datetime.date = None
-               , dcf: float = 365.25):
-        """ Obtains data from database.
+               , discount_curve  : Optional[Callable] = None
+               , calc_date       : datetime.date      = None
+               , dcf             : float              = 365.25 ):
+        """ Obtains forward, vol curves from database.
 
         :param mkt_date: market date
         :param fwd_curves: dictionary, where keys are fwd curve names ('WTI') and values are FwdCurve objects
@@ -101,7 +101,6 @@ class ComSkewTolling(ComSkew):
         :param hours_partition: partition of hours for each block, e.g { 'WEEKDAY': ((PJMW-PEAK, 8), (PJMW-OFFPEAK, 16),)
                                                                        , 'WEEKEND': ((PJMW-PEAK, 16), (PJMW-OFFPEAK, 8),) }
         :param dcf: day-count factor.
-
         """
 
         return cls( mkt_date
