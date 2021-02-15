@@ -2,17 +2,32 @@
 # tests the functions regarding the tolling model
 #
 
+import datetime
 import numpy as np
-import time
-import datetime as dt
-import tolling
-
 
 from unittest import TestCase
+
+from mrds.tolling.tolling import TollingModel
 
 
 class TestTolling(TestCase):
 
+    def test_smoke(self):
+        """ Run smoke test on the tolling model.
+        """
+
+        tm = TollingModel.from_db( datetime.date(2015, 4, 1)
+                                 , datetime.date(2015, 5, 1)
+                                 , datetime.date(2015, 6, 20)
+                                 , ['WTI', 'BRENT', ]
+                                 , ['WTI', 'BRENT', ]
+                                 , {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,)}
+                                 , { 'WEEKDAY': [('WTI', 8), ('BRENT', 16), ]
+                                   , 'WEEKEND': [('WTI', 16), ('BRENT', 8), ]}
+                                 , 'BRENT'
+                                 , ['WTI', 'BRENT', ] )
+
+        tm.dispatch_all(tm.toll_start, tm.toll_end )
 
     def test_tensor_mt(self):
         s1 = 10

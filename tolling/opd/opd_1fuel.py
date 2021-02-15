@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Tuple
 
-from tolling.opd import opd_avx
+from mrds.tolling.opd import opd_avx
 
 SMALL_EPS = 1e-5
 

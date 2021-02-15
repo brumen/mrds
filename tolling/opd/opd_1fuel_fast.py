@@ -96,9 +96,8 @@ def opd_1fuel_fast( power_prices  # vector of power prices
         is_not_cold_start * (fixed_startup_cost + start_fuel * fp)
 
     startup_sp = startup_sp_in + fixed_and_fuel_startup_cost / (startup_horizon * max_cap)
-    startup_profit_v = power_prices - optimal_marginal_cost_at_max - startup_sp > 0.
+    is_startup_profitable = power_prices - optimal_marginal_cost_at_max - startup_sp > 0.
 
-    is_startup_profitable = startup_profit_v
     do_startup = dc_can_start * ((dc_force_start == 2) |
                                 (is_startup_profitable & (dc_force_start == 1)))
 
