@@ -1,5 +1,6 @@
 import numpy as np
-from typing import Tuple
+
+from typing import Tuple, Any, Dict
 
 from mrds.tolling.opd import opd_avx
 
@@ -8,14 +9,14 @@ SMALL_EPS = 1e-5
 
 def opd_1fuel(power_prices     : np.ndarray
               , fuel_prices    : np.ndarray
-              , tolling_params : Tuple
+              , tolling_params : Dict[str, Any]
               , startup_sp
               , curr_state
               , curr_decision
               , hours_in_block : int
               , nb_paths       : int
               , cashflow       : np.ndarray ):
-    """ Computes one period tolling optimization.
+    """ Computes one block tolling optimization.
 
     :param power_prices: power prices
     :param fuel_prices: fuel prices
@@ -40,6 +41,32 @@ def opd_1fuel(power_prices     : np.ndarray
         ramp_up_sp_in, ramp_down_sp_in, \
         ramp_up_cost, ramp_down_cost, ramp_up_horizon, ramp_down_horizon = tolling_params
 
+    hr_at_max       = tolling_params['hrAtMax']
+    hr_at_min       = tolling_params['hrAtMin']
+    max_cap         = tolling_params['maxCap']
+    min_disp        = tolling_params['minDisp']
+    start_fuel      = tolling_params['startFuel']
+    start_fuel_cold = tolling_params['startFuelCold']
+    add_fuel_cost   = tolling_params['addFuelCost']
+    VC              = tolling_params['VC']
+    ramp_rate       = tolling_params['rampRate']
+    shutdown_sp_in  = tolling_params['shutdownSPin']  # TODO: THIS IS WRONG, THIS HAS TO BE UPDATED
+    # min_downtime    = tolling_params['minDownTime']
+    # min_runtime     = tolling_params['minRunTime']
+    fixed_startup_cost = tolling_params['fixedStartupCost']
+    fixed_startup_cost_cold = tolling_params['fixedStartupCostCold']
+    # max_monthly_starts = tolling_params['maxMonthlyStarts']
+    cold_startup = tolling_params['coldStartup']
+    startup_horizon = tolling_params['startupHorizon']
+    shutdown_horizon = tolling_params['shutdownHorizon']
+    ramp_up_sp_in    = tolling_params['rampUpSPin']
+    ramp_down_sp_in  = tolling_params['rampDownSPin']
+    ramp_up_cost     = tolling_params['rampUpCost']
+    ramp_down_cost   = tolling_params['rampDownCost']
+    ramp_up_horizon  = tolling_params['rampUpHorizon']
+    ramp_down_horizon = tolling_params['rampDownHorizon']
+
+    # what kind of state the power plant is in - 0 (not running), or 1 (running)
     state_state = curr_state['state']  # bool type
 
     # marginal cost at max

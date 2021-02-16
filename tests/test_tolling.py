@@ -17,8 +17,6 @@ class TestTolling(TestCase):
         """
 
         tm = TollingModel.from_db( datetime.date(2015, 4, 1)
-                                 , datetime.date(2015, 5, 1)
-                                 , datetime.date(2015, 6, 20)
                                  , ['WTI', 'BRENT', ]
                                  , ['WTI', 'BRENT', ]
                                  , {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,)}
@@ -27,7 +25,9 @@ class TestTolling(TestCase):
                                  , 'BRENT'
                                  , ['WTI', 'BRENT', ] )
 
-        tm.dispatch_all(tm.toll_start, tm.toll_end )
+        res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20) )
+
+        self.assertTrue(True)
 
     def test_tensor_mt(self):
         s1 = 10
