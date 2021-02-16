@@ -240,19 +240,22 @@ class ComSkewTolling(ComSkew):
 
         raise RuntimeError(f'Couldnt find {day_nb} in partition {self.days_partition}')
 
-    def _generate_hours(self, start_day_in_month : datetime.date) -> List[Tuple[str, int]]:
+    def _generate_hours(self, start_day_in_month : datetime.date, hours_partition=None) -> List[Tuple[str, int]]:
         """ Generate consequent hours for particular year and month.
 
         :param start_day_in_month: start day in the month for which hours are generated.
+        :param hours_partition: override w/ new hours partition.
         :returns: list of tuples, where the first element of the tuple is a curve, and the second
                   the amount of hours in that curve.
         """
+
+        hours_partition_used = hours_partition if hours_partition is not None else self.hours_partition
 
         hours = []
         start_year, start_month = start_day_in_month.year, start_day_in_month.month
         for year_, month_, day_, day_in_week in self._CALENDAR.itermonthdays4(start_year, start_month):
             if year_ == start_year and month_ == start_month and day_ >= start_day_in_month.day:  # iterator gives days for other months too, to complete the week
-                hours.extend(self.hours_partition[self.__find_day_partition(day_in_week)])
+                hours.extend(hours_partition_used[self.__find_day_partition(day_in_week)])
 
         return hours
 
@@ -261,7 +264,8 @@ class ComSkewTolling(ComSkew):
                             , nb_simulations : int
                             , tolling_start  : datetime.date
                             , tolling_end    : datetime.date
-                            , set_seed      = None) -> Dict[datetime.date, List[Tuple[str, int, np.array]]]:
+                            , set_seed      = None
+                            , hours_partition = None ) -> Dict[datetime.date, List[Tuple[str, int, np.array]]]:
         """ Same as simulate_spot_blocks, but for all blocks. TODO: DESCRIBE THIS BETTER
 
         :param assets: list of assets to which asset to simulate block prices for.
@@ -269,6 +273,7 @@ class ComSkewTolling(ComSkew):
         :param tolling_start: start of the tolling simulations
         :param tolling_end: end of tolling sims.
         :param set_seed: optional param for debugging, so that simulations are always the same
+        :param hours_partition: override for the hours partition (used for fuel stuff)
         :returns: dictionary, where keys are simulated first-of-months, and values are:
                     tuples, where the first is block name, second is block hours, and third is the simulations for that
                             block.
@@ -289,7 +294,7 @@ class ComSkewTolling(ComSkew):
                                     for asset_2 in all_assets ]
                                   for asset_1 in all_assets ])
 
-            days_within_month_sim = self._generate_hours(sim_date)
+            days_within_month_sim = self._generate_hours(sim_date, hours_partition=hours_partition)
             cash_vols = np.array([ self._cash_vol_curves(asset).atm_vol(sim_date) for asset in all_assets] )  # TODO: this is the same for all assets, OPTIMIZE
 
             first_block_name, first_block_hour = days_within_month_sim[0]
