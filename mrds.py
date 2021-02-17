@@ -121,14 +121,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                   , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
                   , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
 
-    # def object_identifier(self) -> Tuple[datetime.date, List[str]]:
-    #     """ Object identifier for the purposes of pickling. returns a tuple which can be used for storing objects.
-    #
-    #     :returns: tuple which identifies the curve - market date of the curve, followed by a list of curves stored in the object.
-    #     """
-    #
-    #     return (self.mkt_date, [fwd_curve.fwd_name for fwd_curve in self.fwd_curves])
-
     @property
     def mkt_date(self) -> datetime.date:
         return self._mktDate
@@ -818,7 +810,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
     @lru_cache(maxsize=MAX_ASSETS)
-    def __kappa_sigma_rho(self, asset : str) -> Tuple[np.array, np.array, np.array]:
+    def _kappa_sigma_rho(self, asset : str) -> Tuple[np.array, np.array, np.array]:
         """ Calibrates kappa and sigma and rho parameters of the log-normal part of the model.
 
         :param asset: asset to be calibrated
@@ -851,7 +843,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                               np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
                        .solve(self.__class__.NLP_SOLVER)
         except Exception as e:
-            raise ComSkewError('Calibration of kappa, sigma, rho failed in method __kappa_sigma_rho: {0}'.format(str(e)))
+            raise ComSkewError('Calibration of kappa, sigma, rho failed in method _kappa_sigma_rho: {0}'.format(str(e)))
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.
@@ -859,17 +851,17 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param asset: asset to compute the kappa vector of.
         """
 
-        return self.__kappa_sigma_rho(asset).xf[0:self.nb_factors_for_asset(asset)]  # number of factors
+        return self._kappa_sigma_rho(asset).xf[0:self.nb_factors_for_asset(asset)]  # number of factors
 
     def _sigma_vec(self, asset : str):
-        """ Calibrated sigma vector, depends on the __kappa_sigma_rho above.
+        """ Calibrated sigma vector, depends on the _kappa_sigma_rho above.
 
         :param asset: asset to calculate sigma vector over.
         """
 
         nbf = self.nb_factors_for_asset(asset)  # number of factors
 
-        return self.__kappa_sigma_rho(asset).xf[nbf:(2 * nbf)]
+        return self._kappa_sigma_rho(asset).xf[nbf:(2 * nbf)]
 
     def __factor_corr_mat(self, asset : str) -> np.ndarray:
         """ Returns the calibrated factor correlation matrix. e.g. 2x2 matrix for asset.
@@ -878,7 +870,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         # calibrated rho vector
-        rho_vec = self._construct_corr_asset(asset, self.__kappa_sigma_rho(asset).xf[(2 * self.nb_factors_for_asset(asset)):])
+        rho_vec = self._construct_corr_asset(asset, self._kappa_sigma_rho(asset).xf[(2 * self.nb_factors_for_asset(asset)):])
         # transforming the rho_vec into the rho matrix
         rho_mat_len = np.sqrt(len(rho_vec))  # this is square matrix  TODO: THIS HERE IS WRONG!!!
 
