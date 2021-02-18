@@ -5,7 +5,7 @@
 import datetime
 
 from numpy import cosh, sqrt, array
-from typing import List
+from typing import List, Union, Iterable
 
 
 def corr_hyp_sec_basic(alpha : float, i : int, j : int ):
@@ -39,7 +39,7 @@ def corr_hyp_sec_two_fronts_time_diff(rho : float, date_1 : datetime.date, date_
     return corr_hyp_sec_time_diff(sqrt(2. * (1. - rho)), date_1, date_2)
 
 
-def corr_hyp_sec_mat(rho : float, ind_range : List[int] ) -> array:
+def corr_hyp_sec_mat(rho : float, ind_range : Union[List[int], Iterable] ) -> array:
     """ Generates a correlation matrix from the hyp sec function above.
 
     :param rho: correlation parameter

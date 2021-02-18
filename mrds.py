@@ -83,9 +83,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self.dcf               = dcf
         nb_assets              = len(self._com_fwd_curves)
 
+        # log_normal part of the model
+        self._kappa_vec_val = {}
+        self._sigma_vec_val = {}
+        self._rho_vec_val   = {}
+
         # initial value of the calibrated params
         # __C_vec is in the form of {'asset': {fwd_date (datetime.date): [1.2, 3.,4.5]} }
-        self.__C_vec = None
+        self._C_vec = {}
 
         # indicator functions - whether the values are updated
         # indicator function for the sigma, kappa calibration
@@ -120,14 +125,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return cls( mkt_date
                   , [FwdCurve.from_db(mkt_date, fwd_curve) for fwd_curve in fwd_curves]
                   , [get_vol_object(fwd_curve, mkt_date)   for fwd_curve in fwd_curves])
-
-    # def object_identifier(self) -> Tuple[datetime.date, List[str]]:
-    #     """ Object identifier for the purposes of pickling. returns a tuple which can be used for storing objects.
-    #
-    #     :returns: tuple which identifies the curve - market date of the curve, followed by a list of curves stored in the object.
-    #     """
-    #
-    #     return (self.mkt_date, [fwd_curve.fwd_name for fwd_curve in self.fwd_curves])
 
     @property
     def mkt_date(self) -> datetime.date:
@@ -230,25 +227,24 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param fwd_date: forward date.
         """
 
-        if not self.__C_vec:
+        #if not self._C_vec:
+        #    logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
+        #    self._C_vec = {asset: {fwd_date: self._calibrate_skew_one_date(asset, fwd_date)}}
+        #    return self._C_vec[asset][fwd_date]
+
+        if asset not in self._C_vec:
             logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
-            self.__C_vec = {asset: {fwd_date: self._calibrate_skew_one_date(asset, fwd_date)}}
+            self._C_vec[asset] = {fwd_date: self._calibrate_skew_one_date(asset, fwd_date) }
 
-            return self.__C_vec[asset][fwd_date]
+            return self._C_vec[asset][fwd_date]
 
-        if asset not in self.__C_vec:
+        if fwd_date not in self._C_vec[asset]:
             logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
-            self.__C_vec[asset] = {fwd_date: self._calibrate_skew_one_date(asset, fwd_date) }
+            self._C_vec[asset][fwd_date] = self._calibrate_skew_one_date(asset, fwd_date)
 
-            return self.__C_vec[asset][fwd_date]
+            return self._C_vec[asset][fwd_date]
 
-        if fwd_date not in self.__C_vec[asset]:
-            logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
-            self.__C_vec[asset][fwd_date] = self._calibrate_skew_one_date(asset, fwd_date)
-
-            return self.__C_vec[asset][fwd_date]
-
-        return self.__C_vec[asset][fwd_date]  # already computed, just return it.
+        return self._C_vec[asset][fwd_date]  # already computed, just return it.
 
     def _set_c_vec(self, asset : str, fwd_date : datetime.date, c_vec_value : np.array) -> np.array:
         """ Sets the c_vec value.
@@ -258,14 +254,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param c_vec_value: new value for c_vector
         """
 
-        if not self.__C_vec:
-            self.__C_vec = {asset: {fwd_date: c_vec_value}}
+        # if not self._C_vec:
+        #     self._C_vec = {asset: {fwd_date: c_vec_value}}
 
-        if asset not in self.__C_vec:
-            self.__C_vec[asset] = {fwd_date: c_vec_value}
+        if asset not in self._C_vec:
+            self._C_vec[asset] = {fwd_date: c_vec_value}
 
-        if fwd_date not in self.__C_vec[asset]:
-            self.__C_vec[asset][fwd_date] = c_vec_value
+        if fwd_date not in self._C_vec[asset]:
+            self._C_vec[asset][fwd_date] = c_vec_value
 
     def __default_factor_corr_mat( self
                                  , asset_1 : str
@@ -818,7 +814,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
     @lru_cache(maxsize=MAX_ASSETS)
-    def __kappa_sigma_rho(self, asset : str) -> Tuple[np.array, np.array, np.array]:
+    def _kappa_sigma_rho(self, asset : str) -> Tuple[np.array, np.array, np.array]:
         """ Calibrates kappa and sigma and rho parameters of the log-normal part of the model.
 
         :param asset: asset to be calibrated
@@ -832,8 +828,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fcm_lb   = self._factor_corr_mat(asset, asset, lb_ub_ind='lb')  # lower bound of the factor corr. mtx.
         fcm_ub   = self._factor_corr_mat(asset, asset, lb_ub_ind='ub')  # upper bound of the factor corr. mtx.
 
-        # optimization run
-        # THIS MIGHT OR MIGHT NOT RUN
         logger.info('Calibrating the log-normal part of the model for asset {0}'.format(asset))
         try:
             return NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
@@ -851,25 +845,33 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                               np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
                        .solve(self.__class__.NLP_SOLVER)
         except Exception as e:
-            raise ComSkewError('Calibration of kappa, sigma, rho failed in method __kappa_sigma_rho: {0}'.format(str(e)))
+            raise ComSkewError('Calibration of kappa, sigma, rho failed in method _kappa_sigma_rho: {0}'.format(str(e)))
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.
 
-        :param asset: asset to compute the kappa vector of.
+        :param asset: asset to compute the kappa vector of (e.g. 'WTI')
         """
 
-        return self.__kappa_sigma_rho(asset).xf[0:self.nb_factors_for_asset(asset)]  # number of factors
+        if asset in self._kappa_vec_val:
+            return self._kappa_vec_val[asset]
+
+        # store the value, and return it.
+        self._kappa_vec_val[asset] = self._kappa_sigma_rho(asset).xf[0:self.nb_factors_for_asset(asset)]
+        return self._kappa_vec_val[asset]
 
     def _sigma_vec(self, asset : str):
-        """ Calibrated sigma vector, depends on the __kappa_sigma_rho above.
+        """ Calibrated sigma vector, depends on the _kappa_sigma_rho above.
 
         :param asset: asset to calculate sigma vector over.
         """
 
-        nbf = self.nb_factors_for_asset(asset)  # number of factors
+        if asset in self._sigma_vec_val:
+            return self._sigma_vec_val[asset]
 
-        return self.__kappa_sigma_rho(asset).xf[nbf:(2 * nbf)]
+        nbf = self.nb_factors_for_asset(asset)  # number of factors
+        self._sigma_vec_val[asset] = self._kappa_sigma_rho(asset).xf[nbf:(2 * nbf)]
+        return self._sigma_vec_val[asset]
 
     def __factor_corr_mat(self, asset : str) -> np.ndarray:
         """ Returns the calibrated factor correlation matrix. e.g. 2x2 matrix for asset.
@@ -877,12 +879,15 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param asset: asset for which the correlation is returned.
         """
 
+        if asset in self._rho_vec_val:
+            return self._rho_vec_val[asset]
+
         # calibrated rho vector
-        rho_vec = self._construct_corr_asset(asset, self.__kappa_sigma_rho(asset).xf[(2 * self.nb_factors_for_asset(asset)):])
+        rho_vec = self._construct_corr_asset(asset, self._kappa_sigma_rho(asset).xf[(2 * self.nb_factors_for_asset(asset)):])
         # transforming the rho_vec into the rho matrix
         rho_mat_len = np.sqrt(len(rho_vec))  # this is square matrix  TODO: THIS HERE IS WRONG!!!
-
-        return rho_vec.reshape((rho_mat_len, rho_mat_len))
+        self._rho_vec_val[asset] = rho_vec.reshape((rho_mat_len, rho_mat_len))
+        return self._rho_vec_val[asset]
 
     # TODO: HERE SHOULD BE CHANGED TO ADD THIS CACHE
     # @lru_cache(maxsize=_BETA_T_CACHE_SIZE)
@@ -1185,27 +1190,38 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return { fwd_date: self._calibrate_skew_one_date(asset, fwd_date, deltas=deltas)
                  for fwd_date in fwd_dates }
 
-    def __c_vec_calibrate( self
+    def _c_vec_calibrate( self
                          , asset            : str
-                         , fwd_dates        : List[datetime.date] ):
+                         , fwd_dates        : List[datetime.date] ) -> None:
         """ Calibrates the dates that are not yet calibrated for the asset.
 
         :param asset: the asset to calibrate, such as 'wti'
         :param fwd_dates: forward dates for which to calibrate
         """
 
-        if self.__C_vec:
-            if asset in self.__C_vec:
-                already_calibrated_dates = set(self.__C_vec[asset].keys())
-                to_be_calibrated = set(fwd_dates).difference(already_calibrated_dates)
-            else:
-                to_be_calibrated = fwd_dates
-        else:  # self.__C_vec == None
+        #if self._C_vec:
+        if asset in self._C_vec:
+            already_calibrated_dates = set(self._C_vec[asset].keys())
+            to_be_calibrated = set(fwd_dates).difference(already_calibrated_dates)
+        else:
             to_be_calibrated = fwd_dates
+        #else:  # self._C_vec == None
+        #    to_be_calibrated = fwd_dates
+
+        self._c_vec_calibrate_force(asset, to_be_calibrated)
+
+    def _c_vec_calibrate_force(self
+                                , asset: str
+                                , to_be_calibrated: List[datetime.date]) -> None:
+        """ Calibrates the dates to_be_calibrated. THIS IS REFACTORED, BC IT'S USED IN SUBCLASS.
+
+        :param asset: the asset to calibrate, such as 'wti'
+        :param to_be_calibrated: forward dates for which to calibrate
+        """
 
         if not self.multi_thread_calib:
             for calib_date, calib_vec in self._calibrate_skew_dates(asset, to_be_calibrated).items():
-                self._set_c_vec( asset, calib_date, calib_vec) # adding this to the __C_vec
+                self._set_c_vec( asset, calib_date, calib_vec) # adding this to the _C_vec
 
         else:  # multithreaded part
             with Pool(processes=cpu_count()) as pool:
@@ -1330,7 +1346,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
             for asset_idx, asset in enumerate(assets):  # asset like 'WTI'...
                 if self.multi_thread_calib:  # calibration in parallel, otherwise on the fly below in self._c_vec
-                    self.__c_vec_calibrate(asset, tenor_list)  # a little redundant, but anyways
+                    self._c_vec_calibrate(asset, tenor_list)  # a little redundant, but anyways
 
                 for tenor_idx, tenor in enumerate(tenor_list):  # tenor is a datetime.date format
                     # prepare cov mtx

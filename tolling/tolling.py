@@ -180,6 +180,13 @@ class TollingModel(ComSkewTolling):
                   , dcf            = dcf )
 
     @property
+    def allowed_dispatches(self) -> Tuple:
+        """ Returns the allowed dispatches.
+        """
+
+        return 'cmg', 'peak_only', 'offpeak-only'
+
+    @property
     def dispatch_mode(self) -> str:
         """ In which dispatch mode you are.
         """
@@ -188,8 +195,10 @@ class TollingModel(ComSkewTolling):
 
     @dispatch_mode.setter
     def dispatch_mode(self, new_dispatch: str):
+        """ Setting the dispatch, and checking if it's allowed.
+        """
 
-        assert self.__dispatch_mode in ('cmg', )
+        assert self.__dispatch_mode in self.allowed_dispatches, f'Disaptch mode {new_dispatch} not one of allowed dispatches: {self.allowed_dispatches}'
 
         self.__dispatch_mode = new_dispatch
 
@@ -321,6 +330,8 @@ class TollingModel(ComSkewTolling):
 
         dispatch_mode = self.dispatch_mode
 
+        assert dispatch_mode in self.allowed_dispatches, f'Dispatch mode {dispatch_mode} not in allowed dispatches: {self.allowed_dispatches}'
+
         if dispatch_mode == 'cmg':
             self._shut_start_dispatch(cs)
 
@@ -362,15 +373,15 @@ class TollingModel(ComSkewTolling):
         dispatch_mode = self.dispatch_mode
 
         # cs is mnemonic for current state.
-        cs = { 'dispatch_mode':  self.dispatch_mode
-             , 'generation'  : 0.
-             , 'total_starts': 0
-             , 'hours_shut'  : 0
-             , 'hours_run'   : 0
-             , 'df'          : 1.
-             , 'state'       : False  # power plant not running
+        cs = { 'dispatch_mode' :  self.dispatch_mode
+             , 'generation'    : 0.
+             , 'total_starts'  : 0
+             , 'hours_shut'    : 0
+             , 'hours_run'     : 0
+             , 'df'            : 1.
+             , 'state'         : False  # power plant not running
              , 'hours_in_state': 0
-             , 'global_starts': 0
+             , 'global_starts' : 0
              , }
 
         if dispatch_mode == 'cmg' or dispatch_mode == 'mrg':
@@ -411,10 +422,9 @@ class TollingModel(ComSkewTolling):
 
         return cs
 
-    # TODO: THIS SHOULD BE OPTIMIZED.
     @property
     def _opd_f(self):
-        """ One period dispatch function
+        """ One period dispatch function selection, depending on whether we are in cuda mode, or not.
         """
 
         return opd_1fuel.opd_1fuel if not self.cuda_ind else opd_1fuel_cu.opd_kernel
@@ -535,20 +545,22 @@ class TollingModel(ComSkewTolling):
         return dispatch_per_month
 
     def _block_dispatch(self
-                        , power_prices     : Union[np.ndarray, gpa.GPUArray]
-                        , fuel_prices      : Union[np.ndarray, gpa.GPUArray]
-                        , block_hours      : int
-                        , startup_shadow_price
-                        , curr_state       : Dict[str, Any]
-                        , nb_sims          : int
-                        , cash_flows       : np.array ):
+                        , power_prices         : Union[np.ndarray, gpa.GPUArray]
+                        , fuel_prices          : Union[np.ndarray, gpa.GPUArray]
+                        , block_hours          : int
+                        , startup_shadow_price : float
+                        , curr_state           : Dict[str, Any]
+                        , nb_sims              : int
+                        , cash_flows           : np.array ):
         """ Dispatch in a single block, changes the current state as appropriate.
 
         :param power_prices: vector of power prices
         :param fuel_prices: vector of fuel prices.
+        :param block_hours: number of hours in the current block
         :param startup_shadow_price: vector of startup shadow prices.
-        :param cs: current state, a dictionary of various elements
+        :param curr_state: current state, a dictionary of various elements
         :param nb_sims: number of simulations
+        :param cash_flows: cash flows to be updated in the block dispatch.
         """
 
         self._opd_f( power_prices

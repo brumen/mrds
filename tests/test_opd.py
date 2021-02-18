@@ -1,12 +1,15 @@
 import numpy as np
 import pycuda.gpuarray as gpa
-import pycuda.autoinit  # IMPORTANT: This line HAS TO BE HERE
+import mrds.config
+
+if mrds.config.CUDA_PRESENT:
+    import pycuda.autoinit  # IMPORTANT: This line HAS TO BE HERE
 
 from unittest import TestCase
 
-from tolling.opd              import opd_avx
-from tolling.opd.opd_1fuel_cu import one_period_dispatch
-from tolling.opd.opd_1fuel   import opd_1fuel
+from mrds.tolling.opd              import opd_avx
+from mrds.tolling.opd.opd_1fuel_cu import one_period_dispatch
+from mrds.tolling.opd.opd_1fuel    import opd_1fuel
 
 
 class TestOpd(TestCase):
