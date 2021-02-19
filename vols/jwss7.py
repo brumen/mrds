@@ -49,23 +49,23 @@ class JWSS7Volatility(ATMFVolatility):
                   , dcf        = dcf )
 
     @property
-    def __atm_vol_curve(self):
+    def _atm_vol_curve(self):
         """ Constructs the ATM vol curve.  Returns the object returned from splrep, to be used for splev.
         """
 
-        if self.__atm_vol_curve_interp:
-            return self.__atm_vol_curve_interp
+        if self._atm_vol_curve_interp:
+            return self._atm_vol_curve_interp
 
-        vol_dates = [(x - self.mkt_date).days / self.__dcf for x in self.vol_dates]
+        vol_dates = [(x - self.mkt_date).days / self._dcf for x in self.vol_dates]
         atm_vols  = [x[0] for x in self._vol_params.values()]
 
         vol_dates_values = sorted(zip(vol_dates, atm_vols), key=lambda vol_date_val: vol_date_val[0])
 
-        self.__atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
+        self._atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
                                             , [x[1] for x in vol_dates_values]
                                             , k=self.INTERPOLATION_DEGREE )
 
-        return self.__atm_vol_curve_interp
+        return self._atm_vol_curve_interp
 
     @staticmethod
     def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, Tuple]:

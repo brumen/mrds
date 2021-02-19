@@ -429,7 +429,7 @@ class ATMFVolatility(Volatility):
     """ ATM volatility
     """
 
-    INTERPOLATION_DEGREE = 2
+    INTERPOLATION_DEGREE = 1
 
     def __init__( self
                 , com_name : str
@@ -444,9 +444,9 @@ class ATMFVolatility(Volatility):
         """
 
         super().__init__(com_name, mkt_date, fwd_params, vol_params)
-        self.__dcf = dcf
+        self._dcf = dcf
 
-        self.__atm_vol_curve_interp = None
+        self._atm_vol_curve_interp = None
 
     @property
     def vol_dates(self) -> List[datetime.date]:
@@ -458,25 +458,25 @@ class ATMFVolatility(Volatility):
         return list( self._vol_params.keys() )
 
     @property
-    def __atm_vol_curve(self):
+    def _atm_vol_curve(self):
         """ Constructs the ATM vol curve
 
         Returns the object returned from splrep, to be used for splev.
         """
 
-        if self.__atm_vol_curve_interp:
-            return self.__atm_vol_curve_interp
+        if self._atm_vol_curve_interp:
+            return self._atm_vol_curve_interp
 
-        vol_dates = [(x - self.mkt_date).days / self.__dcf for x in self.vol_dates]
+        vol_dates = [(x - self.mkt_date).days / self._dcf for x in self.vol_dates]
 
         vol_dates_values = sorted( zip(vol_dates, self._vol_params.values())
                                  , key = lambda vol_date_val: vol_date_val[0])
 
-        self.__atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
+        self._atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
                                             , [x[1] for x in vol_dates_values]
                                             , k=self.INTERPOLATION_DEGREE )
 
-        return self.__atm_vol_curve_interp
+        return self._atm_vol_curve_interp
 
     def atm_vol(self, fwd_date : Union[datetime.date, List[datetime.date]]) -> Union[float, List[float]]:
         """ Returns the atm forward for the fwd date fwd_date.
@@ -484,7 +484,7 @@ class ATMFVolatility(Volatility):
         :param fwd_date: forward date for which the ATM is constructed.
         """
 
-        to_return = splev((fwd_date - self.mkt_date).days / self.__dcf, self.__atm_vol_curve )
+        to_return = splev((fwd_date - self.mkt_date).days / self._dcf, self._atm_vol_curve )
 
         if isinstance(fwd_date, datetime.date):
             return float(to_return)
