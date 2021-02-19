@@ -1,18 +1,22 @@
 import numpy as np
 import pycuda.gpuarray as gpa
-import mrds.config
-
-if mrds.config.CUDA_PRESENT:
-    import pycuda.autoinit  # IMPORTANT: This line HAS TO BE HERE
 
 from unittest import TestCase
+
+from mrds.config import CUDA_PRESENT
+
+if CUDA_PRESENT:
+    import pycuda.autoinit  # IMPORTANT: This line HAS TO BE HERE
 
 from mrds.tolling.opd              import opd_avx
 from mrds.tolling.opd.opd_1fuel_cu import one_period_dispatch
 from mrds.tolling.opd.opd_1fuel    import opd_1fuel
+from mrds.tolling.default_tolling  import tolling_params_default
 
 
 class TestOpd(TestCase):
+    """ Testing the one-period dispatch.
+    """
 
     N = 128000
     r = np.random.rand(N)
@@ -22,52 +26,54 @@ class TestOpd(TestCase):
     d = np.random.rand(N)
     y = np.empty(N)
 
-    def sample_inputs(self):
-        """ Sample cuda params.
-        """
-
-        return ( 6.     # hrAtMax
-               , 7.     # hrAtMin
-               , 1000.  # maxCap - maximum capacity
-               , 100.   # minDisp - minimum dispatch
-               , 10.    # startFuel - startup fuel
-               , 15.    # startFuelCold - startup fuel from cold.
-               , 5.     # addFuelCost - added fuel costs
-               , 10.    # VC - variable costs
-               , 3.     # rampRate - ramp rate
-               , 0.1    # shutdownSPin - shutdown shadow price in
-               , 8.     # minDownTime - minimum downtime
-               , 16.    # minRunTime - minimum run time.
-               , 10.    # fixedStartupCost
-               , 10.    # fixedStartupCostCold
-               , 5.     # maxMonthlyStarts
-               , 10.    # coldStartup
-               , 16.    # startupHorizon
-               , 16.    # shutdownHorizon
-               , 10.    # rampUpSPin
-               , 10.    # rampDownSPin
-               , 10.    # rampUpCost
-               , 10.    # rampDownCost
-               , 15.    # rampUpHorizon
-               , 25.    # rampDownHorizon
-               )
+    # def sample_inputs(self):
+    #     """ Sample cuda params.
+    #     """
+    #
+    #     return ( 6.     # hrAtMax
+    #            , 7.     # hrAtMin
+    #            , 1000.  # maxCap - maximum capacity
+    #            , 100.   # minDisp - minimum dispatch
+    #            , 10.    # startFuel - startup fuel
+    #            , 15.    # startFuelCold - startup fuel from cold.
+    #            , 5.     # addFuelCost - added fuel costs
+    #            , 10.    # VC - variable costs
+    #            , 3.     # rampRate - ramp rate
+    #            , 0.1    # shutdownSPin - shutdown shadow price in
+    #            , 8.     # minDownTime - minimum downtime
+    #            , 16.    # minRunTime - minimum run time.
+    #            , 10.    # fixedStartupCost
+    #            , 10.    # fixedStartupCostCold
+    #            , 5.     # maxMonthlyStarts
+    #            , 10.    # coldStartup
+    #            , 16.    # startupHorizon
+    #            , 16.    # shutdownHorizon
+    #            , 10.    # rampUpSPin
+    #            , 10.    # rampDownSPin
+    #            , 10.    # rampUpCost
+    #            , 10.    # rampDownCost
+    #            , 15.    # rampUpHorizon
+    #            , 25.    # rampDownHorizon
+    #            )
 
     def test_add4_function(self):
         """ Tests whether add4 function works correctly.
         """
 
-        y1 = np.empty(TestOpd.N)
-        opd_avx.add4(TestOpd.r, TestOpd.a, TestOpd.b, TestOpd.c, TestOpd.d, y1, TestOpd.N)
+        topd = self.__class__
 
-        np.testing.assert_array_equal( y1
-                                     , TestOpd.r - (TestOpd.a + TestOpd.b + TestOpd.c + TestOpd.d))
+        y1 = np.empty(topd.N)
+        opd_avx.add4(topd.r, topd.a, topd.b, topd.c, topd.d, y1, topd.N)
+
+        np.testing.assert_array_equal( y1, topd.r - (topd.a + topd.b + topd.c + topd.d))
 
     def test_opd_cuda_1(self):
         """ Tests whether the opd cuda even runs.
         """
 
         N = 1024  # number of paths, simulations of power/fuel/decision/state prices.
-        sample_params = self.sample_inputs()
+        # sample_params = self.sample_inputs()
+        sample_params = tuple(tolling_params_default().values())  # same as self.sample_inputss() above
 
         power_prices        = np.random.rand(N)
         fuel_prices         = np.random.rand(N)
@@ -123,7 +129,8 @@ class TestOpd(TestCase):
 
         nb_paths       = 1024  # number of paths, simulations of power/fuel/decision/state prices.
         hours_in_block = 8
-        sample_params = self.sample_inputs()
+        # sample_params = self.sample_inputs()
+        sample_params = tuple(tolling_params_default().values())
 
         power_prices        = np.random.rand(nb_paths)
         fuel_prices         = np.random.rand(nb_paths)
@@ -169,7 +176,6 @@ class TestOpd(TestCase):
                    , cashflow
                    , block=(100, 1, 1)
                    , grid=(65000, 1))
-        print(cashflow)
 
         cashflow_cpu = np.empty_like(power_prices)
         curr_state = { 'state'         : state_state
@@ -194,7 +200,5 @@ class TestOpd(TestCase):
                  , hours_in_block
                  , nb_paths
                  , cashflow_cpu)
-        print(cashflow_cpu)
 
-        print(1)
         np.testing.assert_almost_equal(cashflow.get(), cashflow_cpu)

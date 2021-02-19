@@ -13,10 +13,10 @@ from mrds.vols.fwd_codes     import fwd_mth_codes
 # mapping of commodity names to vol parametrization
 vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals, ds_data.wti_vol_curve_dates_vals)
            , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates    , ds_data.brent_vol_vals    , ds_data.brent_vol_curve_dates_vals)
-           , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals)
-           , 'ATSI_7X8'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)
-           , 'ATSI_2X16'         : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals)
-           , 'NG_MICHCON_GD-PEAK': ('ATM', ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals)
+           , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals, ds_data.atsi_peak_vol_dates_vals )
+           , 'ATSI_2X16'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals, dict(zip(ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)))
+           , 'ATSI_7X8'         : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals, dict(zip(ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals)))
+           , 'NG_MICHCON_GD-PEAK': ('ATM', ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals, dict(zip(ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals)))
            , 'NG_MICHCON_CASHVOL': ('ATM', ds_data.ng_michcon_cv_vol_dates, ds_data.ng_michcon_cv_vol_vals)
            , 'PJMW-OFFPEAK_CV'   : ('ATM', ds_data.pjm_offpeak_cv_vol_dates, ds_data.pjm_offpeak_cv_vol_vals)
            , 'PJMW-PEAK_CV'      : ('ATM', ds_data.pjm_peak_cv_vol_dates, ds_data.pjm_peak_cv_vol_vals)}
@@ -48,16 +48,16 @@ fwd_hash = { 'WTI':                (ds_data.wti_curve_dates, ds_data.wti_curve_v
            , }
 
 
-def get_forward_curve( comName: str
-                     , mktDate : datetime.date):
+def get_forward_curve( commodity : str
+                     , mkt_date  : datetime.date ):
     """
     Gets the forward curve (ALWAYS USE DATE 20150410) for a particular date.
 
-    :param comName: name of the commodity curve
-    :param mktDate: market date for which the com curve is needed (not used here, but the interface should be such)
+    :param commodity: name of the commodity curve
+    :param mkt_date: market date for which the com curve is needed (not used here, but the interface should be such)
     """
 
-    return fwd_hash[comName]
+    return fwd_hash[commodity]
 
 
 def get_forward_curve_slice( fwd : str
@@ -124,7 +124,7 @@ def get_vol_curve( com_name : str
 
     vol_type, _, _, vol_curve_with_dates = vol_hash[com_name]
 
-    return (vol_type, vol_curve_with_dates)
+    return vol_type, vol_curve_with_dates
 
 
 def get_fwd_vol_curve_numeric_tenor( curve_name : str
@@ -240,11 +240,35 @@ def read_data_matched_tenors( mktDate : datetime.date
     vol_surface_params_final = sorting_fct(option_tenors_dt_matched, vol_surface_params_matched)
     option_tenors_dt_final = np.sort(option_tenors_dt_matched)
 
-    return {'fwd_tenors'        : np.array(fwd_tenors_final),
-            'fwd_curve'         : np.array(fwd_curve_final),
-            'fwd_tenors_code'   : np.array(fwd_tenors_code_final),
-            'fwd_tenors_dt'     : fwd_tenors_dt_final,
-            'option_tenors'     : np.array(option_tenors_final),
-            'option_tenors_code': np.array(option_tenors_code_final),
-            'option_tenors_dt'  : option_tenors_dt_final,
-            'vol_surface_params': np.array(vol_surface_params_final)}
+    # remove duplicates from list_2 with regards to list_1
+    def remove_duplicates(list_1, list_2):
+        res = []
+        no_duplicates = []
+        for x, y in zip(list_1, list_2):
+            if x not in no_duplicates:
+                res.append(y)
+                no_duplicates.append(x)
+
+        return res
+
+    # curve part
+    return {'fwd_tenors'        : np.array(remove_duplicates(fwd_tenors_dt_final, fwd_tenors_final)),
+            'fwd_curve'         : np.array(remove_duplicates(fwd_tenors_dt_final, fwd_curve_final)),
+            'fwd_tenors_code'   : np.array(remove_duplicates(fwd_tenors_dt_final, fwd_tenors_code_final)),
+            'fwd_tenors_dt'     : remove_duplicates(fwd_tenors_dt_final, fwd_tenors_dt_final),
+            # vol part
+            'option_tenors'     : np.array(remove_duplicates(option_tenors_dt_final, option_tenors_final)),
+            'option_tenors_code': np.array(remove_duplicates(option_tenors_dt_final, option_tenors_code_final)),
+            'option_tenors_dt'  : remove_duplicates(option_tenors_dt_final, option_tenors_dt_final),
+            'vol_surface_params': np.array(remove_duplicates(option_tenors_dt_final, vol_surface_params_final))
+            , }
+
+    # return {'fwd_tenors'        : np.array(fwd_tenors_final),
+    #         'fwd_curve'         : np.array(fwd_curve_final),
+    #         'fwd_tenors_code'   : np.array(fwd_tenors_code_final),
+    #         'fwd_tenors_dt'     : fwd_tenors_dt_final,
+    #         # vol part
+    #         'option_tenors'     : np.array(option_tenors_final),
+    #         'option_tenors_code': np.array(option_tenors_code_final),
+    #         'option_tenors_dt'  : option_tenors_dt_final,
+    #         'vol_surface_params': np.array(vol_surface_params_final)}

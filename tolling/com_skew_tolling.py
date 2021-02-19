@@ -9,6 +9,7 @@ from typing   import List, Tuple, Dict, Union, Callable, Optional
 from calendar import Calendar
 
 from mrds.mrds          import ComSkew
+from mrds.mrds_orm      import ComSkewORM
 from mrds.vols.vols     import Volatility
 from mrds.forward_curve import FwdCurve
 from mrds.vols.vols_get import get_vol_object
@@ -25,7 +26,7 @@ import pycuda.gpuarray as gpa
 logger = getLogger(__name__)
 
 
-class ComSkewTolling(ComSkew):
+class ComSkewTolling(ComSkewORM):
     """ Adds the methods responsible only for tolling simulation, etc.
     """
 

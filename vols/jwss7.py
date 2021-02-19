@@ -7,11 +7,12 @@ from scipy.stats import norm
 
 from typing  import List, Dict, Tuple, Union
 from tkinter import Scale, Button, HORIZONTAL
-from scipy.interpolate import splev, splrep
+from scipy.interpolate import splrep
 
 from mrds.ds            import get_vol_curve
 from mrds.forward_curve import FwdCurve
-from mrds.vols.vols     import Volatility, VolatilityDrawMixin
+from mrds.vols.vols     import VolatilityDrawMixin, ATMFVolatility
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,42 +21,36 @@ class JWSS7Exception(Exception):
     pass
 
 
-class JWSS7Volatility(Volatility):
+class JWSS7Volatility(ATMFVolatility):
     """ Jump-wing parametrization.
     """
 
     INTERPOLATION_DEGREE = 2
     SCIPY_SOLVER = 'scipy_cobyla'
 
-    def __init__( self
-                , com_name : str
-                , mkt_date : datetime.date
-                , fwd_params
-                , vol_params
-                , dcf = 365.25 ):
-        """ JWSS7 volatility init. the same as the volatility init, w/ some specific properties.
-        All parameters are the same as in Volatility class, except for the following:
+    @classmethod
+    def from_db(cls, com_name : str, mkt_date : datetime.date, dcf : float = 365.25):
+        """ Obtains the volatility from database.
 
-        :param dcf: day-count factor,
+        :param com_name: commodity name, e.g. 'WTI'
+        :param mkt_date: market date, e.g. datetime.date(2015, 4, 1)
+        :param dcf: day-count factor.
         """
 
-        super().__init__(com_name, mkt_date, fwd_params, vol_params)
-        self.__dcf = dcf
+        vol_type, vol_params = get_vol_curve(com_name, mkt_date)
 
-        self.__atm_vol_curve_interp = None
+        if vol_type != 'JWSS7':
+            raise RuntimeError(f'Fetching the wrong curve. {com_name} has type {vol_type}')
 
-    @property
-    def vol_dates(self) -> List[datetime.date]:
-        """ Returns the curve spine points, i.e. the points on the curve from which the curve is interpolated.
-        """
-
-        return self._vol_params.keys()
+        return cls( com_name
+                  , mkt_date
+                  , fwd_params = FwdCurve.from_db(mkt_date, com_name)
+                  , vol_params = vol_params
+                  , dcf        = dcf )
 
     @property
     def __atm_vol_curve(self):
-        """ Constructs the ATM vol curve
-
-        Returns the object returned from splrep, to be used for splev.
+        """ Constructs the ATM vol curve.  Returns the object returned from splrep, to be used for splev.
         """
 
         if self.__atm_vol_curve_interp:
@@ -71,37 +66,6 @@ class JWSS7Volatility(Volatility):
                                             , k=self.INTERPOLATION_DEGREE )
 
         return self.__atm_vol_curve_interp
-
-    def atm_vol(self, fwd_date : Union[datetime.date, List[datetime.date]]) -> Union[float, List[float]]:
-        """ Returns the atm forward for the fwd date fwd_date.
-
-        :param fwd_date: forward date for which the ATM is constructed.
-        """
-
-        to_return = splev((fwd_date - self.mkt_date).days / self.__dcf, self.__atm_vol_curve )
-
-        if isinstance(fwd_date, datetime.date):
-            return float(to_return)
-
-        return to_return
-
-    @classmethod
-    def from_db(cls, com_name : str, mkt_date : datetime.date):
-        """ Obtains the volatility from database.
-
-        :param com_name: commodity name, e.g. 'WTI'
-        :param mkt_date: market date, e.g. datetime.date(2015, 4, 1)
-        """
-
-        vol_type, vol_params = get_vol_curve(com_name, mkt_date)
-
-        if vol_type != 'JWSS7':
-            raise RuntimeError('Fetching the wrong curve. {0} has type {1}'.format(com_name, vol_type))
-
-        return cls( com_name
-                  , mkt_date
-                  , fwd_params = FwdCurve.from_db(mkt_date, com_name)
-                  , vol_params = vol_params)
 
     @staticmethod
     def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, Tuple]:

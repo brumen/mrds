@@ -1,11 +1,13 @@
 # elementwise kernel for one_period dispatch
 
 import os
-import pycuda.autoinit  # DO NOT REMOVE: THIS NEEDS TO BE HERE
 
 from pycuda.compiler import SourceModule
 
-from config import work_dir, opd_1_fuel_cuda_code
+from mrds.config import work_dir, opd_1_fuel_cuda_code, CUDA_PRESENT
+
+if CUDA_PRESENT:
+    import pycuda.autoinit  # DO NOT REMOVE: THIS NEEDS TO BE HERE
 
 
 def one_period_dispatch(float_type ='double', int_type ='int'):

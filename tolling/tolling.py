@@ -496,7 +496,7 @@ class TollingModel(ComSkewTolling):
         """
 
         fuel_hours_partition = { weekday: tuple( (self.fuel_idx, nb_hours) for _, nb_hours in weekday_split )
-            for weekday, weekday_split in self.hours_partition.items() }
+                                 for weekday, weekday_split in self.hours_partition.items() }
 
         fuel_process = self.simulate_spot_blocks( [self.fuel_idx]
                                                 , nb_simulations

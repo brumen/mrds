@@ -11,8 +11,9 @@ import tkinter    as tk
 import matplotlib.pyplot as plt
 
 
-from typing  import List, Tuple, Dict
+from typing  import List, Tuple, Dict, Union
 from openopt import NLP
+from scipy.interpolate import splev, splrep
 from pycuda.compiler import SourceModule
 from pycuda.gpuarray import to_gpu, GPUArray
 from mpl_toolkits.mplot3d              import Axes3D
@@ -29,20 +30,20 @@ mpl.use('TkAgg')
 logger = logging.Logger(__name__)
 
 
-def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
-    """ Array with forwards and vol params.
-    """
-
-    fvm = ds.read_data_matched_tenors(date_, fwd_name, vol_name)
-    nb_fwds = len(fvm['fwd_curve']) if nb_fwds_taken == -1 else nb_fwds_taken
-
-    fwd_curve = fvm['fwd_curve'][:nb_fwds]
-    option_tenors_dt = fvm['option_tenors_dt'][:nb_fwds]
-    vol_surface_params = fvm['vol_surface_params'][:nb_fwds]
-    fv_array = np.append(np.array(fwd_curve).reshape((nb_fwds, 1)),
-                         np.array(vol_surface_params), axis=1)
-
-    return fv_array, option_tenors_dt
+# def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
+#     """ Array with forwards and vol params.
+#     """
+#
+#     fvm = ds.read_data_matched_tenors(date_, fwd_name, vol_name)
+#     nb_fwds = len(fvm['fwd_curve']) if nb_fwds_taken == -1 else nb_fwds_taken
+#
+#     fwd_curve = fvm['fwd_curve'][:nb_fwds]
+#     option_tenors_dt = fvm['option_tenors_dt'][:nb_fwds]
+#     vol_surface_params = fvm['vol_surface_params'][:nb_fwds]
+#     fv_array = np.append(np.array(fwd_curve).reshape((nb_fwds, 1)),
+#                          np.array(vol_surface_params), axis=1)
+#
+#     return fv_array, option_tenors_dt
 
 
 class VolatilityException(Exception):
@@ -428,19 +429,75 @@ class ATMFVolatility(Volatility):
     """ ATM volatility
     """
 
+    INTERPOLATION_DEGREE = 2
+
+    def __init__( self
+                , com_name : str
+                , mkt_date : datetime.date
+                , fwd_params
+                , vol_params
+                , dcf = 365.25 ):
+        """ JWSS7 volatility init. the same as the volatility init, w/ some specific properties.
+        All parameters are the same as in Volatility class, except for the following:
+
+        :param dcf: day-count factor,
+        """
+
+        super().__init__(com_name, mkt_date, fwd_params, vol_params)
+        self.__dcf = dcf
+
+        self.__atm_vol_curve_interp = None
+
     @property
-    def vol_dates(self):
+    def vol_dates(self) -> List[datetime.date]:
         """ Returns the volatility spine points, building blocks of volatility structure.
 
-        """
-        # TODO: THIS IS WRONG, DATES, NOT string
-        return 'volDates'
-
-    def atm_vol(self, fwd_date : datetime.date) -> float:
-        """ Returns the ATM volatility for the forward date fwd_date.
-
-        :param fwd_date: forward point on the vol curve.
-        :returns: atm volatility for that point.
+        :returns: volatility dates as a model input.
         """
 
-        return self._volParams[self.vol_dates][self._vol_for_date(fwd_date)]
+        return list( self._vol_params.keys() )
+
+    @property
+    def __atm_vol_curve(self):
+        """ Constructs the ATM vol curve
+
+        Returns the object returned from splrep, to be used for splev.
+        """
+
+        if self.__atm_vol_curve_interp:
+            return self.__atm_vol_curve_interp
+
+        vol_dates = [(x - self.mkt_date).days / self.__dcf for x in self.vol_dates]
+
+        vol_dates_values = sorted( zip(vol_dates, self._vol_params.values())
+                                 , key = lambda vol_date_val: vol_date_val[0])
+
+        self.__atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
+                                            , [x[1] for x in vol_dates_values]
+                                            , k=self.INTERPOLATION_DEGREE )
+
+        return self.__atm_vol_curve_interp
+
+    def atm_vol(self, fwd_date : Union[datetime.date, List[datetime.date]]) -> Union[float, List[float]]:
+        """ Returns the atm forward for the fwd date fwd_date.
+
+        :param fwd_date: forward date for which the ATM is constructed.
+        """
+
+        to_return = splev((fwd_date - self.mkt_date).days / self.__dcf, self.__atm_vol_curve )
+
+        if isinstance(fwd_date, datetime.date):
+            return float(to_return)
+
+        return to_return
+
+    def implied_vol(self, fwd_date : datetime.date, K : float, ttm : float) -> float:
+        """ Implied vol for ATM vol is simply atm vol.
+
+        :param fwd_date: date of the forward contract for which the volatility is required.
+        :param K: strike price.
+        :param ttm: time to maturity
+        :returns: implied volatility, which equals the atm volatility.
+        """
+
+        return self.atm_vol(fwd_date)

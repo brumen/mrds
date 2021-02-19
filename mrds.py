@@ -829,23 +829,23 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fcm_ub   = self._factor_corr_mat(asset, asset, lb_ub_ind='ub')  # upper bound of the factor corr. mtx.
 
         logger.info('Calibrating the log-normal part of the model for asset {0}'.format(asset))
-        try:
-            return NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
-                                                                                          , kappa_sigma_rho_vec[:nbf]
-                                                                                          , kappa_sigma_rho_vec[nbf:(2*nbf)]
-                                                                                          , kappa_sigma_rho_vec[(2*nbf):] )
-                       , np.concatenate([ self._kappa_default(nbf, 'init')
-                                        , self._sigma_default(nbf, 'init')
-                                        , np.triu(fcm_init, 1)[np.triu(fcm_init, 1) != 0] ])
-                       , lb = np.concatenate([self._kappa_default(nbf, 'lb'),
-                                              self._sigma_default(nbf, 'lb'),
-                                              np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ])
-                       , ub = np.concatenate([self._kappa_default(nbf, 'ub'),
-                                              self._sigma_default(nbf, 'ub'),
-                                              np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
-                       .solve(self.__class__.NLP_SOLVER)
-        except Exception as e:
-            raise ComSkewError('Calibration of kappa, sigma, rho failed in method _kappa_sigma_rho: {0}'.format(str(e)))
+
+        return NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
+                                                                                      , kappa_sigma_rho_vec[:nbf]
+                                                                                      , kappa_sigma_rho_vec[nbf:(2*nbf)]
+                                                                                      , kappa_sigma_rho_vec[(2*nbf):] )
+                   , np.concatenate([ self._kappa_default(nbf, 'init')
+                                    , self._sigma_default(nbf, 'init')
+                                    , np.triu(fcm_init, 1)[np.triu(fcm_init, 1) != 0] ])
+                   , lb = np.concatenate([self._kappa_default(nbf, 'lb'),
+                                          self._sigma_default(nbf, 'lb'),
+                                          np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ])
+                   , ub = np.concatenate([self._kappa_default(nbf, 'ub'),
+                                          self._sigma_default(nbf, 'ub'),
+                                          np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
+                   .solve(self.__class__.NLP_SOLVER)
+        # except Exception as e:
+        #     raise ComSkewError('Calibration of kappa, sigma, rho failed in method _kappa_sigma_rho: {0}'.format(str(e)))
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.
@@ -1164,15 +1164,14 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                                         , diff_to_mkt_date)
                                  for delta in deltas_used ])
 
-        try:
-            c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
-                           , np.array([1., 0., 0.]))\
-                           .solve(self.__class__.NLP_SOLVER)
-        except Exception as e:
-            raise ComSkewError('Error in finding skew parameters, method _calibrate_skew_one_date: {0}'.format(str(e)))
+        c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
+                       , np.array([1., 0., 0.]))\
+                       .solve(self.__class__.NLP_SOLVER)
+        # except Exception as e:
+        #     raise ComSkewError('Error in finding skew parameters, method _calibrate_skew_one_date: {0}'.format(str(e)))
 
         # TODO: FIX THIS HERE!!!
-        logger.info('Finding skew parameters did not finish properly: {0}'.format(c_vec_sol.msg))
+        # logger.info('Finding skew parameters did not finish properly: {0}'.format(c_vec_sol.msg))
 
         return c_vec_sol.xf  # return whatever you get back
 
