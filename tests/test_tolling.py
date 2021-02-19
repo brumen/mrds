@@ -37,7 +37,7 @@ class TestTolling(TestCase):
                                  , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK']
                                  , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK']
                                  , {'WEEKDAY': (0, 1, 2, 3, 4,), 'WEEKEND': (5, 6,)}
-                                 , { 'WEEKDAY': [('ATSI-PEAK', 8), ('ATSI_7x8', 16), ]
+                                 , { 'WEEKDAY': [('ATSI-PEAK', 8), ('ATSI_7X8', 16), ]
                                    , 'WEEKEND': [('ATSI-PEAK', 16), ('ATSI_7X8', 8), ]}
                                  , 'NG_MICHCON_GD-PEAK'
                                  , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK'] )

@@ -502,8 +502,10 @@ class TollingModel(ComSkewTolling):
                                                 , nb_simulations
                                                 , tolling_start
                                                 , tolling_end
-                                                , set_seed = set_seed
-                                                , hours_partition = fuel_hours_partition )  # replace old partition w/ fuel partition
+                                                , set_seed           = set_seed
+                                                , hours_partition    = fuel_hours_partition
+                                                , )
+                                                #, ignore_block_names = True)  # replace old partition w/ fuel partition
 
         power_processes = self.simulate_spot_blocks( [fwd_curve.fwd_name for fwd_curve in self.fwd_curves]
                                                    , nb_simulations
