@@ -98,6 +98,33 @@ class ComSkewORM(ComSkew):
         self.__db_session.commit()
         return res_sigma
 
+    def _factor_corr_mat_single(self, asset : str) -> np.ndarray:
+        """ Returns the calibrated factor correlation matrix. e.g. 2x2 matrix for asset.
+
+        :param asset: asset for which the correlation is returned.
+        """
+
+        if asset in self._rho_vec_val:
+            return self._rho_vec_val[asset]
+
+        # check database if this is stored anywhere
+        rho_db_results = self.__db_session.query(ComSkewLnParams).filter_by( market_date = self.mkt_date
+                                                                           , commodity   = asset
+                                                                           , param       = 'rho' ).all()
+
+        if rho_db_results:  # this is not-empty
+            self._rho_vec_val[asset] = np.array(rho_db_results[0].val)
+            return self._rho_vec_val[asset]
+
+        res_rho = super()._factor_corr_mat_single(asset)  # this also caches the value
+        self.__db_session.add(ComSkewLnParams( commodity   = asset
+                                             , market_date = self.mkt_date
+                                             , param       = 'rho'
+                                             , value       = json.dumps(res_rho.tolist())))
+        self.__db_session.commit()
+
+        return res_rho
+
     def _c_vec(self, asset : str, fwd_date : datetime.date) -> np.array:
         """ Returns the C vector (skew vector) for the asset and forward date.
 

@@ -87,6 +87,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self._kappa_vec_val = {}
         self._sigma_vec_val = {}
         self._rho_vec_val   = {}
+        self.__beta_T_param = {}
 
         # initial value of the calibrated params
         # __C_vec is in the form of {'asset': {fwd_date (datetime.date): [1.2, 3.,4.5]} }
@@ -105,6 +106,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self.__com_curve_names = None
         self.__vol_curve_names = None
         self.__factor_corr_mtx = dict()  # to keep track of the factor correlation matrices.
+        self.__factor_corr_mtx_lb = dict()  # lower and upper boundaries
+        self.__factor_corr_mtx_ub = dict()
         self.__market_corr_mtx = dict()  # track of the market correlation matrix
         self.__complete_corr_mtx            = None  # complete correlation matrix hash
         self.__regenerate_complete_corr_mtx = True  # indicator whether to regenerate the complete corr. mtx.
@@ -227,11 +230,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param fwd_date: forward date.
         """
 
-        #if not self._C_vec:
-        #    logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
-        #    self._C_vec = {asset: {fwd_date: self._calibrate_skew_one_date(asset, fwd_date)}}
-        #    return self._C_vec[asset][fwd_date]
-
         if asset not in self._C_vec:
             logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
             self._C_vec[asset] = {fwd_date: self._calibrate_skew_one_date(asset, fwd_date) }
@@ -263,7 +261,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if fwd_date not in self._C_vec[asset]:
             self._C_vec[asset][fwd_date] = c_vec_value
 
-    def __default_factor_corr_mat( self
+    def __factor_corr_mat_default( self
                                  , asset_1 : str
                                  , asset_2 : str
                                  , same_asset_corr = 0.98
@@ -304,34 +302,74 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             tmp_1 = np.ones((self.nb_factors_for_asset(asset_1), self.nb_factors_for_asset(asset_1)))
             tmp_ut = np.triu(tmp_1, 1)
             tmp_lt = np.tril(tmp_1, -1)
-            return tmp_1 - tmp_ut * 0.001 - tmp_lt * 0.001 if lb_ub_ind is 'ub'else \
+            return tmp_1 - tmp_ut * 0.001 - tmp_lt * 0.001 if lb_ub_ind is 'ub' else \
                 tmp_1 - tmp_ut * 1.999 - tmp_lt * 1.999
 
         return lb_ub_fact * np.ones((self.nb_factors_for_asset(asset_1), self.nb_factors_for_asset(asset_2)))
 
-    def _factor_corr_mat(self
-                         , asset_1 : str
-                         , asset_2 : str
-                         , new_corr_mtx = None
-                         , lb_ub_ind    = None) -> np.ndarray:
+    def _factor_corr_mat_default( self
+                                , asset_1 : str
+                                , asset_2 : str
+                                , lb_ub_ind    = None) -> np.ndarray:
         """ Returns the factor correlation matrix between assets 1 & 2. If new_corr_mtx is provided,
             set that as the correlation matrix between them.
 
         :param asset_1: first asset to get the correlation
         :param asset_2: second asset for the correlation
-        :param new_corr_mtx: new matrix if you want it to be set up.
         :param lb_ub_ind: indicator whether upper bound or lower bound is set. Options: 'lb', 'ub'
         """
 
-        mtx_to_insert = new_corr_mtx if new_corr_mtx else (self.__default_factor_corr_mat(asset_1, asset_2) if not lb_ub_ind else self.__factor_corr_mat_lb_ub(asset_1, asset_2, lb_ub_ind=lb_ub_ind))
+        if lb_ub_ind is None:
+            factor_mtx_chosen = self.__factor_corr_mtx
+        elif lb_ub_ind == 'lb':
+            factor_mtx_chosen = self.__factor_corr_mtx_lb
+        else:
+            factor_mtx_chosen = self.__factor_corr_mtx_ub
 
-        if asset_1 not in self.__factor_corr_mtx:
-            self.__factor_corr_mtx[asset_1] = {asset_2: mtx_to_insert}
+        stored_mtx = factor_mtx_chosen.get(asset_1, {}).get(asset_2)
+        if stored_mtx is not None:  # not None
+            return stored_mtx
 
-        elif asset_2 not in self.__factor_corr_mtx[asset_1]:
-            self.__factor_corr_mtx[asset_1][asset_2] = mtx_to_insert
+        # compute the matrix and store it.
+        mtx_to_insert = self.__factor_corr_mat_default(asset_1, asset_2) if not lb_ub_ind else self.__factor_corr_mat_lb_ub(asset_1, asset_2, lb_ub_ind=lb_ub_ind)
 
-        return self.__factor_corr_mtx[asset_1][asset_2]
+        if asset_1 not in factor_mtx_chosen:
+            factor_mtx_chosen[asset_1] = {asset_2: mtx_to_insert}
+
+        elif asset_2 not in factor_mtx_chosen[asset_1]:
+            factor_mtx_chosen[asset_1][asset_2] = mtx_to_insert
+
+        return factor_mtx_chosen[asset_1][asset_2]
+
+    def _factor_corr_mat( self
+                        , asset_1 : str
+                        , asset_2 : str
+                        , lb_ub_ind    = None ) -> np.ndarray:
+        """ Returns the factor correlation matrix between assets 1 & 2. If new_corr_mtx is provided,
+            set that as the correlation matrix between them.
+
+        :param asset_1: first asset to get the correlation
+        :param asset_2: second asset for the correlation
+        :param lb_ub_ind: indicator whether upper bound or lower bound is set. Options: 'lb', 'ub'
+        """
+
+        fcm = self.__factor_corr_mtx  # abbreviation for easy access.
+
+        # first handle the case when asset_1 == asset_2
+        if asset_1 == asset_2:
+            if asset_1 in fcm:
+                if asset_1 in fcm[asset_1]:
+                    return fcm[asset_1][asset_1]  # asset_2 == asset_1
+
+                # doesnt have [asset_1][asset_1] - calibrate asset_1
+                fcm[asset_1][asset_1] = self._factor_corr_mat_single(asset_1)
+                return fcm[asset_1][asset_1]
+
+            fcm[asset_1] = {asset_1 : self._factor_corr_mat_single(asset_1)}
+            return fcm[asset_1][asset_1]
+
+        # asset_1 and asset_2 are different, just return the default value, TODO: THIS IS WORK IN PROGRESS.
+        return self._factor_corr_mat_default(asset_1, asset_2)
 
     def __factor_corr_mat_multiple(self, assets : List[str]) -> np.ndarray:
         """ Returns the factor correlation matrix for all assets in assets
@@ -598,17 +636,19 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
     def __fwd_square_vol (self
                           , asset       : str
-                          , kappa_vec   : np.array
-                          , sigma_vec   : np.array
+                          , kappa       : np.array
+                          , sigma       : np.array
                           , corr_matrix : np.array
                           , fwd_tenor   : datetime.date
                           , fwd_date_1  : datetime.date
                           , fwd_date_2  : datetime.date ):
         """ Computes forward integrated square vol (function V) from fwd_date_1 to fwd_date_2.
 
+         \int _{fwd_date_1} ^{fwd_date_2} ( e^(-kappa_1 (T-t)) * sigma_1 + e^{-kappa_2(T-t)) + cross terms)
+
         :param asset: asset to be considered. (e.g. 'WTI')
-        :param kappa_vec: vec of kappas
-        :param sigma_vec: vector of sigmas
+        :param kappa: vec of kappas
+        :param sigma: vector of sigmas
         :param corr_matrix: correlation matrix for asset
         :param fwd_tenor: tenor for which this forward volatility is computed.
         :param fwd_date_1: start of forward volatility computation
@@ -620,22 +660,20 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         nb_factors = self.nb_factors_for_asset(asset)
 
-        sigma_vec_row = sigma_vec.reshape((1, nb_factors))
-        sigma_vec_col = sigma_vec.reshape((nb_factors, 1))
-        kappa_vec_row = kappa_vec.reshape((1, nb_factors))
-        kappa_vec_col = kappa_vec.reshape((nb_factors, 1))
+        t_1 = self.__difference_to_market_date(fwd_date_1)
+        t_2 = self.__difference_to_market_date(fwd_date_2)
+        T   = self.__difference_to_market_date(fwd_tenor)
 
-        # TODO: CHECK HOW TO INCORPORATE BETA_T BACK!!!
-        #cross_1 = self._beta_T(asset, [fwd_date_2]) ** 2 * sigma_vec_row * corr_matrix * sigma_vec_col
-        cross_1 = sigma_vec_row * corr_matrix * sigma_vec_col
-        cross_2 = kappa_vec_row + kappa_vec_col
+        direct_terms = sum([ sigma_i**2 * (np.exp(-2 * kappa_i * (T - t_2)) - np.exp(-2 * kappa_i * (T - t_1)) )
+                             for kappa_i, sigma_i in zip(kappa, sigma) ])
 
-        time_to_fwd_tenor  = self.__difference_to_market_date(fwd_tenor)
-        time_to_fwd_date_1 = self.__difference_to_market_date(fwd_date_1)
-        time_to_fwd_date_2 = self.__difference_to_market_date(fwd_date_2)
+        cross_terms = sum([sigma[i] * sigma[j] * 2 * corr_matrix[i, j] / (kappa[i] + kappa[j]) * \
+                           ( np.exp(-(kappa[i] + kappa[j]) * (T - t_2)) - np.exp(-(kappa[i] + kappa[j]) * (T - t_1)) )
+            for i in range(nb_factors)
+            for j in range(i+1, nb_factors)
+        ])
 
-        return np.sum(cross_1 * (np.exp(-cross_2 * ( time_to_fwd_tenor - time_to_fwd_date_2)) -
-                                 np.exp(-cross_2 * ( time_to_fwd_tenor - time_to_fwd_date_1)) / cross_2) )
+        return direct_terms + cross_terms
 
     def __V_one_factor( self
                       , asset      : str
@@ -824,19 +862,20 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         nbf = self.nb_factors_for_asset(asset)
 
         # extracting the upper triangular part of the correlation matrix
-        fcm_init = self._factor_corr_mat(asset, asset)  # initial value of the factor correlation.
-        fcm_lb   = self._factor_corr_mat(asset, asset, lb_ub_ind='lb')  # lower bound of the factor corr. mtx.
-        fcm_ub   = self._factor_corr_mat(asset, asset, lb_ub_ind='ub')  # upper bound of the factor corr. mtx.
+        fcm_init = self._factor_corr_mat_default(asset, asset)  # initial value of the factor correlation.
+        fcm_lb   = self._factor_corr_mat_default(asset, asset, lb_ub_ind='lb')  # lower bound of the factor corr. mtx.
+        fcm_ub   = self._factor_corr_mat_default(asset, asset, lb_ub_ind='ub')  # upper bound of the factor corr. mtx.
 
         logger.info('Calibrating the log-normal part of the model for asset {0}'.format(asset))
 
-        return NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
+        init_kappa_sigma_rho = np.concatenate([ self._kappa_default(nbf, 'init')
+                                              , self._sigma_default(nbf, 'init')
+                                              , np.triu(fcm_init, 1)[np.triu(fcm_init, 1) != 0] ])
+        pr_solve = NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
                                                                                       , kappa_sigma_rho_vec[:nbf]
                                                                                       , kappa_sigma_rho_vec[nbf:(2*nbf)]
                                                                                       , kappa_sigma_rho_vec[(2*nbf):] )
-                   , np.concatenate([ self._kappa_default(nbf, 'init')
-                                    , self._sigma_default(nbf, 'init')
-                                    , np.triu(fcm_init, 1)[np.triu(fcm_init, 1) != 0] ])
+                   , init_kappa_sigma_rho
                    , lb = np.concatenate([self._kappa_default(nbf, 'lb'),
                                           self._sigma_default(nbf, 'lb'),
                                           np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ])
@@ -844,8 +883,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                           self._sigma_default(nbf, 'ub'),
                                           np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
                    .solve(self.__class__.NLP_SOLVER)
-        # except Exception as e:
-        #     raise ComSkewError('Calibration of kappa, sigma, rho failed in method _kappa_sigma_rho: {0}'.format(str(e)))
+
+        if pr_solve.isFeasible:
+            return pr_solve.xf  # return solution
+
+        # proble is not feasible: TODO: FOR NOW RETURN DEFAULT VALUES
+        return init_kappa_sigma_rho
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.
@@ -857,7 +900,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             return self._kappa_vec_val[asset]
 
         # store the value, and return it.
-        self._kappa_vec_val[asset] = self._kappa_sigma_rho(asset).xf[0:self.nb_factors_for_asset(asset)]
+        self._kappa_vec_val[asset] = self._kappa_sigma_rho(asset)[0:self.nb_factors_for_asset(asset)]
         return self._kappa_vec_val[asset]
 
     def _sigma_vec(self, asset : str) -> np.array:
@@ -871,10 +914,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             return self._sigma_vec_val[asset]
 
         nbf = self.nb_factors_for_asset(asset)  # number of factors
-        self._sigma_vec_val[asset] = self._kappa_sigma_rho(asset).xf[nbf:(2 * nbf)]
+        self._sigma_vec_val[asset] = self._kappa_sigma_rho(asset)[nbf:(2 * nbf)]
         return self._sigma_vec_val[asset]
 
-    def __factor_corr_mat(self, asset : str) -> np.ndarray:
+    def _factor_corr_mat_single(self, asset : str) -> np.ndarray:
         """ Returns the calibrated factor correlation matrix. e.g. 2x2 matrix for asset.
 
         :param asset: asset for which the correlation is returned.
@@ -884,17 +927,22 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             return self._rho_vec_val[asset]
 
         # calibrated rho vector
-        rho_vec = self._construct_corr_asset(asset, self._kappa_sigma_rho(asset).xf[(2 * self.nb_factors_for_asset(asset)):])
+        rho_vec = self._construct_corr_asset(asset, self._kappa_sigma_rho(asset)[(2 * self.nb_factors_for_asset(asset)):])
         # transforming the rho_vec into the rho matrix
-        rho_mat_len = np.sqrt(len(rho_vec))  # this is square matrix  TODO: THIS HERE IS WRONG!!!
-        self._rho_vec_val[asset] = rho_vec.reshape((rho_mat_len, rho_mat_len))
+        n_dim = rho_vec.ndim
+        if n_dim == 1:  # construct a 2-by-2
+            rho_value = rho_vec[0]  # only 1 element
+            self._rho_vec_val[asset] = np.array([[1., rho_value], [rho_value, 1.]])
+        else:  # we have a matrix, dont do anything
+            self._rho_vec_val[asset] = rho_vec
+
         return self._rho_vec_val[asset]
 
     # TODO: HERE SHOULD BE CHANGED TO ADD THIS CACHE
     # @lru_cache(maxsize=_BETA_T_CACHE_SIZE)
-    def _beta_T(self
-                , asset : str
-                , tenors = None):
+    def _beta_T( self
+               , asset : str
+               , tenors = None):
         """ Adjusts beta_T so that the atm vol is fitted perfectly.
             (assuming that kappa, sigma, rho has already been calibrated).
             The results are memoized.
@@ -1482,7 +1530,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param simulation_times: times when to simulate curves, if None TODO: WHAT THEN???
         :param set_seed: set the seed for simulations.
         """
-
 
     @lru_cache(maxsize=20)  # TODO: THIS IS NOT RIGHT HERE!!!
     def __factor_positions(self, asset : str) -> slice:
