@@ -333,6 +333,7 @@ atsi_7x8_vol_vals = [np.array([0.27, 0.12, 0.03, 0.01, 0., 0.315, 0.0]),
                      np.array([0.295, 0.12, 0.03, 0.01, 0., 0.315, 0.0])]
 
 atsi_peak_vol_vals = atsi_7x8_vol_vals
+atsi_peak_vol_dates_vals = dict(zip(atsi_peak_vol_dates, atsi_peak_vol_vals))
 
 # atsi_2x16
 atsi_2x16_curve_dates = atsi_peak_curve_dates
@@ -527,14 +528,31 @@ atsi_2x16_vol_vals = [np.array([0.27, 0.12, 0.03, 0.01, 0., 0.315, 0.0]),
 
 # ng_michcon_gd-peak
 ng_michcon_gd_peak_dates = atsi_peak_curve_dates
-ng_michcon_gd_peak_curve_vals = [2.72, 2.745, 2.774, 2.774, 2.762,
-                                 2.749, 2.778, 3.048, 3.214,
-                                 3.277,
-                                 3.286, 3.234, 2.865, 2.899, 2.95,
-                                 3.003, 3.013, 3.001, 3.029, 3.1575,
-                                 3.45,
-                                 3.277,
-                                 3.286, 3.234, 2.865, 2.899, 2.95,
+ng_michcon_gd_peak_curve_vals = [ 2.72
+                                , 2.745
+                                , 2.774
+                                , 2.774
+                                , 2.762
+                                , 2.749
+                                , 2.778
+                                , 3.048
+                                , 3.214
+                                , 3.277
+                                , 3.286
+                                , 3.234
+                                , 2.865
+                                , 2.899
+                                , 2.95
+                                , 3.003
+                                , 3.013
+                                , 3.001
+                                , 3.029
+                                , 3.1575
+                                , 3.45
+                                , 3.277
+                                , 3.286
+                                ,
+                                3.234, 2.865, 2.899, 2.95,
                                  3.003, 3.013, 3.001, 3.029, 3.1575,
                                  3.45,
                                  3.277,
@@ -573,6 +591,7 @@ ng_michcon_gd_peak_curve_vals = [2.72, 2.745, 2.774, 2.774, 2.762,
                                  3.286, 3.234, 2.865, 2.899, 2.95,
                                  3.003, 3.013, 3.001, 3.029, 3.1575,
                                  3.45]
+
 ng_michcon_gd_peak_vol_dates = ng_michcon_gd_peak_dates
 ng_michcon_gd_peak_vol_vals = [0.53, 0.41, 0.41, 0.396, 0.388,
                                0.386,0.38, 0.357, 0.33,

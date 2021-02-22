@@ -9,6 +9,7 @@ from typing   import List, Tuple, Dict, Union, Callable, Optional
 from calendar import Calendar
 
 from mrds.mrds          import ComSkew
+from mrds.mrds_orm      import ComSkewORM
 from mrds.vols.vols     import Volatility
 from mrds.forward_curve import FwdCurve
 from mrds.vols.vols_get import get_vol_object
@@ -25,7 +26,7 @@ import pycuda.gpuarray as gpa
 logger = getLogger(__name__)
 
 
-class ComSkewTolling(ComSkew):
+class ComSkewTolling(ComSkewORM):
     """ Adds the methods responsible only for tolling simulation, etc.
     """
 
@@ -265,7 +266,8 @@ class ComSkewTolling(ComSkew):
                             , tolling_start  : datetime.date
                             , tolling_end    : datetime.date
                             , set_seed      = None
-                            , hours_partition = None ) -> Dict[datetime.date, List[Tuple[str, int, np.array]]]:
+                            , hours_partition = None
+                            , ignore_block_names : bool = False  ) -> Dict[datetime.date, List[Tuple[str, int, np.array]]]:
         """ Same as simulate_spot_blocks, but for all blocks. TODO: DESCRIBE THIS BETTER
 
         :param assets: list of assets to which asset to simulate block prices for.
@@ -274,6 +276,7 @@ class ComSkewTolling(ComSkew):
         :param tolling_end: end of tolling sims.
         :param set_seed: optional param for debugging, so that simulations are always the same
         :param hours_partition: override for the hours partition (used for fuel stuff)
+        :param ignore_block_names: ignore block names (USED ONLY FOR FUEL SIMULATION - FIX THIS)
         :returns: dictionary, where keys are simulated first-of-months, and values are:
                     tuples, where the first is block name, second is block hours, and third is the simulations for that
                             block.
@@ -306,7 +309,9 @@ class ComSkewTolling(ComSkew):
                 cash_corr_rns = self.__class__._cash_rns(cash_corr_mtx, nb_simulations).transpose()
                 curr_asset_values *= np.exp(-0.5 * cash_vols**2 * block_hours_num + \
                                             np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose())
-                spot_sim.append( (block_name, block_hours, curr_asset_values[:, all_assets.index(block_name)]) )
+                spot_sim.append( ( block_name
+                                 , block_hours
+                                 , curr_asset_values[:, all_assets.index(block_name)  ]) )  # if not ignore_block_names else 0
 
             spot_sims[sim_date] = spot_sim
 

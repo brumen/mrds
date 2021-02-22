@@ -1,6 +1,10 @@
+#
+#  One period dispatch accounting.
+#
+
 import numpy as np
 
-from typing import Tuple, Any, Dict
+from typing import Any, Dict
 
 from mrds.tolling.opd import opd_avx
 
@@ -30,16 +34,16 @@ def opd_1fuel(power_prices     : np.ndarray
     """
 
     # unpacking of params
-    hr_at_max, hr_at_min, max_cap, min_disp, \
-        start_fuel, start_fuel_cold, \
-        add_fuel_cost, VC, ramp_rate, \
-        shutdown_sp_in, \
-        min_downtime, min_runtime, \
-        fixed_startup_cost, fixed_startup_cost_cold,  \
-        max_monthly_starts, \
-        cold_startup, startup_horizon, shutdown_horizon, \
-        ramp_up_sp_in, ramp_down_sp_in, \
-        ramp_up_cost, ramp_down_cost, ramp_up_horizon, ramp_down_horizon = tolling_params
+    # hr_at_max, hr_at_min, max_cap, min_disp, \
+    #     start_fuel, start_fuel_cold, \
+    #     add_fuel_cost, VC, ramp_rate, \
+    #     shutdown_sp_in, \
+    #     min_downtime, min_runtime, \
+    #     fixed_startup_cost, fixed_startup_cost_cold,  \
+    #     max_monthly_starts, \
+    #     cold_startup, startup_horizon, shutdown_horizon, \
+    #     ramp_up_sp_in, ramp_down_sp_in, \
+    #     ramp_up_cost, ramp_down_cost, ramp_up_horizon, ramp_down_horizon = tolling_params
 
     hr_at_max       = tolling_params['hrAtMax']
     hr_at_min       = tolling_params['hrAtMin']
@@ -91,9 +95,9 @@ def opd_1fuel(power_prices     : np.ndarray
 
     # startup shadow price
     startup_sp += fixed_and_fuel_startup_cost / (startup_horizon * max_cap)  # adjustment of the startup shadow prices TODO: CHECK IF THIS MAKES SENSE
-    startup_profit_v = power_prices - optimal_marginal_cost_at_max - startup_sp > 0.
+    is_startup_profitable = power_prices - optimal_marginal_cost_at_max - startup_sp > 0.
 
-    is_startup_profitable = startup_profit_v
+    # is_startup_profitable = startup_profit_v
     do_startup = curr_decision['can_start'] * ((curr_decision['force_start'] == 2) |
                                                (is_startup_profitable & (curr_decision['force_start'] == 1)))
 
