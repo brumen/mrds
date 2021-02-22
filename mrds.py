@@ -17,7 +17,7 @@ from typing          import List, Dict, Tuple, Union, Callable
 from mrds.mrds_maths    import ComMathsMixin
 from mrds.mrds_defaults import ComSkewDefaultsMixin
 from mrds.correlations  import corr_hyp_sec_mat
-from mrds.near_corr     import near_corr_simple
+from mrds.near_corr     import near_corr_simple, near_corr_simple_iter
 from mrds.vols.vols     import Volatility
 from mrds.vols.vols_get import get_vol_object
 from mrds.vols.vols_basic import black_vol_inverse
@@ -1385,7 +1385,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             nb_factors_by_asset = [self.nb_factors_for_asset(asset) for asset in assets]
             total_nb_factors = sum(nb_factors_by_asset)
 
-            factor_corr_mat = self.__factor_corr_mat_multiple(assets)
+            if np.all(np.linalg.eigvals(self.__factor_corr_mat_multiple(assets)) > 0):
+                # positive definite matrix
+                factor_corr_mat = self.__factor_corr_mat_multiple(assets)
+            else:
+                factor_corr_mat = near_corr_simple_iter(self.__factor_corr_mat_multiple(assets))  # try to make it.
+
             simulated_rn    = self.__class__._simulate_std_normal( total_nb_factors, factor_corr_mat, nb_simulations )
 
             # sims_Z_unit shape = ((nb_factors_per_asset, e.g. 2) * nb_assets) X nb_simulations, e.g. 4 X 1000
