@@ -1,8 +1,8 @@
 # Com Skew w/ ORM database queries
 
-import pickle
 import datetime
 import numpy as np
+import json
 
 from logging import getLogger
 from typing  import List, Callable
@@ -60,7 +60,7 @@ class ComSkewORM(ComSkew):
                                                                              , param     = 'kappa' ).all()
 
         if kappa_db_results:  # this is not-empty
-            self._kappa_vec_val[asset] = kappa_db_results[0].val
+            self._kappa_vec_val[asset] = np.array(kappa_db_results[0].val)  # converting back to array (from list)
             return self._kappa_vec_val[asset]  # returning
 
         # not found the value anywhere, store the value, and return it.
@@ -68,7 +68,7 @@ class ComSkewORM(ComSkew):
         self.__db_session.add(ComSkewLnParams( commodity   = asset
                                               , market_date = self.mkt_date
                                               , param       = 'kappa'
-                                              , value       = pickle.dumps(res_kappa)))
+                                              , value       = json.dumps(res_kappa.tolist())))
         self.__db_session.commit()
         return res_kappa
 
@@ -87,14 +87,14 @@ class ComSkewORM(ComSkew):
                                                                                       , param     = 'sigma' ).all()
 
         if sigma_db_results:  # this is not-empty
-            self._sigma_vec_val[asset] = sigma_db_results[0].val
-            return self._sigma_vec_val[asset]  # returning
+            self._sigma_vec_val[asset] = np.array(sigma_db_results[0].val)
+            return self._sigma_vec_val[asset]
 
         res_sigma = super()._sigma_vec(asset)
         self.__db_session.add(ComSkewLnParams( commodity   = asset
-                                                      , market_date = self.mkt_date
-                                                      , param       = 'sigma'
-                                                      , value       = pickle.dumps(res_sigma)))
+                                             , market_date = self.mkt_date
+                                             , param       = 'sigma'
+                                             , value       = json.dumps(res_sigma.tolist())))
         self.__db_session.commit()
         return res_sigma
 
@@ -107,24 +107,24 @@ class ComSkewORM(ComSkew):
 
         # check db for this instance
         C_db = self.__db_session.query(ComSkewCParams).filter_by( commodity   = asset
-                                                                         , market_date = self.mkt_date
-                                                                         , fwd_date    = fwd_date ).all()
+                                                                , market_date = self.mkt_date
+                                                                , fwd_date    = fwd_date ).all()
 
         if C_db:  # C_db is not empty
             if asset not in self._C_vec:
-                self._C_vec[asset] = {fwd_date: C_db[0].val}
+                self._C_vec[asset] = {fwd_date: np.array(C_db[0].val)}
                 return self._C_vec[asset][fwd_date]
 
             if fwd_date not in self._C_vec[asset]:
-                self._C_vec[asset][fwd_date] = C_db[0].val
+                self._C_vec[asset][fwd_date] = np.array(C_db[0].val)
                 return self._C_vec[asset][fwd_date]
 
         # C_db is not found, call the superclass routine.
         res_c = super()._c_vec(asset, fwd_date)  # this also stores values.
         self.__db_session.add(ComSkewCParams( commodity   = asset
-                                                     , market_date = self.mkt_date
-                                                     , fwd_date    = fwd_date
-                                                     , value       = pickle.dumps(res_c)))
+                                            , market_date = self.mkt_date
+                                            , fwd_date    = fwd_date
+                                            , value       = json.dumps(res_c.tolist())))
         self.__db_session.commit()
         return res_c
 
@@ -147,13 +147,13 @@ class ComSkewORM(ComSkew):
 
         calibrated_in_db = {skew_C_obj.fwd_date: skew_C_obj.val
                             for skew_C_obj in self.__db_session.query(ComSkewCParams).filter_by( commodity   = asset
-                                                                                                        , market_date = self.mkt_date).all()}
+                                                                                               , market_date = self.mkt_date).all()}
 
         # to be added but just here
         if asset not in self._C_vec:
             self._C_vec[asset] = {}
 
         for fwd_date in set(to_be_calibrated).intersection(list(calibrated_in_db.keys())):
-            self._C_vec[asset][fwd_date] = calibrated_in_db[fwd_date]
+            self._C_vec[asset][fwd_date] = np.array(calibrated_in_db[fwd_date])
 
         self._c_vec_calibrate_force(asset, set(to_be_calibrated).difference(list(calibrated_in_db.keys())))

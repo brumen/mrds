@@ -860,10 +860,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self._kappa_vec_val[asset] = self._kappa_sigma_rho(asset).xf[0:self.nb_factors_for_asset(asset)]
         return self._kappa_vec_val[asset]
 
-    def _sigma_vec(self, asset : str):
+    def _sigma_vec(self, asset : str) -> np.array:
         """ Calibrated sigma vector, depends on the _kappa_sigma_rho above.
 
         :param asset: asset to calculate sigma vector over.
+        :returns: the calibrated sigma vector
         """
 
         if asset in self._sigma_vec_val:

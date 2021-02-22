@@ -1,6 +1,10 @@
+#
+#  One period dispatch accounting.
+#
+
 import numpy as np
 
-from typing import Tuple, Any, Dict
+from typing import Any, Dict
 
 from mrds.tolling.opd import opd_avx
 

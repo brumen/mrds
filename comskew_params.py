@@ -1,6 +1,6 @@
 # flight class for ORM, trade access
 
-import pickle
+import json
 
 from sqlalchemy                 import ( Column
                                        , String
@@ -8,6 +8,7 @@ from sqlalchemy                 import ( Column
                                        , BigInteger
                                        , Enum
                                        , LargeBinary
+                                       , JSON
                                        , )
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -30,16 +31,16 @@ class ComSkewLnParams(ComSkewParamsBaseORM):
     id          = Column(BigInteger, primary_key=True)  # serial, primary key
     market_date = Column(Date)
     commodity   = Column(String)
-    value       = Column(LargeBinary)
+    value       = Column(JSON)
     param       = Column(Enum('sigma', 'kappa', 'rho', ))
 
     @property
     def val(self):
-        return pickle.loads(self.value)
+        return json.loads(self.value)
 
     @val.setter
     def val(self, new_val):
-        self.value = pickle.dumps(new_val)
+        self.value = json.dumps(new_val)
 
 
 class ComSkewCParams(ComSkewParamsBaseORM):
@@ -51,17 +52,17 @@ class ComSkewCParams(ComSkewParamsBaseORM):
     id          = Column(BigInteger, primary_key=True)  # serial, primary key
     market_date = Column(Date)
     commodity   = Column(String)
-    value       = Column(LargeBinary)
+    value       = Column(JSON)
     # param       = Column(Enum('sigma', 'kappa', 'rho', ))
     fwd_date    = Column(Date)
 
     @property
     def val(self):
-        return pickle.loads(self.value)
+        return json.loads(self.value)
 
     @val.setter
     def val(self, new_val):
-        self.value = pickle.dumps(new_val)
+        self.value = json.dumps(new_val)
 
 
 # Example of usage
