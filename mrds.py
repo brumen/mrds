@@ -60,6 +60,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
     _BETA_T_CACHE_SIZE    = 10   # cache size for beta_t
     _C_VEC_CACHE          = 100  # cache for C vector
 
+    _MIN_OPTION_PRICE     = 1.e-8  # Minimal option price
+
     def __init__(self
                  , mkt_date       : datetime.date
                  , fwd_curves     : List[FwdCurve]
@@ -1190,6 +1192,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         ttm_numerical = self.__difference_to_market_date(option_tenor)
         option_prices = [self._polynomial_european( asset, C_vec, fwd_date, strike, cp, ttm_numerical)
                          for strike, cp in zip(strikes, cp_ind)]
+        # if option prices are 0 -> correct to MIN_OPTION_PRICE
+        option_prices = [ option_price if option_price > 0. else self._MIN_OPTION_PRICE
+                          for option_price in option_prices]
         discount_fact = self.DF(option_tenor)
 
         return [black_vol_inverse( fwd_value
