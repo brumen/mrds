@@ -158,3 +158,5 @@ def opd_1fuel(power_prices     : np.ndarray
     curr_state['hours_run']       = np.where(new_state, curr_state['hours_run'] + hours_in_block, 0)
     curr_state['global_starts']  += starts
     curr_state['state']           = new_state
+
+    return cashflow, curr_state

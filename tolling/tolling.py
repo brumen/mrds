@@ -357,12 +357,11 @@ class TollingModel(ComSkewTolling):
 
         return cuda_ops.min_int_two(cnd_2, cnd_3, cs['can_shut'])  # that's wrong - FIX THIS HERE
 
-    def _shutdown_decision(self, block_name, hours_run) -> Union[bool, np.ndarray]:
+    def _shutdown_decision(self, block_name : str, hours_run : int) -> Union[bool, np.ndarray]:
         """ Decision whether it is sensible to shut down
 
-        :param cs: current state, cs.can_shut is filled by this routine
-           cs.can_shut is array of bools
-
+        :param block_name: block name
+        :param hours_run: hours run so far.
         """
 
         dispatch_mode = self.dispatch_mode
@@ -388,6 +387,7 @@ class TollingModel(ComSkewTolling):
         :param block_name: current block name
         :param power_prices: power price vector
         :param fuel_prices: fuel_price vector
+        :param dv: decision variable TODO: EXPLAIN BETTER
         :returns: indicator whether the power plant should force shutdown.
         """
 
@@ -492,6 +492,8 @@ class TollingModel(ComSkewTolling):
     @property
     def _opd_f(self):
         """ One period dispatch function selection, depending on whether we are in cuda mode, or not.
+
+        :returns: function executing one-block dispatch.
         """
 
         return opd_1fuel.opd_1fuel if not self.cuda_ind else opd_1fuel_cu.opd_kernel
@@ -503,7 +505,7 @@ class TollingModel(ComSkewTolling):
                          , block_name   : str
                          , fuel_prices  : np.array
                          , power_prices : np.array
-                         , ):
+                         , ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """ Updates the current state variable.
 
         :param curr_state: current state variable, gets updated in this routine.
@@ -512,6 +514,7 @@ class TollingModel(ComSkewTolling):
         :param block_name: name of the block (e.g. 'PJMW-PEAK')
         :param fuel_prices: vector of fuel prices
         :param power_prices: vector of power prices.
+        :returns:
         """
 
         curr_state.update( { 'hours_block': block_hours
@@ -529,20 +532,20 @@ class TollingModel(ComSkewTolling):
             startup_sp_in = 0.
 
         curr_state['can_start']   = self._startup_decision(curr_state)
-        curr_state['can_shut' ]   = self._shutdown_decision(curr_state['block_name'], curr_state['hours_run'])
+        curr_state['can_shut' ]   = self._shutdown_decision(block_name, curr_state['hours_run'])
         curr_state['force_start'] = self._forced_startup(block_name, power_prices, fuel_prices)
         curr_state['force_shut']  = self._forced_shutdown(block_name, power_prices, fuel_prices)
 
-        # dispatch for a block.
-        self._block_dispatch( power_prices
-                            , fuel_prices
-                            , block_hours
-                            , startup_sp_in
-                            , curr_state
-                            , len(power_prices)  # number of simulations
-                            , cash_flows )
+        # dispatch for a block, updates both curr_state, and cash_flows
+        cash_flows, new_curr_state = self._block_dispatch( power_prices
+                                                         , fuel_prices
+                                                         , block_hours
+                                                         , startup_sp_in
+                                                         , curr_state
+                                                         , len(power_prices)  # number of simulations
+                                                         , cash_flows )
 
-        return cash_flows
+        return cash_flows, new_curr_state
 
     def dispatch_all( self
                     , tolling_start  : datetime.date
@@ -569,7 +572,6 @@ class TollingModel(ComSkewTolling):
                                                 , set_seed           = set_seed
                                                 , hours_partition    = fuel_hours_partition
                                                 , )
-                                                #, ignore_block_names = True)  # replace old partition w/ fuel partition
 
         power_processes = self.simulate_spot_blocks( [fwd_curve.fwd_name for fwd_curve in self.fwd_curves]
                                                    , nb_simulations
@@ -595,13 +597,14 @@ class TollingModel(ComSkewTolling):
                 power_block_name, block_hours, power_block_values = power_block
                 fuel_block_name , _          , fuel_block_values  = fuel_block
 
-                cash_flows = self.__dispatch_update( curr_state
-                                                   , cash_flows
-                                                   , block_hours
-                                                   , power_block_name
-                                                   , fuel_block_values
-                                                   , power_block_values
-                                                   , )
+                # cashflows and new current state, which updates the old curr_state
+                cash_flows, curr_state = self.__dispatch_update( curr_state
+                                                               , cash_flows
+                                                               , block_hours
+                                                               , power_block_name
+                                                               , fuel_block_values
+                                                               , power_block_values
+                                                               , )
                 cash_flows_cum += cash_flows
 
                 value_per_month.append( (block_hours, (power_block_name, fuel_block_name), cash_flows) )
@@ -617,7 +620,7 @@ class TollingModel(ComSkewTolling):
                         , startup_shadow_price : float
                         , curr_state           : Dict[str, Any]
                         , nb_sims              : int
-                        , cash_flows           : np.array ) -> None:
+                        , cash_flows           : np.array ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """ Dispatch in a single block, changes the current state as appropriate.
 
         :param power_prices: vector of power prices
@@ -627,19 +630,19 @@ class TollingModel(ComSkewTolling):
         :param curr_state: current state, a dictionary of various elements
         :param nb_sims: number of simulations
         :param cash_flows: cash flows to be updated in the block dispatch.
-        :returns: None, updates the cashflows and other parameters.
+        :returns: updated cash-flows, and updated current state.
         """
 
-        self._opd_f( power_prices
-                   , fuel_prices
-                   , self.tolling_params
-                   , startup_shadow_price
-                   , curr_state
-                   , { 'can_start'  : curr_state['can_start']
-                     , 'can_shut'   : curr_state['can_shut']
-                     , 'force_start': curr_state['force_start']
-                     , 'force_shut' : curr_state['force_shut']
-                     , }
-                   , block_hours
-                   , nb_sims
-                   , cash_flows )
+        return self._opd_f( power_prices
+                          , fuel_prices
+                          , self.tolling_params
+                          , startup_shadow_price
+                          , curr_state
+                          , { 'can_start'  : curr_state['can_start']
+                            , 'can_shut'   : curr_state['can_shut']
+                            , 'force_start': curr_state['force_start']
+                            , 'force_shut' : curr_state['force_shut']
+                            , }
+                          , block_hours
+                          , nb_sims
+                          , cash_flows )
