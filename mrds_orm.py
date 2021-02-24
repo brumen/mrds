@@ -6,6 +6,8 @@ import json
 
 from logging import getLogger
 from typing  import List, Callable
+from sqlalchemy     import create_engine
+from sqlalchemy.exc import OperationalError
 
 from mrds.mrds          import ComSkew
 from mrds.vols.vols     import Volatility
@@ -44,6 +46,28 @@ class ComSkewORM(ComSkew):
         super().__init__(mkt_date, fwd_curves, vol_curves, discount_curve = discount_curve, calc_date = calc_date, dcf = dcf)
 
         self.__db_session = create_session(DB)  # this is lazy evaluated
+        self.__db_engine  = create_engine(DB)
+
+        # cached db connection
+        self.__db_connection_status = None
+
+    def _check_db_connection(self) -> bool:
+        """ Check whether the connection is established.
+
+        :returns: True if connection is established, otherwise False
+        """
+
+        if self.__db_connection_status is not None:
+            return self.__db_connection_status
+
+        try:  # TODO: THIS IS KIND OF POOR HERE.
+            self.__db_engine.connect()
+            self.__db_connection_status = True
+            return True
+
+        except OperationalError as oe:
+            self.__db_connection_status = False
+            return False
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.
@@ -55,7 +79,7 @@ class ComSkewORM(ComSkew):
             return self._kappa_vec_val[asset]
 
         # check database if this is stored anywhere
-        kappa_db_results = self.__db_session.query(ComSkewLnParams).filter_by( market_date=self.mkt_date
+        kappa_db_results = [] if not self._check_db_connection() else self.__db_session.query(ComSkewLnParams).filter_by( market_date=self.mkt_date
                                                                              , commodity = asset
                                                                              , param     = 'kappa' ).all()
 
@@ -65,11 +89,13 @@ class ComSkewORM(ComSkew):
 
         # not found the value anywhere, store the value, and return it.
         res_kappa = super()._kappa_vec(asset)  # this also stores value
-        self.__db_session.add(ComSkewLnParams( commodity   = asset
-                                              , market_date = self.mkt_date
-                                              , param       = 'kappa'
-                                              , value       = json.dumps(res_kappa.tolist())))
-        self.__db_session.commit()
+        if self._check_db_connection():  # if we have a connection, write into db
+            self.__db_session.add(ComSkewLnParams( commodity   = asset
+                                                 , market_date = self.mkt_date
+                                                 , param       = 'kappa'
+                                                 , value       = json.dumps(res_kappa.tolist())))
+            self.__db_session.commit()
+
         return res_kappa
 
     def _sigma_vec(self, asset : str):
@@ -82,7 +108,7 @@ class ComSkewORM(ComSkew):
             return self._sigma_vec_val[asset]
 
         # check database if this is stored anywhere
-        sigma_db_results = self.__db_session.query(ComSkewLnParams).filter_by( market_date=self.mkt_date
+        sigma_db_results = [] if not self._check_db_connection() else self.__db_session.query(ComSkewLnParams).filter_by( market_date=self.mkt_date
                                                                                       , commodity = asset
                                                                                       , param     = 'sigma' ).all()
 
@@ -91,11 +117,13 @@ class ComSkewORM(ComSkew):
             return self._sigma_vec_val[asset]
 
         res_sigma = super()._sigma_vec(asset)
-        self.__db_session.add(ComSkewLnParams( commodity   = asset
-                                             , market_date = self.mkt_date
-                                             , param       = 'sigma'
-                                             , value       = json.dumps(res_sigma.tolist())))
-        self.__db_session.commit()
+        if self._check_db_connection():
+            self.__db_session.add(ComSkewLnParams( commodity   = asset
+                                                 , market_date = self.mkt_date
+                                                 , param       = 'sigma'
+                                                 , value       = json.dumps(res_sigma.tolist())))
+            self.__db_session.commit()
+
         return res_sigma
 
     def _factor_corr_mat_single(self, asset : str) -> np.ndarray:
@@ -108,7 +136,7 @@ class ComSkewORM(ComSkew):
             return self._rho_vec_val[asset]
 
         # check database if this is stored anywhere
-        rho_db_results = self.__db_session.query(ComSkewLnParams).filter_by( market_date = self.mkt_date
+        rho_db_results = [] if not self._check_db_connection() else self.__db_session.query(ComSkewLnParams).filter_by( market_date = self.mkt_date
                                                                            , commodity   = asset
                                                                            , param       = 'rho' ).all()
 
@@ -117,11 +145,12 @@ class ComSkewORM(ComSkew):
             return self._rho_vec_val[asset]
 
         res_rho = super()._factor_corr_mat_single(asset)  # this also caches the value
-        self.__db_session.add(ComSkewLnParams( commodity   = asset
-                                             , market_date = self.mkt_date
-                                             , param       = 'rho'
-                                             , value       = json.dumps(res_rho.tolist())))
-        self.__db_session.commit()
+        if self._check_db_connection():
+            self.__db_session.add(ComSkewLnParams( commodity   = asset
+                                                 , market_date = self.mkt_date
+                                                 , param       = 'rho'
+                                                 , value       = json.dumps(res_rho.tolist())))
+            self.__db_session.commit()
 
         return res_rho
 
@@ -133,7 +162,7 @@ class ComSkewORM(ComSkew):
         """
 
         # check db for this instance
-        C_db = self.__db_session.query(ComSkewCParams).filter_by( commodity   = asset
+        C_db = [] if not self._check_db_connection() else self.__db_session.query(ComSkewCParams).filter_by( commodity   = asset
                                                                 , market_date = self.mkt_date
                                                                 , fwd_date    = fwd_date ).all()
 
@@ -148,11 +177,13 @@ class ComSkewORM(ComSkew):
 
         # C_db is not found, call the superclass routine.
         res_c = super()._c_vec(asset, fwd_date)  # this also stores values.
-        self.__db_session.add(ComSkewCParams( commodity   = asset
-                                            , market_date = self.mkt_date
-                                            , fwd_date    = fwd_date
-                                            , value       = json.dumps(res_c.tolist())))
-        self.__db_session.commit()
+        if self._check_db_connection():
+            self.__db_session.add(ComSkewCParams( commodity   = asset
+                                                , market_date = self.mkt_date
+                                                , fwd_date    = fwd_date
+                                                , value       = json.dumps(res_c.tolist())))
+            self.__db_session.commit()
+
         return res_c
 
     def _c_vec_calibrate( self
@@ -171,8 +202,7 @@ class ComSkewORM(ComSkew):
             to_be_calibrated = fwd_dates
 
         # check which of the to_be_calibrated are in the DB
-
-        calibrated_in_db = {skew_C_obj.fwd_date: skew_C_obj.val
+        calibrated_in_db = {} if not self._check_db_connection() else {skew_C_obj.fwd_date: skew_C_obj.val
                             for skew_C_obj in self.__db_session.query(ComSkewCParams).filter_by( commodity   = asset
                                                                                                , market_date = self.mkt_date).all()}
 

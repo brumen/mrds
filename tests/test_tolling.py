@@ -42,7 +42,7 @@ class TestTolling(TestCase):
                                  , 'NG_MICHCON_GD-PEAK'
                                  , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK'] )
         tm.multi_thread_calib = False  # Multi-threading doesnt allow for pickling of ORM session
-        res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20) )
+        res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20), nb_simulations=1000 )
 
         self.assertTrue(True)
 

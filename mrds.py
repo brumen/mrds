@@ -7,8 +7,10 @@ import numpy  as np
 import scipy
 import scipy.stats
 import scipy.interpolate  # spline package
+import logging
+
 from openopt         import NLP, NSP
-from logging         import getLogger
+from logging         import getLogger, DEBUG, INFO
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
 from typing          import List, Dict, Tuple, Union, Callable
@@ -28,7 +30,9 @@ from mrds.quartic.quartic_cy  import QuadRoots, CubicRoots, QuarticRoots
 from mrds.tolling.opd.opd_avx import skew_fom
 
 
+logging.basicConfig(level=DEBUG)
 logger = getLogger(__name__)
+# logger.setLevel(DEBUG)
 
 
 class ComSkewError(Exception):
@@ -55,6 +59,8 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
     _LRU_CACHE_SIZE_CALIB = 5    # lru for number of factors.
     _BETA_T_CACHE_SIZE    = 10   # cache size for beta_t
     _C_VEC_CACHE          = 100  # cache for C vector
+
+    _MIN_OPTION_PRICE     = 1.e-8  # Minimal option price
 
     def __init__(self
                  , mkt_date       : datetime.date
@@ -231,13 +237,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         if asset not in self._C_vec:
-            logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
+            logger.info(f'Calibrating skew params for {asset} and dates: {fwd_date}')
             self._C_vec[asset] = {fwd_date: self._calibrate_skew_one_date(asset, fwd_date) }
 
             return self._C_vec[asset][fwd_date]
 
         if fwd_date not in self._C_vec[asset]:
-            logger.info('Calibrating the model for asset {0} and fwd point {1}'.format(asset, fwd_date))
+            logger.info(f'Calibrating skew params for {asset} and dates {fwd_date}')
             self._C_vec[asset][fwd_date] = self._calibrate_skew_one_date(asset, fwd_date)
 
             return self._C_vec[asset][fwd_date]
@@ -405,7 +411,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         """
 
         if mkt_corr_mtx:
-            logger.info('Market correlation between assets {0} and {1} overwritten with {2}'.format(asset_1, asset_2, mkt_corr_mtx))
+            logger.info(f'Market correlation between assets {asset_1} and {asset_2} overwritten with {mkt_corr_mtx}')
 
         mtx_to_insert = mkt_corr_mtx if mkt_corr_mtx else self.__default_factor_corr_mat(asset_1, asset_2)
 
@@ -866,11 +872,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fcm_lb   = self._factor_corr_mat_default(asset, asset, lb_ub_ind='lb')  # lower bound of the factor corr. mtx.
         fcm_ub   = self._factor_corr_mat_default(asset, asset, lb_ub_ind='ub')  # upper bound of the factor corr. mtx.
 
-        logger.info('Calibrating the log-normal part of the model for asset {0}'.format(asset))
-
         init_kappa_sigma_rho = np.concatenate([ self._kappa_default(nbf, 'init')
                                               , self._sigma_default(nbf, 'init')
                                               , np.triu(fcm_init, 1)[np.triu(fcm_init, 1) != 0] ])
+        print(f'Calibrating sigma, kappa, rho for: {asset}.')
+        logger.debug(f'Calibrating sigma, kappa, rho for: {asset}.')
+
         pr_solve = NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
                                                                                       , kappa_sigma_rho_vec[:nbf]
                                                                                       , kappa_sigma_rho_vec[nbf:(2*nbf)]
@@ -887,7 +894,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if pr_solve.isFeasible:
             return pr_solve.xf  # return solution
 
-        # proble is not feasible: TODO: FOR NOW RETURN DEFAULT VALUES
+        # problem is not feasible: TODO: FOR NOW RETURN DEFAULT VALUES
         return init_kappa_sigma_rho
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
@@ -1185,6 +1192,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         ttm_numerical = self.__difference_to_market_date(option_tenor)
         option_prices = [self._polynomial_european( asset, C_vec, fwd_date, strike, cp, ttm_numerical)
                          for strike, cp in zip(strikes, cp_ind)]
+        # if option prices are 0 -> correct to MIN_OPTION_PRICE
+        option_prices = [ option_price if option_price > 0. else self._MIN_OPTION_PRICE
+                          for option_price in option_prices]
         discount_fact = self.DF(option_tenor)
 
         return [black_vol_inverse( fwd_value
@@ -1213,16 +1223,18 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                                                         , diff_to_mkt_date)
                                  for delta in deltas_used ])
 
+        logger.debug(f'Calibrating {asset} for date {fwd_date}.')
+        print(f'Calibrating {asset} for date {fwd_date}.')
+        initial_guess = np.array([1., 0., 0.])
         c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
-                       , np.array([1., 0., 0.]))\
+                       , initial_guess)\
                        .solve(self.__class__.NLP_SOLVER)
-        # except Exception as e:
-        #     raise ComSkewError('Error in finding skew parameters, method _calibrate_skew_one_date: {0}'.format(str(e)))
 
-        # TODO: FIX THIS HERE!!!
-        # logger.info('Finding skew parameters did not finish properly: {0}'.format(c_vec_sol.msg))
+        if c_vec_sol.isFeasible:
+            return c_vec_sol.xf
 
-        return c_vec_sol.xf  # return whatever you get back
+        # solution not feasible  # TODO: MAYBE THERE IS SOMETHING MORE TO DO HERE
+        return initial_guess
 
     def _calibrate_skew_dates( self
                              , asset     : str
