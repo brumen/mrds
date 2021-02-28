@@ -772,10 +772,9 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         :param asset: asset number (e.g. 'WTI')
         :param fwd_date: forward date
-        :returns: black volatility for the model TODO: REWRITE THESE DESCRIPTIONS
+        :returns: black volatility for the model for forward point fwd_date and asset asset.
         """
 
-        # TODO: SWITCH THESE TWO STATEMENTS
         # return self.black_vol(asset
         #                       , self._kappa_vec(asset)
         #                       , self._sigma_vec(asset)
@@ -1066,7 +1065,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param A_V: array of A0, A1, A2, A3, A4, V
         :param call_put_ind: indicator for call (1) or put (-1)
         :param strike: option strike.
-        :returns: integrated option value for TODO: COMPLETE HERE.
+        :returns: value of the option for the parameters given in A_V.
         """
 
         from scipy.integrate import quad
@@ -1187,7 +1186,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
         cp_ind    = np.array([1 if strike >= fwd_value else -1 for strike in strikes])
 
-        # TODO: check if self.__difference_to ... is the correct parameter.
         option_tenor  = self.__option_tenor_for_fwd_tenor(asset, fwd_date)  # option tenor corresponding to fwd_date
         ttm_numerical = self.__difference_to_market_date(option_tenor)
         option_prices = [self._polynomial_european( asset, C_vec, fwd_date, strike, cp, ttm_numerical)
@@ -1373,8 +1371,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         for com_curve in assets:
             com_fwd_curve = self.fwd_curve_names(com_curve)
-            # TODO: CHANGE THIS TO MAKE IT A PANDAS DATA STRUCTURE - SO MUCH NICER!!!
-            simulated_curves[com_curve] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))  #  if not cuda_ind else
+            simulated_curves[com_curve] = np.empty((len(simulation_times), len(tenor_list), nb_simulations))
             fwd_c_col[com_curve] = com_fwd_curve.fwd_value(tenor_list)
             simulated_curves[com_curve][0, :, :] = np.array(fwd_c_col[com_curve]).reshape((len(tenor_list), 1))
 
@@ -1487,7 +1484,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         :param assets: assets for which to generate first nearby.
         :param nb_simulations: number of simulations to simulate.
-        :param simulation_times: times when to simulate curves, if None TODO: WHAT THEN???
+        :param simulation_times: times when to simulate curves
         :param set_seed: set the seed for simulations.
         """
 
@@ -1544,11 +1541,11 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         :param assets: assets for which to generate first nearby.
         :param nb_simulations: number of simulations to simulate.
-        :param simulation_times: times when to simulate curves, if None TODO: WHAT THEN???
+        :param simulation_times: times when to simulate curves
         :param set_seed: set the seed for simulations.
         """
 
-    @lru_cache(maxsize=20)  # TODO: THIS IS NOT RIGHT HERE!!!
+    @lru_cache(maxsize=MAX_ASSETS)
     def __factor_positions(self, asset : str) -> slice:
         """ Returns factor positions in a matrix for asset.
 

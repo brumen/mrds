@@ -441,6 +441,7 @@ class TollingModel(ComSkewTolling):
              , 'state'         : False  # power plant not running
              , 'hours_in_state': 0
              , 'global_starts' : 0
+             , 'startup_sp'    : 0.  # TODO: CHECK THIS - INITIAL SHADOW PRICE
              , }
 
         if dispatch_mode == 'cmg' or dispatch_mode == 'mrg':
@@ -498,6 +499,25 @@ class TollingModel(ComSkewTolling):
 
         return opd_1fuel.opd_1fuel if not self.cuda_ind else opd_1fuel_cu.opd_kernel
 
+    def __compute_shadow_cost(self, fuel_prices : np.ndarray, power_prices : np.ndarray) -> np.ndarray:
+        """ Computes the shadow cost for the model.
+
+        :param fuel_prices: vector of fuel prices.
+        :param power_prices: vector of power prices.
+        :returns:
+        """
+
+        tp = self.tolling_params
+
+        if self.dispatch_mode == 'cmg':
+            start_cost_init = tp['fixedStartupCostCold'] + \
+                              tp['startFuel'] * (fuel_prices + tp['addFuelCost']) - \
+                              tp['hrAtMax'] * power_prices  # TODO: hrAtMax is NOT CORRECT HERE
+            # startup shadow prices
+            return start_cost_init / (tp['maxCap'] * tp['startupHorizon'])
+
+        return 0.
+
     def __dispatch_update( self
                          , curr_state   : Dict[str, Any]
                          , cash_flows   : np.array
@@ -522,15 +542,7 @@ class TollingModel(ComSkewTolling):
 
         tp = self.tolling_params  # abbreviation
 
-        if self.dispatch_mode == 'cmg':
-            start_cost_init = tp['fixedStartupCostCold'] + \
-                              tp['startFuel'] * (fuel_prices + tp['addFuelCost']) - \
-                              tp['hrAtMax'] * power_prices  # TODO: hrAtMax is NOT CORRECT HERE
-            # startup shadow prices
-            startup_sp_in = start_cost_init / (tp['maxCap'] * tp['startupHorizon'])
-        else:
-            startup_sp_in = 0.
-
+        curr_state['startup_sp']  = self.__compute_shadow_cost(fuel_prices, power_prices)
         curr_state['can_start']   = self._startup_decision(curr_state)
         curr_state['can_shut' ]   = self._shutdown_decision(block_name, curr_state['hours_run'])
         curr_state['force_start'] = self._forced_startup(block_name, power_prices, fuel_prices)
@@ -540,7 +552,6 @@ class TollingModel(ComSkewTolling):
         cash_flows, new_curr_state = self._block_dispatch( power_prices
                                                          , fuel_prices
                                                          , block_hours
-                                                         , startup_sp_in
                                                          , curr_state
                                                          , len(power_prices)  # number of simulations
                                                          , cash_flows )
@@ -583,14 +594,15 @@ class TollingModel(ComSkewTolling):
 
         dispatch_per_month = {}
         np_gpa = gpa if self.cuda_ind else np
+        cash_flows = np_gpa.empty(nb_simulations)  # cash flow per path
 
-        cash_flows     = np_gpa.empty(nb_simulations)  # cash flow per path
-        cash_flows_cum = np_gpa.zeros(nb_simulations)  # cumulative cash flows
         curr_state = self._set_initial_current_state(nb_simulations)
 
         for date_month in dates_months:  # date_month - beginning of that month
             fuel_process_month  = fuel_process[date_month]  # (list of (block_name, block_hours, block_sims)
             power_process_month = power_processes[date_month]  # same here
+
+            cash_flows_cum = np_gpa.zeros(nb_simulations)  # cumulative cash flows
 
             value_per_month = []
             for power_block, fuel_block in zip(power_process_month, fuel_process_month):
@@ -617,7 +629,6 @@ class TollingModel(ComSkewTolling):
                         , power_prices         : Union[np.ndarray, gpa.GPUArray]
                         , fuel_prices          : Union[np.ndarray, gpa.GPUArray]
                         , block_hours          : int
-                        , startup_shadow_price : float
                         , curr_state           : Dict[str, Any]
                         , nb_sims              : int
                         , cash_flows           : np.array ) -> Tuple[np.ndarray, Dict[str, Any]]:
@@ -626,7 +637,6 @@ class TollingModel(ComSkewTolling):
         :param power_prices: vector of power prices
         :param fuel_prices: vector of fuel prices.
         :param block_hours: number of hours in the current block
-        :param startup_shadow_price: vector of startup shadow prices.
         :param curr_state: current state, a dictionary of various elements
         :param nb_sims: number of simulations
         :param cash_flows: cash flows to be updated in the block dispatch.
@@ -636,7 +646,6 @@ class TollingModel(ComSkewTolling):
         return self._opd_f( power_prices
                           , fuel_prices
                           , self.tolling_params
-                          , startup_shadow_price
                           , curr_state
                           , { 'can_start'  : curr_state['can_start']
                             , 'can_shut'   : curr_state['can_shut']
