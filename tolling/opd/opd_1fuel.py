@@ -5,10 +5,20 @@
 import numpy as np
 
 from typing import Any, Dict, Union
+from enum   import Enum
 
-from mrds.tolling.opd import opd_avx
+from mrds.tolling.opd     import opd_avx
 
 SMALL_EPS = 1e-5
+
+
+class TollingState(Enum):
+    """ State that the power plant can be in.
+    """
+
+    NOT_RUNNING  = 1
+    MIN_DISPATCH = 2
+    MAX_DISPATCH = 3
 
 
 def invert_bool(x : Union[np.ndarray, bool]) -> Union[np.ndarray, bool]:
@@ -21,6 +31,38 @@ def invert_bool(x : Union[np.ndarray, bool]) -> Union[np.ndarray, bool]:
 
     # here x is of bool type
     return not x
+
+
+def starts_indicator(curr_state : np.array, new_state : np.array) -> np.array:
+    """
+
+    """
+
+    return (curr_state == TollingState.NOT_RUNNING) & (
+                (new_state == TollingState.MAX_DISPATCH) | (new_state == TollingState.MIN_DISPATCH))
+
+
+def shuts_indicator(curr_state: np.array, new_state: np.array) -> np.array:
+    """ Indicator if the power plant was shutdown.
+
+    :param curr_state: array of current states.
+    :param new_state: array of new states.
+    :returns: array of states if the power plant
+    """
+
+    return ((curr_state == TollingState.MAX_DISPATCH) | (curr_state == TollingState.MIN_DISPATCH)) & (new_state == TollingState.NOT_RUNNING)
+
+
+def still_running_indicator(curr_state: np.array, new_state: np.array) -> np.array:
+    """ Indicator if the power plant was shutdown.
+
+    :param curr_state: array of current states.
+    :param new_state: array of new states.
+    :returns: array of states if the power plant
+    """
+
+    return ( (curr_state == TollingState.MIN_DISPATCH) | (curr_state == TollingState.MAX_DISPATCH)) & \
+           ( (new_state == TollingState.MIN_DISPATCH) | (new_state == TollingState.MAX_DISPATCH))
 
 
 def opd_1fuel(power_prices     : np.ndarray
@@ -69,7 +111,7 @@ def opd_1fuel(power_prices     : np.ndarray
     ramp_down_horizon = tolling_params['rampDownHorizon']
 
     # what kind of state the power plant is in - 0 (not running), or 1 (running)
-    state_state = curr_state['state']  # bool type
+    state_state = curr_state['state']  # np.array[dtype=TollingState]
 
     # marginal cost at max
     optimal_marginal_cost_at_max = (fuel_prices + add_fuel_cost) * hr_at_max + VC
@@ -92,34 +134,35 @@ def opd_1fuel(power_prices     : np.ndarray
                                           , )
 
     # startup shadow price
-    startup_sp = fixed_and_fuel_startup_cost / (startup_horizon * max_cap) #  TODO: CHECK IF THIS MAKES SENSE
+    startup_sp = fixed_and_fuel_startup_cost / (startup_horizon * max_cap)  # Startup shadow price TODO: CHECK IF THIS MAKES SENSE
     is_startup_profitable = power_prices - optimal_marginal_cost_at_max - startup_sp > 0.
-
-    # is_startup_profitable = startup_profit_v
-    #do_startup = curr_decision['can_start'] & ((curr_decision['force_start'] == 2) |
-    #                                           (is_startup_profitable & (curr_decision['force_start'] == 1)))
     do_startup = curr_decision['can_start'] & ( curr_decision['force_start'] | is_startup_profitable )
 
     # compute shutdown
-    # actual_gen_profit = run_at_min_index * (power_prices - optimal_marginal_cost_at_min) * min_disp + \
-    #                    not_run_at_min_index * (power_prices - optimal_marginal_cost_at_max) * max_cap
     actual_gen_profit = np.where( run_at_min_index
                                 , (power_prices - optimal_marginal_cost_at_min) * min_disp
                                 , (power_prices - optimal_marginal_cost_at_max) * max_cap )
     shutdown_gen_profit = shutdown_horizon * actual_gen_profit
     shut_cost_sp = shutdown_horizon * shutdown_sp_in * max_cap
     is_shutdown_profitable = shutdown_gen_profit < - (fixed_and_fuel_startup_cost + shut_cost_sp)  # TODO: THIS IS WRONG
-    #do_shutdown = curr_decision['can_shut'] & ((curr_decision['force_shut'] == 2) |
-    #                                           (is_shutdown_profitable & (curr_decision['force_shut'] == 1)))
     do_shutdown = curr_decision['can_shut'] & ( curr_decision['force_shut'] | is_shutdown_profitable )
-    # compute dispatch
-    not_state_state = invert_bool(state_state)
-    # new_state       = (state_state & (~do_shutdown)) | (not_state_state & do_startup)
-    new_state = np.where(state_state, invert_bool(do_shutdown), do_startup)
+
+    # compute new state
+    new_state = np.where( (state_state == TollingState.NOT_RUNNING) & do_startup
+                        , TollingState.MAX_DISPATCH
+                        , np.where( (state_state == TollingState.MAX_DISPATCH) & do_shutdown
+                                  , TollingState.NOT_RUNNING
+                                  , state_state)
+                        )  # remain in the same state
 
     # accounting (- on curr_state is because curr_state is -1)
     # curr_generation = new_state * (max_cap * not_run_at_min_index + run_at_min_index * min_disp)
-    curr_generation = new_state * np.where(run_at_min_index, min_disp, max_cap)
+    curr_generation = np.where( new_state == TollingState.NOT_RUNNING
+                              , 0.
+                              , np.where( new_state == TollingState.MAX_DISPATCH
+                                        , max_cap
+                                        , min_disp ) )
+    # curr_generation = new_state * np.where(run_at_min_index, min_disp, max_cap)
     generation_change = curr_generation - curr_state['generation']
     # ramping_adjustment = (0.5 / (ramp_rate * hours_in_block)) * np.abs(generation_change) * generation_change
     ramping_adjustment = 0.  # TODO: THIS IS WRONG CHECK HERE
@@ -131,20 +174,16 @@ def opd_1fuel(power_prices     : np.ndarray
     # actual_heat_rate = np.where(run_at_min_index, hr_at_min, hr_at_max)
     fuel_cost = curr_energy * (fuel_prices + add_fuel_cost) * np.where(run_at_min_index, hr_at_min, hr_at_max)  # last expression is actual heat rate
 
-    not_new_state = invert_bool(new_state)
-    starts = new_state & not_state_state  # curr_state > state_state
-    shuts = not_new_state & state_state
+    # new starts and new shutdowns.
+    starts = starts_indicator(state_state, new_state)
+    shuts = shuts_indicator(state_state, new_state)
 
-    # startup_cost = (is_cold_start & starts) * (fixed_startup_cost_cold + fuel_prices * start_fuel_cold) + \
-    #                (is_not_cold_start & starts) * (fixed_startup_cost + fuel_prices * start_fuel)
     startup_cost = np.where( starts
                            , np.where( is_cold_start
                                      , fixed_startup_cost_cold + fuel_prices * start_fuel_cold
                                      , fixed_startup_cost + fuel_prices * start_fuel )
                            , 0 )
 
-    # ramp_cost = ((~starts) & (generation_change > SMALL_EPS  )) * ramp_up_cost + \
-    #             ((~shuts ) & (generation_change < - SMALL_EPS)) * ramp_down_cost
     ramp_cost = np.where( invert_bool(starts) & (generation_change > SMALL_EPS  )
                         , ramp_up_cost
                         , np.where( invert_bool(shuts) & (generation_change < - SMALL_EPS)
@@ -161,10 +200,12 @@ def opd_1fuel(power_prices     : np.ndarray
                                             , hours_in_block )
     curr_state['generation']      = curr_generation
     curr_state['total_starts']   += starts
-    # curr_state['hours_shut']      = not_new_state * (curr_state['hours_shut'] + hours_in_block)
-    curr_state['hours_shut']      = np.where(not_new_state, curr_state['hours_shut'] + hours_in_block, 0)
-    # curr_state['hours_run']       = new_state * (curr_state['hours_run'] + hours_in_block)
-    curr_state['hours_run']       = np.where(new_state, curr_state['hours_run'] + hours_in_block, 0)
+    curr_state['hours_shut']      = np.where( (new_state == TollingState.NOT_RUNNING) & (state_state == TollingState.NOT_RUNNING)
+                                            , curr_state['hours_shut'] + hours_in_block
+                                            , 0 )
+    curr_state['hours_run']       = np.where( still_running_indicator(state_state, new_state)
+                                            , curr_state['hours_run'] + hours_in_block
+                                            , 0 )
     curr_state['global_starts']  += starts
     curr_state['state']           = new_state
 

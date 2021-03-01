@@ -1,12 +1,13 @@
 # Tolling model
 import mrds.config
 
-from typing import List, Tuple, Union, Dict, Callable, Optional, Any
-
 import datetime
 import numpy as np
 
+from typing import List, Tuple, Union, Dict, Callable, Optional, Any
+
 from mrds.tolling.opd              import opd_1fuel, opd_1fuel_cu
+from mrds.tolling.opd.opd_1fuel    import TollingState
 from mrds.tolling.com_skew_tolling import ComSkewTolling
 from mrds.tolling.default_tolling  import tolling_params_default
 from mrds.forward_curve            import FwdCurve
@@ -438,7 +439,7 @@ class TollingModel(ComSkewTolling):
              , 'hours_shut'    : 1000  # large number
              , 'hours_run'     : 0
              , 'df'            : 1.
-             , 'state'         : False  # power plant not running
+             , 'state'         : TollingState.NOT_RUNNING
              , 'hours_in_state': 0
              , 'global_starts' : 0
              , 'startup_sp'    : 0.  # TODO: CHECK THIS - INITIAL SHADOW PRICE
