@@ -24,6 +24,7 @@ class TollingState(Enum):
 def invert_bool(x : Union[np.ndarray, bool]) -> Union[np.ndarray, bool]:
     """ Invert a bool vector or variable.
 
+    :param x: initial bool array
     """
 
     if isinstance(x, np.ndarray):
@@ -34,8 +35,11 @@ def invert_bool(x : Union[np.ndarray, bool]) -> Union[np.ndarray, bool]:
 
 
 def starts_indicator(curr_state : np.array, new_state : np.array) -> np.array:
-    """
+    """ Indicator function of when the power plant starts.
 
+    :param curr_state:
+    :param new_state:
+    :returns: array of bools of whether the start occured or not.
     """
 
     return (curr_state == TollingState.NOT_RUNNING) & (
@@ -65,14 +69,14 @@ def still_running_indicator(curr_state: np.array, new_state: np.array) -> np.arr
            ( (new_state == TollingState.MIN_DISPATCH) | (new_state == TollingState.MAX_DISPATCH))
 
 
-def opd_1fuel(power_prices     : np.ndarray
-              , fuel_prices    : np.ndarray
-              , tolling_params : Dict[str, Any]
-              , curr_state
-              , curr_decision
-              , hours_in_block : int
-              , nb_paths       : int
-              , cashflow       : np.ndarray ):
+def opd_1fuel( power_prices   : np.ndarray
+             , fuel_prices    : np.ndarray
+             , tolling_params : Dict[str, Any]
+             , curr_state     : Dict[str, Any]
+             , curr_decision  : Dict[str, np.ndarray]
+             , hours_in_block : int
+             , nb_paths       : int):
+             # , cashflow       : np.ndarray ):
     """ Computes one block tolling optimization.
 
     :param power_prices: power prices
@@ -110,7 +114,7 @@ def opd_1fuel(power_prices     : np.ndarray
     ramp_up_horizon  = tolling_params['rampUpHorizon']
     ramp_down_horizon = tolling_params['rampDownHorizon']
 
-    # what kind of state the power plant is in - 0 (not running), or 1 (running)
+    # what kind of state the power plant is in, type = TollingState
     state_state = curr_state['state']  # np.array[dtype=TollingState]
 
     # marginal cost at max
@@ -122,6 +126,7 @@ def opd_1fuel(power_prices     : np.ndarray
     ramp_up_to_max_cost = generation_smaller_maxcap * (ramp_up_sp_in + ramp_up_cost / (max_cap * ramp_up_horizon))
     generation_larger_mindisp = curr_state['generation'] > min_disp
     ramp_down_to_min_cost = generation_larger_mindisp * (ramp_down_sp_in + ramp_down_cost / (min_disp * ramp_down_horizon))
+    # run_at_min_index = whether it's better to run at minimum dispatch, than at maximum dispatch np.array[bool]
     run_at_min_index = max_cap * (power_prices - optimal_marginal_cost_at_max - ramp_up_to_max_cost) < \
                        min_disp * (power_prices - optimal_marginal_cost_at_min - ramp_down_to_min_cost)
 
@@ -155,28 +160,23 @@ def opd_1fuel(power_prices     : np.ndarray
                                   , state_state)
                         )  # remain in the same state
 
-    # accounting (- on curr_state is because curr_state is -1)
-    # curr_generation = new_state * (max_cap * not_run_at_min_index + run_at_min_index * min_disp)
+    # Generation accounting
     curr_generation = np.where( new_state == TollingState.NOT_RUNNING
                               , 0.
                               , np.where( new_state == TollingState.MAX_DISPATCH
                                         , max_cap
                                         , min_disp ) )
-    # curr_generation = new_state * np.where(run_at_min_index, min_disp, max_cap)
     generation_change = curr_generation - curr_state['generation']
     # ramping_adjustment = (0.5 / (ramp_rate * hours_in_block)) * np.abs(generation_change) * generation_change
     ramping_adjustment = 0.  # TODO: THIS IS WRONG CHECK HERE
     curr_generation -= ramping_adjustment
     curr_energy = curr_generation * hours_in_block
     revenue = curr_energy * power_prices
-    # variable_cost = VC * curr_energy
-    # actual_heat_rate = run_at_min_index * hr_at_min + not_run_at_min_index * hr_at_max
-    # actual_heat_rate = np.where(run_at_min_index, hr_at_min, hr_at_max)
-    fuel_cost = curr_energy * (fuel_prices + add_fuel_cost) * np.where(run_at_min_index, hr_at_min, hr_at_max)  # last expression is actual heat rate
+    fuel_cost = curr_energy * (fuel_prices + add_fuel_cost) * np.where(run_at_min_index, hr_at_min, hr_at_max)
 
     # new starts and new shutdowns.
     starts = starts_indicator(state_state, new_state)
-    shuts = shuts_indicator(state_state, new_state)
+    shuts  = shuts_indicator (state_state, new_state)
 
     startup_cost = np.where( starts
                            , np.where( is_cold_start
@@ -191,10 +191,10 @@ def opd_1fuel(power_prices     : np.ndarray
                                   , 0. ) )
 
     # cashflow = revenue - (totalCost = fuel_cost + (variable_cost = VC * curr_energy) + startup_cost + ramp_cost)
+    cashflow = np.empty(len(revenue), dtype=float)
     opd_avx.add4(revenue, fuel_cost, VC * curr_energy, startup_cost, ramp_cost, cashflow, nb_paths)
 
     # new unit state
-    # curr_state['hours_in_state']  = curr_state['hours_in_state'] * (~state_change) + hours_in_block
     curr_state['hours_in_state']  = np.where( new_state == state_state  # no state change
                                             , curr_state['hours_in_state'] + hours_in_block
                                             , hours_in_block )

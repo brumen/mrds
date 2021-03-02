@@ -521,7 +521,6 @@ class TollingModel(ComSkewTolling):
 
     def __dispatch_update( self
                          , curr_state   : Dict[str, Any]
-                         , cash_flows   : np.array
                          , block_hours  : int
                          , block_name   : str
                          , fuel_prices  : np.array
@@ -554,8 +553,8 @@ class TollingModel(ComSkewTolling):
                                                          , fuel_prices
                                                          , block_hours
                                                          , curr_state
-                                                         , len(power_prices)  # number of simulations
-                                                         , cash_flows )
+                                                         , len(power_prices))   # number of simulations
+
 
         return cash_flows, new_curr_state
 
@@ -612,14 +611,13 @@ class TollingModel(ComSkewTolling):
 
                 # cashflows and new current state, which updates the old curr_state
                 cash_flows, curr_state = self.__dispatch_update( curr_state
-                                                               , cash_flows
                                                                , block_hours
                                                                , power_block_name
                                                                , fuel_block_values
                                                                , power_block_values
                                                                , )
                 cash_flows_cum += cash_flows
-
+                # TODO: REMOVE per-block cash flows when this works.
                 value_per_month.append( (block_hours, (power_block_name, fuel_block_name), cash_flows) )
 
             dispatch_per_month[date_month] = (cash_flows_cum, value_per_month)
@@ -631,8 +629,7 @@ class TollingModel(ComSkewTolling):
                         , fuel_prices          : Union[np.ndarray, gpa.GPUArray]
                         , block_hours          : int
                         , curr_state           : Dict[str, Any]
-                        , nb_sims              : int
-                        , cash_flows           : np.array ) -> Tuple[np.ndarray, Dict[str, Any]]:
+                        , nb_sims              : int) -> Tuple[np.ndarray, Dict[str, Any]]:
         """ Dispatch in a single block, changes the current state as appropriate.
 
         :param power_prices: vector of power prices
@@ -640,7 +637,6 @@ class TollingModel(ComSkewTolling):
         :param block_hours: number of hours in the current block
         :param curr_state: current state, a dictionary of various elements
         :param nb_sims: number of simulations
-        :param cash_flows: cash flows to be updated in the block dispatch.
         :returns: updated cash-flows, and updated current state.
         """
 
@@ -654,5 +650,4 @@ class TollingModel(ComSkewTolling):
                             , 'force_shut' : curr_state['force_shut']
                             , }
                           , block_hours
-                          , nb_sims
-                          , cash_flows )
+                          , nb_sims )
