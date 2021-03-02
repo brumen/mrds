@@ -7,7 +7,7 @@ from sqlalchemy                 import ( Column
                                        , Date
                                        , BigInteger
                                        , Enum
-                                       , LargeBinary
+                                       # , LargeBinary  # this is used if pickle.dumps is used
                                        , JSON
                                        , )
 from sqlalchemy.ext.declarative import declarative_base
