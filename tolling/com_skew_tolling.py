@@ -268,7 +268,7 @@ class ComSkewTolling(ComSkewORM):
                             , set_seed      = None
                             , hours_partition = None
                             , ignore_block_names : bool = False  ) -> Dict[datetime.date, List[Tuple[str, int, np.array]]]:
-        """ Same as simulate_spot_blocks, but for all blocks. TODO: DESCRIBE THIS BETTER
+        """ Same as simulate_spot_blocks, but for all blocks. This is a GENERATOR.
 
         :param assets: list of assets to which asset to simulate block prices for.
         :param nb_simulations: number of simulations.
@@ -282,13 +282,16 @@ class ComSkewTolling(ComSkewORM):
                             block.
         """
 
+        import time
+
         # fom_sims type is: {date: {asset: sims}}
         fom_sims = self.simulate_1nb( assets
                                     , nb_simulations
                                     , self.__class__._create_first_of_months(tolling_start, tolling_end)
                                     , set_seed = set_seed )
 
-        spot_sims = {}
+        #
+        # spot_sims = {}
         for sim_date, sim_info in fom_sims.items():  # sim_info = {'asset': simulations}
             all_assets = list(sim_info.keys())  # keys is a generator
 
@@ -313,9 +316,10 @@ class ComSkewTolling(ComSkewORM):
                                  , block_hours
                                  , curr_asset_values[:, all_assets.index(block_name)  ]) )  # if not ignore_block_names else 0
 
-            spot_sims[sim_date] = spot_sim
+            yield sim_date, spot_sim
+            # spot_sims[sim_date] = spot_sim
 
-        return spot_sims
+        # return spot_sims
 
 
 class ComSkewTollingCuda(ComSkewTolling):

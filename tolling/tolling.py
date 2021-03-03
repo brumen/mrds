@@ -597,15 +597,17 @@ class TollingModel(ComSkewTolling):
                                                    , tolling_end
                                                    , set_seed = set_seed )
 
-        dates_months = list(fuel_process.keys())  # same as power_process.keys()
+        # dates_months = list(fuel_process.keys())  # same as power_process.keys()
 
         dispatch_per_month = {}
         np_gpa     = gpa if self.cuda_ind else np
         curr_state = self._set_initial_current_state(nb_simulations)
 
-        for date_month in dates_months:  # date_month - beginning of that month
-            fuel_process_month  = fuel_process[date_month]  # (list of (block_name, block_hours, block_sims)
-            power_process_month = power_processes[date_month]  # same here
+        # for date_month in dates_months:  # date_month - beginning of that month
+        for (date_month_fuel, fuel_process_month), (date_month_power, power_process_month) in zip(fuel_process, power_processes):  # date_month - beginning of that month
+            assert date_month_fuel == date_month_power, f'Start dates for power and fuel month are different: {date_month_power, date_month_fuel}'
+            # fuel_process_month  = fuel_process[date_month]  # (list of (block_name, block_hours, block_sims)
+            # power_process_month = power_processes[date_month]  # same here
 
             cash_flows_cum = np_gpa.zeros(nb_simulations)  # cumulative cash flows
 
@@ -625,7 +627,7 @@ class TollingModel(ComSkewTolling):
                 # TODO: REMOVE per-block cash flows when this works.
                 value_per_month.append( (block_hours, (power_block_name, fuel_block_name), cash_flows) )
 
-            dispatch_per_month[date_month] = (cash_flows_cum, value_per_month)
+            dispatch_per_month[date_month_fuel] = (cash_flows_cum, value_per_month)
 
         return dispatch_per_month
 

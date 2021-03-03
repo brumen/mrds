@@ -1494,6 +1494,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # 1 - st dimension: simulation times
         # 2 - nd dimension: forward date
         # 3 - rd dimension: repeats of the curve
+        print(f'ASSERTS: {assets}, {simulation_times}')
         simulated_curves = self.simulate_curves( assets
                                                , nb_simulations
                                                , simulation_times
