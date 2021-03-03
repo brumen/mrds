@@ -43,7 +43,12 @@ class ComSkewORM(ComSkew):
         :param dcf: day-count factor for computing numerical dates from actual.
         """
 
-        super().__init__(mkt_date, fwd_curves, vol_curves, discount_curve = discount_curve, calc_date = calc_date, dcf = dcf)
+        super().__init__( mkt_date
+                        , fwd_curves
+                        , vol_curves
+                        , discount_curve = discount_curve
+                        , calc_date      = calc_date
+                        , dcf            = dcf )
 
         self.__db_session = create_session(DB)  # this is lazy evaluated
         self.__db_engine  = create_engine(DB)
@@ -58,12 +63,10 @@ class ComSkewORM(ComSkew):
 
         try:
             self.__db_engine.connect()
-            # self.__db_connection_status = True
 
         except OperationalError as oe:  # connection fail
-            # self.__db_connection_status = False
-            logger.warning(f'Connection to {DB} failed.')
-            return False
+            logger.warning(f'Connection to {DB} failed: {str(oe)}')
+            return False  # connection failure
 
         return True  # connection success
 

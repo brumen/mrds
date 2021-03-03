@@ -242,7 +242,13 @@ class TollingModel(ComSkewTolling):
         cnd_2 = block_name == 'peak'
         cnd_3 = hours_shut >= tp['minDownTime']
 
-        return cnd_1 & cnd_2 & cnd_3 if not self.cuda_ind else cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
+        if not self.cuda_ind:
+            return cnd_1 & cnd_2 & cnd_3
+
+        # cuda section
+        return gpa.minimum(gpa.minimum(cnd_1, cnd_2), cnd_3)
+        # TODO: better version of the above.
+        # cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
 
     def _offpeak_only_startup( self
                              , total_starts : Union[int, np.ndarray]
@@ -262,7 +268,12 @@ class TollingModel(ComSkewTolling):
         cnd_2 = block_name != 'peak'
         cnd_3 = hours_shut >= tp['minDownTime']
 
-        return cnd_1 & cnd_2 & cnd_3 if not self.cuda_ind else cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
+        if not self.cuda_ind:
+            return cnd_1 & cnd_2 & cnd_3
+
+        # Cuda version
+        return gpa.minimum(gpa.minimum(cnd_1, cnd_2), cnd_3)
+        # return cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
 
     def _startup_decision(self, cs):
         """ Decision whether to start up, depending on the dispatch method.
@@ -356,6 +367,7 @@ class TollingModel(ComSkewTolling):
         if not self.cuda_ind:
             return cnd_2 & cnd_3  # cs['can_shut']
 
+        # cuda version
         return cuda_ops.min_int_two(cnd_2, cnd_3, cs['can_shut'])  # TODO: that's wrong - FIX THIS HERE
 
     def _shutdown_decision(self, block_name : str, hours_run : int) -> Union[bool, np.ndarray]:
