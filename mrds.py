@@ -716,21 +716,27 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                         , t_0      : float
                         , t_1      : float):
         """  Computes cross integrated vol. V between factors factor_1 and factor_2.
+             Integrate between t_0 and t_1 for forward dates fwd_date_1, fwd_date_2.
 
         :param asset: asset to consider (e.g. 'WTI')
         :param factor_1: first factor to consider (0, 1,...)
         :param factor_2: second factor to consider (0,1,...)
         :param fwd_date_1: forward date_1
         :param fwd_date_2: forward date 2
-        :param t_0: integrated volatility start time (float)
-        :param t_1: integrated vol end time (float)
+        :param t_0: integrated volatility start time (float) t_0 < t_1
+        :param t_1: integrated vol end time (float); t_1 > t_0
         """
 
-        kappa_1  = self._kappa_vec(asset)[factor_1]
-        kappa_2  = self._kappa_vec(asset)[factor_2]
+        assert t_0 <= t_1, f'Integration times {t_0} and {t_1} are not ordered.'
+
+        kv = self._kappa_vec(asset)
+        sv = self._sigma_vec(asset)
+
+        kappa_1  = kv[factor_1]
+        kappa_2  = kv[factor_2]
         kappa_12 = kappa_1 + kappa_2
-        sigma_1  = self._sigma_vec(asset)[factor_1]
-        sigma_2  = self._sigma_vec(asset)[factor_2]
+        sigma_1  = sv[factor_1]
+        sigma_2  = sv[factor_2]
         rho_12   = self._factor_corr_mat(asset, asset)[factor_1, factor_2]
         beta_1   = self._beta_T(asset, [fwd_date_1])[0]  # one forward date
         beta_2   = self._beta_T(asset, [fwd_date_2])[0]
@@ -738,11 +744,16 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         if kappa_12 == 0.:
             return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 * (t_1 - t_0)
 
-        T_2 = 2.  # TODO: THIS IS BOGUS, DONT KNOW WHAT TO INSERT HERE
+        T_0 = self.__difference_to_market_date(fwd_date_1)
+        T_1 = self.__difference_to_market_date(fwd_date_2)
 
-        return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 / kappa_12 * \
-               (np.exp(-kappa_1 * (self.__difference_to_market_date(fwd_date_1) - t_1) - kappa_2 * (T_2-t_1)) -
-                np.exp(-kappa_1 * (self.__difference_to_market_date(fwd_date_2) - t_0) - kappa_2 * (T_2-t_0)))
+        if t_0 > T_0:
+            return 0.
+
+        # t_0 < T_0
+        # integrate two functions either until T_1 or t_1
+        return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 / kappa_12 * np.exp(-kappa_1 * T_0 - kappa_2 * T_1) * \
+               ( np.exp(kappa_12 * min(T_1, t_1)) - np.exp(kappa_12 * t_0) )
 
     def black_vol(self
                   , asset       : str
@@ -851,17 +862,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return sum([(market_vol_elt - model_vol_elt)**2
                     for market_vol_elt, model_vol_elt in zip(market_vol, model_vol)])
 
-    def __convert_rho_vec_into_matrix(self, rho_vec :np.array) -> np.array:
-        """ Converts the vector rho_vec into a symmetric matrix rho, which can be used as a correlation matrix.
-
-        """
-
     @lru_cache(maxsize=MAX_ASSETS)
-    def _kappa_sigma_rho(self, asset : str) -> Tuple[np.array, np.array, np.array]:
+    def _kappa_sigma_rho(self, asset : str) -> np.ndarray:
         """ Calibrates kappa and sigma and rho parameters of the log-normal part of the model.
 
         :param asset: asset to be calibrated
-        :returns: tuple of calibrated kappa, sigma and correlation. kappa, sigma are vectors, rho is a matrix (upper triangular).
+        :returns: vector of calibrated kappa, sigma and correlation. kappa, sigma are vectors,
+                  rho is a matrix (upper triangular).
         """
 
         nbf = self.nb_factors_for_asset(asset)
@@ -1320,24 +1327,26 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         return self.__complete_corr_mtx
 
     def _var_covar_mtx( self
-                      , asset_nb : str
-                      , fwd_idx
-                      , i  : int
-                      , j  : int
-                      , t_idx
-                      , sim_times ):
-        """ Generate covar mtx, part of LN simulation, used in simulate_curves.
+                      , asset     : str
+                      , fwd_tenor : datetime.date
+                      , factor_1  : int
+                      , factor_2  : int
+                      , t_start   : float
+                      , t_end     : float ):
+        """ Generate covar mtx for asset , part of LN simulation.
+        Computes correlation between t_start and t_end
 
-        :param asset_nb: asset number considered
+        :param asset: asset for which the covariance between factors is computed
+        :param fwd_tenor: tenor date for which covariance is computed.
+        :param factor_1: factor for which correlation is computed
+        :param factor_2: second factor for which correlation is computed
+        :param t_idx:
         """
 
-        t_prev = 0. if t_idx == 0 else sim_times[t_idx - 1]
-        t_next = sim_times[t_idx]
+        if factor_1 == factor_2:
+            return self.__V_one_factor(asset, factor_1, fwd_tenor, t_start, t_end)
 
-        if i == j:
-            return self.__V_one_factor(asset_nb, i, fwd_idx, t_prev, t_next)
-
-        return self._V_cross_factor(asset_nb, i, j, fwd_idx, fwd_idx, t_prev, t_next)
+        return self._V_cross_factor(asset, factor_1, factor_2, fwd_tenor, fwd_tenor, t_start, t_end)
 
     def simulate_curves( self
                        , assets           : List[str]
@@ -1410,7 +1419,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                 for tenor_idx, tenor in enumerate(tenor_list):  # tenor is a datetime.date format
                     # prepare cov mtx
                     nb_factors_asset = self.nb_factors_for_asset(asset)
-                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx(asset, tenor, factor_1, factor_2, sim_time_idx, sim_times_numeric)
+                    cov_chol = np.linalg.cholesky(np.array([[self._var_covar_mtx( asset
+                                                                                , tenor
+                                                                                , factor_1
+                                                                                , factor_2
+                                                                                , 0. if sim_time_idx == 0 else sim_times_numeric[sim_time_idx - 1]
+                                                                                , sim_time_value )
                                                              for factor_2 in range(nb_factors_asset)]
                                                             for factor_1 in range(nb_factors_asset)]))
                     delta_X = np.sum(np.dot(cov_chol, sims_Z_unit[2 * asset_idx: 2*asset_idx+2, :]), axis=0)
