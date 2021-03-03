@@ -181,7 +181,7 @@ class TollingModel(ComSkewTolling):
                   , dcf            = dcf )
 
     @property
-    def allowed_dispatches(self) -> Tuple:
+    def allowed_dispatches(self) -> Tuple[str, str, str]:
         """ Returns the allowed dispatches.
         """
 
@@ -356,7 +356,7 @@ class TollingModel(ComSkewTolling):
         if not self.cuda_ind:
             return cnd_2 & cnd_3  # cs['can_shut']
 
-        return cuda_ops.min_int_two(cnd_2, cnd_3, cs['can_shut'])  # that's wrong - FIX THIS HERE
+        return cuda_ops.min_int_two(cnd_2, cnd_3, cs['can_shut'])  # TODO: that's wrong - FIX THIS HERE
 
     def _shutdown_decision(self, block_name : str, hours_run : int) -> Union[bool, np.ndarray]:
         """ Decision whether it is sensible to shut down
@@ -500,12 +500,12 @@ class TollingModel(ComSkewTolling):
 
         return opd_1fuel.opd_1fuel if not self.cuda_ind else opd_1fuel_cu.opd_kernel
 
-    def __compute_shadow_cost(self, fuel_prices : np.ndarray, power_prices : np.ndarray) -> np.ndarray:
+    def __compute_shadow_cost(self, fuel_prices : np.ndarray, power_prices : np.ndarray) -> Union[np.ndarray, float]:
         """ Computes the shadow cost for the model.
 
         :param fuel_prices: vector of fuel prices.
         :param power_prices: vector of power prices.
-        :returns:
+        :returns: shadow cost of the model.
         """
 
         tp = self.tolling_params
@@ -529,7 +529,6 @@ class TollingModel(ComSkewTolling):
         """ Updates the current state variable.
 
         :param curr_state: current state variable, gets updated in this routine.
-        :param cash_flows: cash flows (one for each simulation)
         :param block_hours: number of hours in this block, e.g. 8
         :param block_name: name of the block (e.g. 'PJMW-PEAK')
         :param fuel_prices: vector of fuel prices
@@ -539,8 +538,6 @@ class TollingModel(ComSkewTolling):
 
         curr_state.update( { 'hours_block': block_hours
                            , 'block_name' : block_name})
-
-        tp = self.tolling_params  # abbreviation
 
         curr_state['startup_sp']  = self.__compute_shadow_cost(fuel_prices, power_prices)
         curr_state['can_start']   = self._startup_decision(curr_state)
@@ -554,7 +551,6 @@ class TollingModel(ComSkewTolling):
                                                          , block_hours
                                                          , curr_state
                                                          , len(power_prices))   # number of simulations
-
 
         return cash_flows, new_curr_state
 
@@ -580,9 +576,8 @@ class TollingModel(ComSkewTolling):
                                                 , nb_simulations
                                                 , tolling_start
                                                 , tolling_end
-                                                , set_seed           = set_seed
-                                                , hours_partition    = fuel_hours_partition
-                                                , )
+                                                , set_seed        = set_seed
+                                                , hours_partition = fuel_hours_partition )
 
         power_processes = self.simulate_spot_blocks( [fwd_curve.fwd_name for fwd_curve in self.fwd_curves]
                                                    , nb_simulations
@@ -593,9 +588,7 @@ class TollingModel(ComSkewTolling):
         dates_months = list(fuel_process.keys())  # same as power_process.keys()
 
         dispatch_per_month = {}
-        np_gpa = gpa if self.cuda_ind else np
-        cash_flows = np_gpa.empty(nb_simulations)  # cash flow per path
-
+        np_gpa     = gpa if self.cuda_ind else np
         curr_state = self._set_initial_current_state(nb_simulations)
 
         for date_month in dates_months:  # date_month - beginning of that month

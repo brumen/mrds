@@ -49,25 +49,48 @@ class ComSkewORM(ComSkew):
         self.__db_engine  = create_engine(DB)
 
         # cached db connection
-        self.__db_connection_status = None
+        self.__db_connection_status     = None
+        self.__db_connection_last_check = None
+
+    def __execute_db_connection(self) -> bool:
+        """ Actually executes the connection and returns True or False if there is one or not.
+        """
+
+        try:
+            self.__db_engine.connect()
+            # self.__db_connection_status = True
+
+        except OperationalError as oe:  # connection fail
+            # self.__db_connection_status = False
+            logger.warning(f'Connection to {DB} failed.')
+            return False
+
+        return True  # connection success
 
     def _check_db_connection(self) -> bool:
-        """ Check whether the connection is established.
+        """ Check whether the connection is established. If the old check is more than 30 secs old,
+            run a new check.
 
         :returns: True if connection is established, otherwise False
         """
 
-        if self.__db_connection_status is not None:
-            return self.__db_connection_status
+        if self.__db_connection_last_check is None:  # never checked before
+            connection = self.__execute_db_connection()
+            self.__db_connection_last_check = datetime.datetime.now()
+            self.__db_connection_status = connection
 
-        try:  # TODO: THIS IS KIND OF POOR HERE.
-            self.__db_engine.connect()
-            self.__db_connection_status = True
-            return True
+            return connection
 
-        except OperationalError as oe:
-            self.__db_connection_status = False
-            return False
+        # db_connection was checked before.
+        check_now = datetime.datetime.now()
+
+        if check_now - self.__db_connection_last_check < datetime.timedelta(seconds=30):
+            return self.__db_connection_status  # dont do anything.
+
+        # spent more than 30 seconds from before.
+        self.__db_connection_last_check = check_now
+        self.__db_connection_status = self.__execute_db_connection()
+        return self.__db_connection_status
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.
