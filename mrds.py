@@ -1257,14 +1257,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param fwd_dates: forward dates for which to calibrate
         """
 
-        #if self._C_vec:
         if asset in self._C_vec:
             already_calibrated_dates = set(self._C_vec[asset].keys())
             to_be_calibrated = set(fwd_dates).difference(already_calibrated_dates)
+
         else:
             to_be_calibrated = fwd_dates
-        #else:  # self._C_vec == None
-        #    to_be_calibrated = fwd_dates
 
         self._c_vec_calibrate_force(asset, to_be_calibrated)
 
@@ -1303,7 +1301,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
             return self.__complete_corr_mtx
 
         # starting to generate the complete correlation matrix
-
         total_nb_factors = sum([self.nb_factors_for_asset(fwd_curve.fwd_name) for fwd_curve  in self.fwd_curves])
         self.__complete_corr_mtx = np.zeros((total_nb_factors, total_nb_factors))
 
@@ -1448,30 +1445,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return simulated_curves
 
-    def simulate_curves_nicer( self
-                             , assets           : List[str]
-                             , nb_simulations   : int
-                             , simulation_times : List[datetime.date]
-                             , tenor_list       : List[datetime.date]
-                             , set_seed         = None) -> Dict[str, Dict[datetime.date, Dict[datetime.date, np.array]]]:
-        """ Re-formats the simulate_curves into a more readable dictionary
-
-        Parameters the same as in simulate_curves_nicer.
-        """
-
-        sc = self.simulate_curves(assets, nb_simulations, simulation_times, tenor_list, set_seed=set_seed)
-
-        sc_nice = {}
-        for asset in assets:
-            sc_asset = sc[asset]
-            sc_nice[asset] = {}
-            for sim_time_idx, sim_time in enumerate(simulation_times):
-                sc_asset_sim_time = sc_asset[sim_time_idx]
-                sc_nice[asset][sim_time] = { tenor: sc_asset_sim_time[tenor_idx]
-                                             for tenor_idx, tenor in enumerate(tenor_list) }
-
-        return sc_nice
-
     def simulate_1nb( self
                     , assets           : List[str]
                     , nb_simulations   : int
@@ -1529,22 +1502,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                            for asset in assets}
                 for sim_idx, sim_date in enumerate(simulation_times) }
 
-    def simulate_1nb_nicer( self
-                          , assets           : List[str]
-                          , nb_simulations   : int
-                          , simulation_times : List[datetime.date]
-                          , set_seed         = None ) -> Dict[datetime.date, Dict[str, np.ndarray]]:
-        """ Simulate the first nearby (1NB) (rolling) contract. Generates a dictionary where keys are
-            assets and values are 2 dimensional arrays:
-               0-th dimension: simulation times
-               1-st dimension: repeats of the curve
-
-        :param assets: assets for which to generate first nearby.
-        :param nb_simulations: number of simulations to simulate.
-        :param simulation_times: times when to simulate curves
-        :param set_seed: set the seed for simulations.
-        """
-
     @lru_cache(maxsize=MAX_ASSETS)
     def __factor_positions(self, asset : str) -> slice:
         """ Returns factor positions in a matrix for asset.
@@ -1558,80 +1515,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         fact_sum[1:(len(cums)+1)] = cums
 
         return slice(fact_sum[asset], fact_sum[asset+1])  # TODO: asset + 1 is wrong
-
-    def simulate_curves_fom(self
-                            , asset_nb       : str
-                            , nb_simulations : int
-                            , sim_times      : List[datetime.date]
-                            , tenors_list = None
-                            , rn_type     = np.float32):
-        """ Simulate first of month curves.
-
-        generates a list of 3 dim arrays:
-           1-st dim: tenor
-           2-nd dim: simulation
-
-        :param sim_times:
-
-        """
-
-        np.random.seed(set_seed)  # TODO: HERE
-        sim_times = self.option_tenors_list[asset_nb]
-        sim_fom = gpa.empty((self.forward_curve_len[asset_nb], nb_simulations), dtype=rn_type)
-
-        rng = self.__random_nb_generator()
-        f_skew_fct = self._f_skew_fct_cuda(int, self._rn_type)
-        # looping over tenors
-        #    t_i ... idx of sim_time (also tenor)
-        #    fact_sum ... factors of the individual assets
-        for t_i, t_curr in enumerate(sim_times):
-
-            tenor_nb = t_i
-            F_curr = self.forward_curve_list[asset_nb][tenor_nb].astype(rn_type)
-            nb_factors_asset = self.nb_factors_for_asset[asset_nb]
-
-            new_cov_mat = np.array([[self._var_covar_mtx_simple(asset_nb, tenor_nb, i, j, t_i, sim_times)
-                                    for j in range(nb_factors_asset)]
-                                        for i in range(nb_factors_asset)])
-            new_chol = np.linalg.cholesky(new_cov_mat)
-            old_cov_mat = self.__completeCorrMat[self.__factor_positions(asset_nb), self.__factor_positions(asset_nb)]
-            sims_Z = self.__random_nb_generator( nb_simulations, self.__completeCorrMat)\
-                                               .transpose()\
-                                               [:, self.__factor_positions(asset_nb)]\
-                                               .transpose()
-
-            sims_Z_unit = skcuda.linalg.dot( gpa.to_gpu(np.linalg.inv(np.linalg.cholesky(old_cov_mat))).astype(rn_type)
-                                           , sims_Z )
-
-            # TODO:  THIS IS SLOW - IMPROVE
-            delta_X = cuda_ops.colsum_cuda_last(cuda_ops.matmul(gpa.to_gpu(new_chol).astype(rn_type), sims_Z_unit))
-
-            qv = np.sum([[self._V_cross_factor(asset_nb, factor_1, factor_2, tenor_nb, tenor_nb, 0., t_curr)
-                          for factor_1 in range(nb_factors_asset)]
-                         for factor_2 in range(nb_factors_asset)]).astype(rn_type)
-
-            if self.model_skew_ln_ind is 'ln_ln':
-                sim_fom[t_i, :] = F_curr * np.exp(delta_X - 0.5 * qv)
-            else:
-                # TODO: below change, use self._c_vec function
-                cVecCurr = self._CVecList[asset_nb][tenor_nb, :]
-                # new_sim = F_curr * \
-                #    (1. + delta_X + c1 * (delta_X**2 - qv) / 2. +
-                #     c2 * (delta_X**3 - delta_X * 3*qv) / 6. +
-                #     c3 * (delta_X**4 - delta_X**2 * 6*qv + s1) / 24.)
-                # sim_fom[t_i, :] = new_sim
-                f_skew_fct( F_curr
-                          , cVecCurr[0].astype(rn_type)
-                          , cVecCurr[1].astype(rn_type)
-                          , cVecCurr[2].astype(rn_type)
-                          , qv
-                          , delta_X
-                          , sim_fom[t_i, :]
-                          , np.int32(nb_simulations)
-                          , block = (1, 1, 1)
-                          , grid  = (nb_simulations, 1))
-
-        return sim_fom
 
 
 class ComSkewChecks(ComSkew):
