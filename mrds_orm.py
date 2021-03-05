@@ -28,9 +28,10 @@ class ComSkewORM(ComSkew):
                  , mkt_date       : datetime.date
                  , fwd_curves     : List[FwdCurve]
                  , vol_curves     : List[Volatility]
-                 , discount_curve : Callable = None
+                 , discount_curve : Callable      = None
                  , calc_date      : datetime.date = None
-                 , dcf            : float = 365.25 ):
+                 , dcf            : float         = 365.25
+                 , cuda_ind       : bool          = False ):
 
         """ Initialization of the skew model.
 
@@ -48,7 +49,8 @@ class ComSkewORM(ComSkew):
                         , vol_curves
                         , discount_curve = discount_curve
                         , calc_date      = calc_date
-                        , dcf            = dcf )
+                        , dcf            = dcf
+                        , cuda_ind       = cuda_ind )
 
         self.__db_session = create_session(DB)  # this is lazy evaluated
         self.__db_engine  = create_engine(DB)

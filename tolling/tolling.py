@@ -93,13 +93,11 @@ class TollingModel(ComSkewTolling):
                         , hours_partition
                         , discount_curve = discount_curve
                         , calc_date      = calc_date
-                        , dcf            = dcf )
+                        , dcf            = dcf
+                        , cuda_ind       = cuda_ind )
 
         self.fuel_idx           = fuel_idx
         self.tolling_params     = tolling_params
-
-        # some other parameters
-        self.cuda_ind = cuda_ind
 
         # TODO: FIX THIS HERE.
         # fixed_monthly_val = None if self.fuel_idx_name is not 'FIXED' else self.tolling_params['fixedCostPerMonth']
@@ -510,7 +508,7 @@ class TollingModel(ComSkewTolling):
         :returns: function executing one-block dispatch.
         """
 
-        return opd_1fuel.opd_1fuel if not self.cuda_ind else opd_1fuel_cu.opd_kernel
+        return opd_1fuel.opd_1fuel if not self.cuda_ind else opd_1fuel_cu.one_period_dispatch
 
     def __compute_shadow_cost(self, fuel_prices : np.ndarray, power_prices : np.ndarray) -> Union[np.ndarray, float]:
         """ Computes the shadow cost for the model.

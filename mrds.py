@@ -66,9 +66,10 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                  , mkt_date       : datetime.date
                  , fwd_curves     : List[FwdCurve]
                  , vol_curves     : List[Volatility]
-                 , discount_curve : Callable = None
+                 , discount_curve : Callable      = None
                  , calc_date      : datetime.date = None
-                 , dcf            : float = 365.25 ):
+                 , dcf            : float         = 365.25
+                 , cuda_ind       : bool          = False ):
 
         """ Initialization of the skew model.
 
@@ -79,6 +80,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         :param discount_curve: discount curve, a function of fwd_date, returns lambda fwd_date: discount(mkt_date, fwd_date)
         :param calc_date: calculation date.
         :param dcf: day-count factor for computing numerical dates from actual.
+        :param cuda_ind: indicator whether to use CUDA, by default False.
         """
 
         self._mktDate          = mkt_date
@@ -87,6 +89,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         self._com_vol_curves   = vol_curves
         self._discount_curve   = discount_curve if discount_curve else DiscountCurve(mkt_date).discount_function_2  #discount_function_local(mkt_date)  # DiscountCurve.discount_function(mkt_date)
         self.dcf               = dcf
+        self.cuda_ind          = cuda_ind
         nb_assets              = len(self._com_fwd_curves)
 
         # log_normal part of the model
@@ -1494,7 +1497,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         # 1 - st dimension: simulation times
         # 2 - nd dimension: forward date
         # 3 - rd dimension: repeats of the curve
-        print(f'ASSERTS: {assets}, {simulation_times}')
         simulated_curves = self.simulate_curves( assets
                                                , nb_simulations
                                                , simulation_times

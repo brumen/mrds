@@ -8,20 +8,27 @@ from logging  import getLogger
 from typing   import List, Tuple, Dict, Union, Callable, Optional
 from calendar import Calendar
 
-from mrds.mrds          import ComSkew
 from mrds.mrds_orm      import ComSkewORM
 from mrds.vols.vols     import Volatility
 from mrds.forward_curve import FwdCurve
 from mrds.vols.vols_get import get_vol_object
 from mrds.correlations  import corr_hyp_sec_two_fronts_time_diff
+from cuda.cuda.cuda_ops import vtpm
 
 from pycuda.gpuarray import GPUArray
 from pycuda.compiler import SourceModule
 
+# cuda related stuff
+import pycuda.autoinit
 import pycuda.curandom
 import pycuda.cumath
 import pycuda.gpuarray as gpa
+import cuda.cublas.curand as curand
+import skcuda.linalg
+# from skcuda.cublas import cublasCreate, cublasSger, cublasDger
 
+skcuda.linalg.init()  # this is necessary to work
+# cublas_handle = cublasCreate()  # create a handle
 
 logger = getLogger(__name__)
 
@@ -43,7 +50,8 @@ class ComSkewTolling(ComSkewORM):
                  , hours_partition : Dict[str, List[Tuple[str, int]]]
                  , discount_curve  : Optional[Callable] = None
                  , calc_date       : datetime.date      = None
-                 , dcf             : float              = 365.25 ):
+                 , dcf             : float              = 365.25
+                 , cuda_ind        : bool               = False ):
 
         """ Initialization of the skew model for tolling simulation.
 
@@ -60,6 +68,7 @@ class ComSkewTolling(ComSkewORM):
         :param hours_partition: partition of hours for each block, e.g { 'WEEKDAY': ((PJMW-PEAK, 8), (PJMW-OFFPEAK, 16),)
                                                                        , 'WEEKEND': ((PJMW-PEAK, 16), (PJMW-OFFPEAK, 8),) }
         :param dcf: day-count factor.
+        :param cuda_ind: whether to use cuda, default False
         """
 
         super().__init__( mkt_date
@@ -67,12 +76,16 @@ class ComSkewTolling(ComSkewORM):
                         , vol_curves
                         , discount_curve
                         , calc_date = calc_date
-                        , dcf       = dcf )
+                        , dcf       = dcf
+                        , cuda_ind  = cuda_ind )
 
         self.__cash_vol_curves   = cash_vol_curves
         self.__cash_correlations = cash_corrs
         self.days_partition     = days_partition
         self.hours_partition    = hours_partition
+
+        # Cuda generator
+        self.__gen = None
 
     @classmethod
     def from_db( cls
@@ -86,7 +99,8 @@ class ComSkewTolling(ComSkewORM):
                                    , 'WEEKEND': [('PJMW-PEAK', 16), ('PJMW-OFFPEAK', 8),] }
                , discount_curve  : Optional[Callable] = None
                , calc_date       : datetime.date      = None
-               , dcf             : float              = 365.25 ):
+               , dcf             : float              = 365.25
+               , cuda_ind        : bool               = False  ):
         """ Obtains forward, vol curves from database.
 
         :param mkt_date: market date
@@ -102,6 +116,7 @@ class ComSkewTolling(ComSkewORM):
         :param hours_partition: partition of hours for each block, e.g { 'WEEKDAY': ((PJMW-PEAK, 8), (PJMW-OFFPEAK, 16),)
                                                                        , 'WEEKEND': ((PJMW-PEAK, 16), (PJMW-OFFPEAK, 8),) }
         :param dcf: day-count factor.
+        :param cuda_ind: whether to use cuda, default False
         """
 
         return cls( mkt_date
@@ -113,7 +128,8 @@ class ComSkewTolling(ComSkewORM):
                   , hours_partition = hours_partition
                   , discount_curve  = discount_curve
                   , calc_date       = calc_date
-                  , dcf             = dcf )
+                  , dcf             = dcf
+                  , cuda_ind        = cuda_ind )
 
     def _cash_vol_curves(self, asset : Union[str, List[str]]) -> Union[Volatility, Dict[str, Volatility]]:
         """ Returns the cash vol curve for the particular asset. If you enter the
@@ -181,8 +197,19 @@ class ComSkewTolling(ComSkewORM):
 
         return (next_month_start - month_start_date).days
 
-    @staticmethod
-    def _cash_rns( cash_corr : np.ndarray, nb_simulations : int ) -> np.array:
+    @property
+    def __generator(self):
+        """ Selects the random variable generator.
+
+        """
+
+        if self.__gen:
+            return self.__gen
+
+        self.__gen = pycuda.curandom.XORWOWRandomNumberGenerator()
+        return self.__gen
+
+    def _cash_rns(self, cash_corr : np.ndarray, nb_simulations : int ) -> Union[np.array, GPUArray]:
         """ Generates the cash correlations
 
         :param cash_corr: matrix of cash correlations
@@ -191,9 +218,24 @@ class ComSkewTolling(ComSkewORM):
 
         nb_assets = cash_corr.shape[0]  # cash_corr is a square matrix
 
-        return np.random.multivariate_normal( np.zeros(nb_assets)
-                                            , cash_corr
-                                            , size = nb_simulations )
+        if not self.cuda_ind:
+            return np.random.multivariate_normal( np.zeros(nb_assets)
+                                                , cash_corr
+                                                , size = nb_simulations )
+
+        # cuda requested.
+        dtype_ = cash_corr.dtype
+
+        if cash_corr.shape == (1, 1):
+            cash_rns = gpa.empty(nb_simulations, dtype=dtype_)
+            self.__generator.fill_normal(cash_rns)  # fills it w/ normal
+            return cash_rns
+
+        # multiply by cholesky
+        cash_rns = gpa.empty((nb_assets, nb_simulations), dtype=dtype_)
+        self.__generator.fill_normal(cash_rns)
+        cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(cash_corr).astype(dtype_))
+        return skcuda.linalg.dot(cash_corr_gpu, cash_rns).transpose()  # performs the matrix multiplication
 
     @staticmethod
     def _create_first_of_months( start_date : datetime.date
@@ -260,6 +302,20 @@ class ComSkewTolling(ComSkewORM):
 
         return hours
 
+    def __sub_bcast(self, a : GPUArray, b : GPUArray) -> GPUArray:
+        """ Subtracts along the broadcasted edge like in numpy
+        IMPORTANT: THIS COULD BE REALLY BAD IN TERMS OF EFFICIENCY
+
+        :param a: first array
+        :param b: second array
+        :returns: a-b, including
+        """
+
+        import tensorflow as tf
+
+        with tf.device('/GPU:0'):
+            return tf.subtract(tf.constant(a), tf.constant(b))
+
     def simulate_spot_blocks( self
                             , assets         : List[str]
                             , nb_simulations : int
@@ -282,8 +338,6 @@ class ComSkewTolling(ComSkewORM):
                             block.
         """
 
-        import time
-
         # fom_sims type is: {date: {asset: sims}}
         fom_sims = self.simulate_1nb( assets
                                     , nb_simulations
@@ -304,14 +358,33 @@ class ComSkewTolling(ComSkewORM):
             cash_vols = np.array([ self._cash_vol_curves(asset).atm_vol(sim_date) for asset in all_assets] )  # TODO: this is the same for all assets, OPTIMIZE
 
             first_block_name, first_block_hour = days_within_month_sim[0]
-            spot_sim = [ (first_block_name, first_block_hour, sim_info[first_block_name][0]) ]  # TODO: THIS 0 HERE MIGHT BE WRONG
-            curr_asset_values = np.array([sim_info[asset][0] for asset in all_assets]).transpose()  # each asset sims in a row
+            spot_sim = [ ( first_block_name
+                         , first_block_hour
+                         , sim_info[first_block_name][0] if not self.cuda_ind else gpa.to_gpu(sim_info[first_block_name][0]) ) ]  # TODO: THIS 0 HERE MIGHT BE WRONG
+            if not self.cuda_ind:
+                curr_asset_values = np.array([sim_info[asset][0] for asset in all_assets]).transpose()  # each asset sims in a row
+            else:
+                curr_asset_values = gpa.to_gpu(np.array([sim_info[asset][0].tolist() for asset in all_assets])).transpose()
 
             for block_name, block_hours in days_within_month_sim:
                 block_hours_num = block_hours / self.dcf
-                cash_corr_rns = self.__class__._cash_rns(cash_corr_mtx, nb_simulations).transpose()
-                curr_asset_values *= np.exp(-0.5 * cash_vols**2 * block_hours_num + \
-                                            np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose())
+                cash_corr_rns = self._cash_rns(cash_corr_mtx, nb_simulations).transpose()
+
+                # this performs the kronecker product basically
+                if not self.cuda_ind:
+                    curr_asset_values *= np.exp(-0.5 * cash_vols ** 2 * block_hours_num + \
+                                                np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose() )
+                else:
+                    if cash_vols.shape == (1, ):  # 1 asset generation
+                        curr_asset_values *= pycuda.cumath.exp(-0.5 * cash_vols**2 * block_hours_num + \
+                                                   np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose() )
+                    else:
+                        cash_vols_gpu = cash_vols if isinstance(cash_vols, GPUArray) else gpa.to_gpu(cash_vols)
+                        curr_asset_values *= pycuda.cumath.exp(vtpm( -0.5 * block_hours_num * cash_vols_gpu**2
+                                                       , np.sqrt(block_hours_num) * vtpm( cash_vols_gpu, cash_corr_rns.transpose(), tm_ind='t', new_mtx_gen=True)
+                                                       , tm_ind      = 'p'
+                                                       , new_mtx_gen = True ) )
+
                 spot_sim.append( ( block_name
                                  , block_hours
                                  , curr_asset_values[:, all_assets.index(block_name)  ]) )  # if not ignore_block_names else 0
