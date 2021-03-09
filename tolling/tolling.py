@@ -6,19 +6,20 @@ import numpy as np
 
 from typing import List, Tuple, Union, Dict, Callable, Optional, Any
 
-from mrds.tolling.opd              import opd_1fuel, opd_1fuel_cu
+import pycuda.autoinit  # leave this here to initialize the GPU
+import pycuda.gpuarray as gpa
+from pycuda.gpuarray import GPUArray
+import cuda.cuda.cuda_ops as cuda_ops
+from cuda.cuda.cuda_ops import bigger_gpa
+
+
+from mrds.tolling.opd              import opd_1fuel
 from mrds.tolling.opd.opd_1fuel    import TollingState
 from mrds.tolling.com_skew_tolling import ComSkewTolling
 from mrds.tolling.default_tolling  import tolling_params_default
 from mrds.forward_curve            import FwdCurve
 from mrds.vols.vols                import Volatility
 from mrds.vols.vols_get            import get_vol_object
-
-import pycuda.gpuarray as gpa
-
-if mrds.config.CUDA_PRESENT:
-    import pycuda.autoinit  # leave this here to initialize the GPU
-    import cuda.cuda_ops   as cuda_ops
 
 
 class TollingModel(ComSkewTolling):
@@ -213,14 +214,14 @@ class TollingModel(ComSkewTolling):
 
         tp = self.tolling_params
 
-        #if not self.cuda_ind:
-        return (total_run_hours < tp['maxMonthlyStarts']) & (hours_shut >= tp['minDownTime'])
+        if not self.cuda_ind:
+            return (total_run_hours < tp['maxMonthlyStarts']) & (hours_shut >= tp['minDownTime'])
 
-        # CUDA part: this kernel implements exactly what is above 3 lines
-        #return cuda_ops.comp_two_arrays_and( total_run_hours
-        #                                   , hours_shut
-        #                                   , tp['maxMonthlyStarts']
-        #                                   , tp['minDownTime'] )
+        # cuda section
+        if not isinstance(total_run_hours, GPUArray) and not isinstance(hours_shut, GPUArray):
+            return (total_run_hours < tp['maxMonthlyStarts']) & (hours_shut >= tp['minDownTime'])
+
+        return bigger_gpa(-total_run_hours + tp['maxMonthlyStarts']) and bigger_gpa(hours_shut - tp['minDownTime'])
 
     def _peak_only_startup( self
                           , total_starts : Union[int, np.ndarray]
@@ -245,8 +246,6 @@ class TollingModel(ComSkewTolling):
 
         # cuda section
         return gpa.minimum(gpa.minimum(cnd_1, cnd_2), cnd_3)
-        # TODO: better version of the above.
-        # cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
 
     def _offpeak_only_startup( self
                              , total_starts : Union[int, np.ndarray]
@@ -338,10 +337,14 @@ class TollingModel(ComSkewTolling):
 
         tp = self.tolling_params
 
-        #if not self.cuda_ind:
-        return hours_run >= tp['minRunTime']
+        if not self.cuda_ind:
+            return hours_run >= tp['minRunTime']
 
-        return cuda_ops.comp_array_number(hours_run, tp['minRunTime'], op='larger', dtype='int32')
+        # cuda section
+        if not isinstance(hours_run, GPUArray):
+            return hours_run >= tp['minRunTime']
+
+        return bigger_gpa(hours_run - tp['minRunTime'])
 
     def _peak_only_shutdown(self, block_name : str, hours_run : Union[int, np.ndarray]) -> Union[bool, np.ndarray]:
         """ Whether the power plant can shut at a particular block.
@@ -390,8 +393,8 @@ class TollingModel(ComSkewTolling):
 
     def _forced_shutdown(self
                          , block_name   : str
-                         , power_prices : Union[np.ndarray, gpa.GPUArray]
-                         , fuel_prices  : Union[np.ndarray, gpa.GPUArray]
+                         , power_prices : Union[np.ndarray, GPUArray]
+                         , fuel_prices  : Union[np.ndarray, GPUArray]
                          , dv = None) -> Union[bool, np.ndarray]:
         """ Decision to forcefully shut down, can take 3 outcomes: 2, 1, 0
 
@@ -420,7 +423,7 @@ class TollingModel(ComSkewTolling):
         if dispatch_mode == 'offpeak_only':
             return self.__const_array(len(power_prices), 2 if block_name != 'offpeak' else 0, np.short)
 
-    def __const_array(self, size : int, value, dtype_=bool) -> Union[np.ndarray, gpa.GPUArray]:
+    def __const_array(self, size : int, value, dtype_=bool) -> Union[np.ndarray, GPUArray]:
         """ Returns a bool array of size size, with all values set to value.
 
         :param size: size of the array
@@ -444,7 +447,9 @@ class TollingModel(ComSkewTolling):
         dispatch_mode = self.dispatch_mode
 
         # initial state
-        initial_state = self.__const_array(nb_sims, TollingState.NOT_RUNNING, dtype_ = TollingState if not self.cuda_ind else np.short)
+        initial_state = self.__const_array( nb_sims
+                                          , TollingState.NOT_RUNNING if not self.cuda_ind else TollingState.NOT_RUNNING.value
+                                          , dtype_ = TollingState if not self.cuda_ind else np.short)
 
         # cs is mnemonic for current state.
         cs = { 'dispatch_mode' :  dispatch_mode
@@ -581,6 +586,10 @@ class TollingModel(ComSkewTolling):
         dispatch_per_month = {}
         curr_state = self._set_initial_current_state(nb_simulations)
 
+        import time
+
+        t1 = time.time()
+
         # for date_month in dates_months:  # date_month - beginning of that month
         for (date_month_fuel, fuel_process_month), (date_month_power, power_process_month) in zip(fuel_process, power_processes):  # date_month - beginning of that month
             assert date_month_fuel == date_month_power, f'Start dates for power and fuel month are different: {date_month_power, date_month_fuel}'
@@ -611,11 +620,12 @@ class TollingModel(ComSkewTolling):
 
             dispatch_per_month[date_month_fuel] = (cash_flows_cum, value_per_month)
 
+        print("HELP", time.time() - t1)
         return dispatch_per_month
 
     def _block_dispatch(self
-                        , power_prices         : Union[np.ndarray, gpa.GPUArray]
-                        , fuel_prices          : Union[np.ndarray, gpa.GPUArray]
+                        , power_prices         : Union[np.ndarray, GPUArray]
+                        , fuel_prices          : Union[np.ndarray, GPUArray]
                         , block_hours          : int
                         , curr_state           : Dict[str, Any]
                         , nb_sims              : int) -> Tuple[np.ndarray, Dict[str, Any]]:
