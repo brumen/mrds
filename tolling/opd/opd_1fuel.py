@@ -198,6 +198,9 @@ def new_state_f(state_state, do_startup, do_shutdown, cuda_ind=False):
 
 
 def curr_generation_f(new_state, max_cap, min_disp, cuda_ind=False):
+    """
+
+    """
 
     if not cuda_ind:
         return np.where( new_state == TollingState.NOT_RUNNING
@@ -216,7 +219,14 @@ def curr_generation_f(new_state, max_cap, min_disp, cuda_ind=False):
                     , cuda_ind = True )  # TODO: OPTIMIZE HERE
 
 
-def is_cold_start_f(hours_shut, cold_startup_cutoff, cuda_ind = False):
+def is_cold_start_f(hours_shut, cold_startup_cutoff, cuda_ind : bool = False) -> Union[bool, np.ndarray, GPUArray]:
+    """ Identifies whether the start is cold or hot.
+
+    :param hours_shut: number of hours being shut.
+    :param cold_startup_cutoff: the parameter identifying the cold startup.
+    :param cuda_ind: indicator using cuda
+    :returns: identifier (True/False) whether the startup is cold.
+    """
     if not cuda_ind:
         return hours_shut >= cold_startup_cutoff
 
@@ -224,6 +234,51 @@ def is_cold_start_f(hours_shut, cold_startup_cutoff, cuda_ind = False):
         return hours_shut >= cold_startup_cutoff
 
     return bigger_gpa(hours_shut - cold_startup_cutoff)
+
+
+def ramp_cost_f(curr_state, new_state, ramp_up_cost : float, ramp_down_cost : float, cuda_ind : bool = False):
+    """ Ramp up cost function - either ramping down or ramping up.
+
+    """
+
+    if not cuda_ind:
+        return np.where( (curr_state == TollingState.MIN_DISPATCH) & (new_state == TollingState.MAX_DISPATCH)
+                       , ramp_up_cost
+                       , np.where( (curr_state == TollingState.MAX_DISPATCH) & (new_state == TollingState.MIN_DISPATCH)
+                                 , ramp_down_cost
+                                 , 0. ) )
+
+    # CUDA section
+    return gpa_where( equal_gpa(curr_state, TollingState.MIN_DISPATCH.value) and equal_gpa(new_state, TollingState.MAX_DISPATCH.value)
+                    , ramp_up_cost
+                    , gpa_where( equal_gpa(curr_state, TollingState.MAX_DISPATCH.value) and equal_gpa(new_state, TollingState.MIN_DISPATCH.value)
+                               , ramp_down_cost
+                               , 0.
+                               , cuda_ind = cuda_ind )
+                    , cuda_ind = cuda_ind )
+
+
+def startup_cost_f( starts
+                  , is_cold_start : Union[bool, np.ndarray, GPUArray]
+                  , cold_start_costs, hot_start_costs, cuda_ind = False):
+
+    if not cuda_ind:
+        return np.where( starts
+                       , np.where( is_cold_start, cold_start_costs, hot_start_costs)
+                       , 0. )
+
+    # cuda section
+    if not isinstance(is_cold_start, GPUArray):
+        return gpa_where( starts
+                        , cold_start_costs if is_cold_start else hot_start_costs
+                        , 0.
+                        , cuda_ind = cuda_ind )
+
+    # GPU array example
+    return gpa_where( starts
+                    , gpa_where(is_cold_start, cold_start_costs, hot_start_costs, cuda_ind=cuda_ind)
+                    , gpa.zeros(is_cold_start.size, dtype=cold_start_costs.dtype)
+                    , cuda_ind = cuda_ind )
 
 
 def opd_1fuel( power_prices   : np.ndarray
@@ -323,33 +378,23 @@ def opd_1fuel( power_prices   : np.ndarray
     # Generation accounting
     curr_generation = curr_generation_f(new_state, max_cap, min_disp, cuda_ind=cuda_ind)
 
-    generation_change = curr_generation - curr_state['generation']
+    # generation_change = curr_generation - curr_state['generation']
     # ramping_adjustment = (0.5 / (ramp_rate * hours_in_block)) * np.abs(generation_change) * generation_change
-    ramping_adjustment = 0.  # TODO: THIS IS WRONG CHECK HERE
-    curr_generation -= ramping_adjustment
+    # ramping_adjustment = 0.  # TODO: THIS IS WRONG CHECK HERE
+    # curr_generation -= ramping_adjustment
     curr_energy = curr_generation * hours_in_block
     revenue = curr_energy * power_prices
     fuel_cost = curr_energy * (fuel_prices + add_fuel_cost) * gpa_where(run_at_min_index, hr_at_min, hr_at_max, cuda_ind=cuda_ind)
 
     # new starts and new shutdowns.
     starts = starts_indicator(state_state, new_state, cuda_ind=cuda_ind)
-    shuts  = shuts_indicator (state_state, new_state, cuda_ind=cuda_ind)
+    startup_cost = startup_cost_f( starts
+                                 , is_cold_start
+                                 , fixed_startup_cost_cold + fuel_prices * start_fuel_cold
+                                 , fixed_startup_cost + fuel_prices * start_fuel
+                                 , cuda_ind = cuda_ind )
 
-    startup_cost = gpa_where( starts
-                           , gpa_where( is_cold_start
-                                     , fixed_startup_cost_cold + fuel_prices * start_fuel_cold
-                                     , fixed_startup_cost + fuel_prices * start_fuel
-                                     , cuda_ind = cuda_ind )
-                           , 0. if not cuda_ind else gpa.zeros(len(fuel_prices), dtype=fuel_prices.dtype)
-                           , cuda_ind = cuda_ind )
-
-    ramp_cost = gpa_where( (invert_bool(starts) & (generation_change > SMALL_EPS  )) if not cuda_ind else (invert_bool(starts) and bigger_gpa(generation_change - SMALL_EPS ))
-                        , ramp_up_cost
-                        , gpa_where( (invert_bool(shuts) & (generation_change < - SMALL_EPS)) if not cuda_ind else (invert_bool(shuts) and bigger_gpa(-generation_change - SMALL_EPS))
-                                   , ramp_down_cost
-                                   , 0.
-                                   , cuda_ind = cuda_ind )
-                        , cuda_ind = cuda_ind )
+    ramp_cost = ramp_cost_f(state_state, new_state, ramp_up_cost, ramp_down_cost, cuda_ind = cuda_ind)
 
     # cashflow = revenue - (totalCost = fuel_cost + (variable_cost = VC * curr_energy) + startup_cost + ramp_cost)
     if not cuda_ind:
@@ -358,7 +403,7 @@ def opd_1fuel( power_prices   : np.ndarray
     else:
         cashflow = revenue - fuel_cost - VC * curr_energy - startup_cost - ramp_cost
 
-    # new unit state
+    # new state parameters
     curr_state['hours_in_state']  = gpa_where( new_state == state_state if not cuda_ind else equal_bools(new_state, state_state) # no state change
                                             , curr_state['hours_in_state'] + hours_in_block
                                             , hours_in_block
