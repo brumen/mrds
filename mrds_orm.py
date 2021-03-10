@@ -28,9 +28,10 @@ class ComSkewORM(ComSkew):
                  , mkt_date       : datetime.date
                  , fwd_curves     : List[FwdCurve]
                  , vol_curves     : List[Volatility]
-                 , discount_curve : Callable = None
+                 , discount_curve : Callable      = None
                  , calc_date      : datetime.date = None
-                 , dcf            : float = 365.25 ):
+                 , dcf            : float         = 365.25
+                 , cuda_ind       : bool          = False ):
 
         """ Initialization of the skew model.
 
@@ -43,31 +44,58 @@ class ComSkewORM(ComSkew):
         :param dcf: day-count factor for computing numerical dates from actual.
         """
 
-        super().__init__(mkt_date, fwd_curves, vol_curves, discount_curve = discount_curve, calc_date = calc_date, dcf = dcf)
+        super().__init__( mkt_date
+                        , fwd_curves
+                        , vol_curves
+                        , discount_curve = discount_curve
+                        , calc_date      = calc_date
+                        , dcf            = dcf
+                        , cuda_ind       = cuda_ind )
 
         self.__db_session = create_session(DB)  # this is lazy evaluated
         self.__db_engine  = create_engine(DB)
 
         # cached db connection
-        self.__db_connection_status = None
+        self.__db_connection_status     = None
+        self.__db_connection_last_check = None
+
+    def __execute_db_connection(self) -> bool:
+        """ Actually executes the connection and returns True or False if there is one or not.
+        """
+
+        try:
+            self.__db_engine.connect()
+
+        except OperationalError as oe:  # connection fail
+            logger.warning(f'Connection to {DB} failed: {str(oe)}')
+            return False  # connection failure
+
+        return True  # connection success
 
     def _check_db_connection(self) -> bool:
-        """ Check whether the connection is established.
+        """ Check whether the connection is established. If the old check is more than 30 secs old,
+            run a new check.
 
         :returns: True if connection is established, otherwise False
         """
 
-        if self.__db_connection_status is not None:
-            return self.__db_connection_status
+        if self.__db_connection_last_check is None:  # never checked before
+            connection = self.__execute_db_connection()
+            self.__db_connection_last_check = datetime.datetime.now()
+            self.__db_connection_status = connection
 
-        try:  # TODO: THIS IS KIND OF POOR HERE.
-            self.__db_engine.connect()
-            self.__db_connection_status = True
-            return True
+            return connection
 
-        except OperationalError as oe:
-            self.__db_connection_status = False
-            return False
+        # db_connection was checked before.
+        check_now = datetime.datetime.now()
+
+        if check_now - self.__db_connection_last_check < datetime.timedelta(seconds=30):
+            return self.__db_connection_status  # dont do anything.
+
+        # spent more than 30 seconds from before.
+        self.__db_connection_last_check = check_now
+        self.__db_connection_status = self.__execute_db_connection()
+        return self.__db_connection_status
 
     def _kappa_vec(self, asset : str) -> np.ndarray:
         """ Holds the kappa vector for a particular asset.

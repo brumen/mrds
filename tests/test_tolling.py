@@ -40,9 +40,14 @@ class TestTolling(TestCase):
                                  , { 'WEEKDAY': [('ATSI-PEAK', 8), ('ATSI_7X8', 16), ]
                                    , 'WEEKEND': [('ATSI-PEAK', 16), ('ATSI_7X8', 8), ]}
                                  , 'NG_MICHCON_GD-PEAK'
-                                 , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK'] )
+                                 , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK']
+                                 , cuda_ind = True )
         tm.multi_thread_calib = False  # Multi-threading doesnt allow for pickling of ORM session
-        res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20), nb_simulations=10000 )
+        import time
+
+        t1 = time.time()
+        res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20), nb_simulations=100000)
+        print(time.time() -t1)
 
         self.assertTrue(True)
 
