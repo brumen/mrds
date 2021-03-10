@@ -1,15 +1,12 @@
 # Tolling model
-import mrds.config
-
 import datetime
 import numpy as np
 
 from typing import List, Tuple, Union, Dict, Callable, Optional, Any
 
 import pycuda.autoinit  # leave this here to initialize the GPU
-import pycuda.gpuarray as gpa
-from pycuda.gpuarray import GPUArray
 import cuda.cuda.cuda_ops as cuda_ops
+from pycuda.gpuarray import GPUArray, minimum, zeros
 from cuda.cuda.cuda_ops import bigger_gpa
 
 
@@ -245,7 +242,7 @@ class TollingModel(ComSkewTolling):
             return cnd_1 & cnd_2 & cnd_3
 
         # cuda section
-        return gpa.minimum(gpa.minimum(cnd_1, cnd_2), cnd_3)
+        return minimum(minimum(cnd_1, cnd_2), cnd_3)
 
     def _offpeak_only_startup( self
                              , total_starts : Union[int, np.ndarray]
@@ -269,7 +266,7 @@ class TollingModel(ComSkewTolling):
             return cnd_1 & cnd_2 & cnd_3
 
         # Cuda version
-        return gpa.minimum(gpa.minimum(cnd_1, cnd_2), cnd_3)
+        return minimum(minimum(cnd_1, cnd_2), cnd_3)
         # return cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
 
     def _startup_decision(self, cs):
@@ -587,8 +584,7 @@ class TollingModel(ComSkewTolling):
         curr_state = self._set_initial_current_state(nb_simulations)
 
         import time
-
-        t1 = time.time()
+        t_total = 0
 
         # for date_month in dates_months:  # date_month - beginning of that month
         for (date_month_fuel, fuel_process_month), (date_month_power, power_process_month) in zip(fuel_process, power_processes):  # date_month - beginning of that month
@@ -596,11 +592,13 @@ class TollingModel(ComSkewTolling):
             # fuel_process_month  = fuel_process[date_month]  # (list of (block_name : str, block_hours : int, block_sims : np.ndarray, GPUArray)
             # power_process_month = power_processes[date_month]  # same here
 
+            t1 = time.time()
+
             if not self.cuda_ind:
                 cash_flows_cum = np.zeros(nb_simulations)
             else:
                 _, _, fuel_process_first_block = fuel_process_month[0]
-                cash_flows_cum = gpa.zeros(nb_simulations, dtype=fuel_process_first_block.dtype)  # cumulative cash flows
+                cash_flows_cum = zeros(nb_simulations, dtype=fuel_process_first_block.dtype)  # cumulative cash flows
 
             value_per_month = []
             for power_block, fuel_block in zip(power_process_month, fuel_process_month):
@@ -618,9 +616,11 @@ class TollingModel(ComSkewTolling):
                 # TODO: REMOVE per-block cash flows when this works.
                 value_per_month.append( (block_hours, (power_block_name, fuel_block_name), cash_flows) )
 
+            t_total += time.time() - t1
+
             dispatch_per_month[date_month_fuel] = (cash_flows_cum, value_per_month)
 
-        print("HELP", time.time() - t1)
+        print("HELP", t_total)
         return dispatch_per_month
 
     def _block_dispatch(self
