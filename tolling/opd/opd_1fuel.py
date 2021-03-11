@@ -3,11 +3,18 @@
 #
 
 import numpy as np
-import pycuda.autoinit
-import pycuda.gpuarray as gpa
 
-from typing import Any, Dict, Union
-from enum   import Enum
+from logging import getLogger
+from typing  import Any, Dict, Union
+from enum    import Enum
+
+logger = getLogger(__name__)
+
+try:
+    import pycuda.autoinit
+except:
+    logger.info('CUDA functionality not enabled.')
+import pycuda.gpuarray as gpa
 
 from mrds.tolling.opd   import opd_avx
 from cuda.cuda.cuda_ops import ( selection_kernel
@@ -17,6 +24,8 @@ from cuda.cuda.cuda_ops import ( selection_kernel
                                , selection_kernel_singles
                                , selection_kernel_first_single
                                , equal_bools
+                               , and_bool
+                               , or_bool
                                , )
 
 from pycuda.gpuarray import  GPUArray
@@ -31,6 +40,22 @@ class TollingState(Enum):
     NOT_RUNNING  = 1
     MIN_DISPATCH = 2
     MAX_DISPATCH = 3
+
+
+def const_array(size : int, value, dtype_ : type = bool, cuda_ind : bool = False) -> Union[np.ndarray, GPUArray]:
+    """ Returns a bool array of size size, with all values set to value.
+
+    :param size: size of the array
+    :param value: value the array is set to, can be float, short, etc.
+    :param dtype_: type of the array to be generated
+    :param cuda_ind: indicator for cuda.
+    :returns: array of size size and value set to value, either np.array or gpu array
+    """
+
+    res = (np.empty if not cuda_ind else gpa.empty)(size, dtype=dtype_)
+    res.fill(value)
+
+    return res
 
 
 def invert_bool(x : Union[np.ndarray, bool, GPUArray]) -> Union[np.ndarray, bool, GPUArray]:
@@ -50,6 +75,27 @@ def invert_bool(x : Union[np.ndarray, bool, GPUArray]) -> Union[np.ndarray, bool
     return not x
 
 
+def compare_with_numpy(toll_fct):
+
+    def wrapped_toll_fct(*args, **kwargs):
+        gpa_res = toll_fct(*args, cuda_ind=True)
+        np_args = [arg if not isinstance(arg, GPUArray) else arg.get()
+                   for arg in args]
+        np_res  = toll_fct(*np_args, cuda_ind=False)
+        gpa_np_res = gpa_res.get()  # this is a np-array
+
+        comparison = all([gpa_elt == np_elt for gpa_elt, np_elt in zip(gpa_np_res, np_res)])
+        if not comparison:
+            print('WRONG')
+
+        # assert comparison, f'Problems in function {toll_fct.__name__}'
+
+        return gpa_res
+
+    return wrapped_toll_fct
+
+
+# @compare_with_numpy
 def starts_indicator( curr_state : Union[np.array, GPUArray]
                     , new_state  : Union[np.array, GPUArray]
                     , cuda_ind   : bool = False  ) -> Union[np.array, GPUArray]:
@@ -66,8 +112,8 @@ def starts_indicator( curr_state : Union[np.array, GPUArray]
                 (new_state == TollingState.MAX_DISPATCH) | (new_state == TollingState.MIN_DISPATCH))
 
     # cuda stuff
-    return equal_gpa(curr_state, TollingState.NOT_RUNNING.value) and (
-                (equal_gpa(new_state, TollingState.MAX_DISPATCH.value) or equal_gpa(new_state, TollingState.MIN_DISPATCH.value)) )
+    return and_bool( equal_gpa(curr_state, TollingState.NOT_RUNNING.value)
+                   , or_bool( equal_gpa(new_state, TollingState.MAX_DISPATCH.value), equal_gpa(new_state, TollingState.MIN_DISPATCH.value)) )
 
 
 def shuts_indicator( curr_state : Union[np.ndarray, GPUArray]
@@ -77,6 +123,7 @@ def shuts_indicator( curr_state : Union[np.ndarray, GPUArray]
 
     :param curr_state: array of current states.
     :param new_state: array of new states.
+    :param cuda_ind: indicator of the cuda.
     :returns: array of states if the power plant
     """
 
@@ -84,8 +131,9 @@ def shuts_indicator( curr_state : Union[np.ndarray, GPUArray]
         return ((curr_state == TollingState.MAX_DISPATCH) | (curr_state == TollingState.MIN_DISPATCH)) & (new_state == TollingState.NOT_RUNNING)
 
     # cuda
-    return (equal_gpa(curr_state, TollingState.MAX_DISPATCH.value) or equal_gpa(curr_state, TollingState.MIN_DISPATCH.value)) and \
-           equal_gpa(new_state, TollingState.NOT_RUNNING.value)
+    return and_bool( or_bool( equal_gpa(curr_state, TollingState.MAX_DISPATCH.value)
+                            , equal_gpa(curr_state, TollingState.MIN_DISPATCH.value) )
+                   , equal_gpa(new_state, TollingState.NOT_RUNNING.value) )
 
 
 def still_running_indicator( curr_state : Union[np.array, GPUArray]
@@ -104,8 +152,8 @@ def still_running_indicator( curr_state : Union[np.array, GPUArray]
                ( (new_state == TollingState.MIN_DISPATCH) | (new_state == TollingState.MAX_DISPATCH))
 
     # cuda ind
-    return ( equal_gpa(curr_state, TollingState.MIN_DISPATCH.value) or equal_gpa(curr_state, TollingState.MAX_DISPATCH)) and \
-               ( equal_gpa(new_state, TollingState.MIN_DISPATCH.value) or equal_gpa(new_state, TollingState.MAX_DISPATCH.value))
+    return and_bool( or_bool( equal_gpa(curr_state, TollingState.MIN_DISPATCH.value), equal_gpa(curr_state, TollingState.MAX_DISPATCH.value))
+                   , or_bool( equal_gpa(new_state, TollingState.MIN_DISPATCH.value), equal_gpa(new_state, TollingState.MAX_DISPATCH.value)) )
 
 
 def do_startup_f( can_start             : Union[bool, np.ndarray, GPUArray]
@@ -124,7 +172,6 @@ def do_startup_f( can_start             : Union[bool, np.ndarray, GPUArray]
     if not cuda_ind:
         return can_start & ( force_start | is_startup_profitable )
 
-    # cuda section
     # cuda section
     if isinstance(can_start, bool):
         return (force_start or is_startup_profitable) if can_start else False
@@ -249,9 +296,9 @@ def ramp_cost_f(curr_state, new_state, ramp_up_cost : float, ramp_down_cost : fl
                                  , 0. ) )
 
     # CUDA section
-    return gpa_where( equal_gpa(curr_state, TollingState.MIN_DISPATCH.value) and equal_gpa(new_state, TollingState.MAX_DISPATCH.value)
+    return gpa_where( and_bool(equal_gpa(curr_state, TollingState.MIN_DISPATCH.value), equal_gpa(new_state, TollingState.MAX_DISPATCH.value))
                     , ramp_up_cost
-                    , gpa_where( equal_gpa(curr_state, TollingState.MAX_DISPATCH.value) and equal_gpa(new_state, TollingState.MIN_DISPATCH.value)
+                    , gpa_where( and_bool(equal_gpa(curr_state, TollingState.MAX_DISPATCH.value), equal_gpa(new_state, TollingState.MIN_DISPATCH.value))
                                , ramp_down_cost
                                , 0.
                                , cuda_ind = cuda_ind )
@@ -259,8 +306,10 @@ def ramp_cost_f(curr_state, new_state, ramp_up_cost : float, ramp_down_cost : fl
 
 
 def startup_cost_f( starts
-                  , is_cold_start : Union[bool, np.ndarray, GPUArray]
-                  , cold_start_costs, hot_start_costs, cuda_ind = False):
+                  , is_cold_start    : Union[bool, np.ndarray, GPUArray]
+                  , cold_start_costs
+                  , hot_start_costs
+                  , cuda_ind         : bool = False):
 
     if not cuda_ind:
         return np.where( starts
@@ -404,22 +453,23 @@ def opd_1fuel( power_prices   : np.ndarray
         cashflow = revenue - fuel_cost - VC * curr_energy - startup_cost - ramp_cost
 
     # new state parameters
-    curr_state['hours_in_state']  = gpa_where( new_state == state_state if not cuda_ind else equal_bools(new_state, state_state) # no state change
-                                            , curr_state['hours_in_state'] + hours_in_block
-                                            , hours_in_block
-                                            , cuda_ind = cuda_ind )
-    curr_state['generation']      = curr_generation
-    curr_state['total_starts']   += starts
-    curr_state['hours_shut']      = gpa_where( ((new_state == TollingState.NOT_RUNNING) & (state_state == TollingState.NOT_RUNNING)) if not cuda_ind else
-                                               (equal_gpa(new_state, TollingState.NOT_RUNNING.value) and equal_gpa(state_state, TollingState.NOT_RUNNING.value))
-                                            , curr_state['hours_shut'] + hours_in_block
-                                            , 0
-                                            , cuda_ind = cuda_ind )
-    curr_state['hours_run']       = gpa_where( still_running_indicator(state_state, new_state, cuda_ind = cuda_ind)
-                                             , curr_state['hours_run'] + hours_in_block
-                                             , 0
-                                             , cuda_ind = cuda_ind )
-    curr_state['global_starts']  += starts
-    curr_state['state']           = new_state
+    curr_state_update = { 'hours_in_state': gpa_where( new_state == state_state if not cuda_ind else equal_bools(new_state, state_state) # no state change
+                                                     , curr_state['hours_in_state'] + hours_in_block
+                                                     , hours_in_block
+                                                     , cuda_ind = cuda_ind )
+                        , 'generation'    : curr_generation
+                        , 'total_starts'  : curr_state['total_starts'] + starts
+                        , 'hours_shut'    : gpa_where( ((new_state == TollingState.NOT_RUNNING) & (state_state == TollingState.NOT_RUNNING)) if not cuda_ind else
+                                                       (and_bool(equal_gpa(new_state, TollingState.NOT_RUNNING.value), equal_gpa(state_state, TollingState.NOT_RUNNING.value)))
+                                                     , curr_state['hours_shut'] + hours_in_block
+                                                     , const_array(len(new_state), 0, dtype_=np.int, cuda_ind=cuda_ind)
+                                                     , cuda_ind = cuda_ind )
+                        , 'hours_run'     : gpa_where( still_running_indicator(state_state, new_state, cuda_ind = cuda_ind)
+                                                     , curr_state['hours_run'] + hours_in_block
+                                                     , const_array(len(new_state), 0, dtype_=np.int, cuda_ind=cuda_ind)
+                                                     , cuda_ind = cuda_ind )
+                        , 'global_starts' : curr_state['global_starts'] + starts
+                        , 'state'         : new_state
+                        , }
 
-    return cashflow, curr_state
+    return cashflow, curr_state_update
