@@ -15,17 +15,23 @@ from mrds.vols.vols_get import get_vol_object
 from mrds.correlations  import corr_hyp_sec_two_fronts_time_diff
 from cuda.cuda.cuda_ops import vtpm
 
+logger = getLogger(__name__)
+
 # cuda related stuff
-import pycuda.autoinit
-import pycuda.curandom
-import pycuda.cumath
+try:
+    import pycuda.autoinit
+except:
+    logger.info('CUDA functionality not enabled.')
+from pycuda.curandom import XORWOWRandomNumberGenerator
+from pycuda.cumath   import exp as gpa_exp
 from pycuda.gpuarray import GPUArray, empty, to_gpu
 
-from skcuda.linalg import dot as cuda_dot
-from skcuda.linalg import init as skcuda_init
-skcuda_init()
-
-logger = getLogger(__name__)
+try:
+    from skcuda.linalg import dot as cuda_dot
+    from skcuda.linalg import init as skcuda_init
+    skcuda_init()
+except:
+    logger.info('SKCUDA not enabled.')
 
 
 class ComSkewTolling(ComSkewORM):
@@ -357,11 +363,11 @@ class ComSkewTolling(ComSkewORM):
                                                 np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose() )
                 else:
                     if cash_vols.shape == (1, ):  # 1 asset generation
-                        curr_asset_values *= pycuda.cumath.exp(-0.5 * cash_vols**2 * block_hours_num + \
+                        curr_asset_values *= gpa_exp(-0.5 * cash_vols**2 * block_hours_num + \
                                                    np.sqrt(block_hours_num) * cash_vols * cash_corr_rns.transpose() )
                     else:
                         cash_vols_gpu = cash_vols if isinstance(cash_vols, GPUArray) else to_gpu(cash_vols)
-                        curr_asset_values *= pycuda.cumath.exp(vtpm( -0.5 * block_hours_num * cash_vols_gpu**2
+                        curr_asset_values *= gpa_exp(vtpm( -0.5 * block_hours_num * cash_vols_gpu**2
                                                        , np.sqrt(block_hours_num) * vtpm( cash_vols_gpu, cash_corr_rns.transpose(), tm_ind='t', new_mtx_gen=True)
                                                        , tm_ind      = 'p'
                                                        , new_mtx_gen = True ) )
@@ -374,99 +380,3 @@ class ComSkewTolling(ComSkewORM):
             # spot_sims[sim_date] = spot_sim
 
         # return spot_sims
-
-
-# class ComSkewTollingCuda(ComSkewTolling):
-#     """ Cuda version of skew tolling model.
-#     """
-#
-#     def __F_skew_tsf_cuda(self):
-#         """
-#
-#         """
-#
-#         with open(self._SKEW_FCT_DIR + 'cuda/skew_tsf.c', 'r') as F_skew_el:
-#             return SourceModule(F_skew_el.read()).get_function('F_skew_tsf')
-#
-#     @staticmethod
-#     def _cash_rns( cash_corr      : np.ndarray
-#                  , nb_simulations : int
-#                  , rn_type        = float ):
-#         """ Generates the cash correlations
-#
-#         :param cash_corr: matrix of cash correlations
-#         :param nb_simulations: number of simulations.
-#         :param rn_type: type of random numbers to generate.
-#         :param
-#         """
-#
-#         nb_assets = cash_corr.shape[0]  # cash_corr is a square matrix
-#
-#         spot_rn_init  = gpa.empty( (nb_assets, nb_simulations), dtype=rn_type)
-#         cash_corr_gpu = gpa.to_gpu(np.linalg.cholesky(cash_corr).astype(rn_type))
-#         curand.gen_eff_dev_rns( spot_rn_init.size
-#                               , np.longlong(spot_rn_init.ptr)
-#                               , pycuda.curandom.XORWOWRandomNumberGenerator())
-#
-#         return cuda_ops.matmul(cash_corr_gpu, spot_rn_init)
-#
-#     def _generate_days_vecs(self, nb_days: int, cuda_ind=False) -> Union[Tuple[List, List], Tuple[GPUArray, GPUArray]]:
-#         """ Generate days for simulate_spot_blocks.
-#
-#         :param cuda_ind: Whether to use and generate objects on cuda, or on cpu.
-#         :returns: tuple of days TODO: FIX THIS
-#         """
-#
-#         days = self._generate_days(nb_days)
-#         days_diff = gpa.empty(len(days))
-#         days_diff[0] = np.array(0.)
-#         days_diff[1:] = np.diff(days)  # TODO: PROBABLY THIS IS INEFFICIENT, CHECK!!
-#
-#         return gpa.to_gpu(days), days_diff
-#
-#     def simulate_spot_blocks( self
-#                             , assets         : List[str]
-#                             , nb_simulations : int
-#                             , tolling_start  : datetime.date
-#                             , tolling_end    : datetime.date
-#                             , set_seed       = None) -> Dict[str, np.ndarray]:
-#         """ Same as simulate_spot_blocks, but for all blocks. TODO: DESCRIBE THIS BETTER
-#
-#         :param assets: list of assets to which asset to simulate block prices for.
-#         :param nb_simulations: number of simulations.
-#         :param tolling_start: start of the tolling simulations
-#         :param tolling_end: end of tolling sims.
-#         :param set_seed: optional param for debugging, so that simulations are always the same
-#         :returns: dictionary, where keys are simulated assets, and values are TODO: FINISH HERE!!!
-#         """
-#
-#         # obtain the months corresponding to tolling_start and tolling_end.
-#         first_month = datetime.date(tolling_start.year, tolling_start.month, 1)  # first of first month
-#         last_month  = datetime.date(tolling_end.year  , tolling_end.month  , 1)  # first of last month
-#         months_to_use = 1  # TODO: dates of first of months between first_month and last_month
-#         days, days_diff = self._generate_days_vecs(nb_days)
-#         # construct the equiv. of days = range(31)/365.25
-#         fom_sims_fom = self.simulate_1nb(assets, nb_simulations, months_to_use, set_seed=set_seed)
-#
-#         spot_sims = {}
-#         for asset in assets:
-#
-#             self.gen_spot_rn(nb_simulations, cuda_ind=cuda_ind)
-#
-#             cash_curves_asset = self._cash_vol_curves(asset)
-#             # cash vol tenors
-#             cv_tenors = [cash_curves_asset.implied_vol(fwd_date, K, ttm)
-#                          for fwd_date in (cash_curves_asset.vol_dates if not tenors_chosen else tenors_chosen)]
-#
-#             w_days = pycuda.cumath.sqrt(days_diff[:days_diff_l]) * self.spot_rn_a[asset_nb][:, :days_diff_l]
-#             cuda_ops.cumsum_cuda(w_days)
-#             for fwd_tenor_nb, cash_vol_tenor in cv_tenors:
-#                 # fom in column format
-#                 fom_sims = fom_sims_all[fwd_tenor_nb, :]   # row vec
-#                 mult_1 = np.float32(-0.5 * cash_vol_tenor**2)
-#                 mult_2 = np.float32(cash_vol_tenor)
-#                 col_vec = pycuda.cumath.exp(days * mult_1 + w_days * mult_2)
-#                 # transpose is used
-#                 spot_sims[asset][fwd_tenor_nb] = cuda_ops.vtpv(fom_sims, col_vec, tm_ind='t', transpose_ind=True).transpose()
-#
-#         return spot_sims
