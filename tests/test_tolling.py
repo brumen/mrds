@@ -47,7 +47,7 @@ class TestTolling(TestCase):
         import time
 
         t1 = time.time()
-        res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20), nb_simulations=50000)
+        res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20), nb_simulations=5000)
         print(time.time() -t1)
 
         self.assertTrue(True)

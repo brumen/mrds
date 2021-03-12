@@ -15,14 +15,14 @@ def tolling_params_default():
            , 'VC'                  : 10.  # VC - variable costs
            , 'rampRate'            : 3.
            , 'shutdownSPin'        : 0.1  # shutdown shadow price in
-           , 'minDownTime'         : 8.  # minimum downtime
-           , 'minRunTime'          : 16.  # minimum run time.
+           , 'minDownTime'         : 8  # minimum downtime
+           , 'minRunTime'          : 16  # minimum run time.
            , 'fixedStartupCost'    : 10.
            , 'fixedStartupCostCold': 10.
-           , 'maxMonthlyStarts': 5.
+           , 'maxMonthlyStarts': 5
            , 'coldStartup'     : 10.
-           , 'startupHorizon'  : 16.
-           , 'shutdownHorizon' : 16.
+           , 'startupHorizon'  : 16
+           , 'shutdownHorizon' : 16
            , 'rampUpSPin'      : 10.
            , 'rampDownSPin'    : 10.
            , 'rampUpCost'      : 10.
