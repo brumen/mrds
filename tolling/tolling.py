@@ -12,12 +12,11 @@ try:
 except:
     logger.info('Could not initialize CUDA. Cuda functionality will not work.')
 
-import cuda.cuda.cuda_ops as cuda_ops
-from pycuda.gpuarray import GPUArray, minimum, zeros, empty as gpa_empty
-from cuda.cuda.cuda_ops import bigger_gpa, smaller_gpa, and_bool
+from pycuda.gpuarray import GPUArray, zeros
+from mrds.tolling.tolling_states import const_array
 
 from mrds.tolling.opd              import opd_1fuel
-from mrds.tolling.opd.opd_1fuel    import TollingState
+from mrds.tolling.tolling_states   import TollingState, BlockStates
 from mrds.tolling.com_skew_tolling import ComSkewTolling
 from mrds.tolling.default_tolling  import tolling_params_default
 from mrds.forward_curve            import FwdCurve
@@ -217,15 +216,7 @@ class TollingModel(ComSkewTolling):
 
         tp = self.tolling_params
 
-        if not self.cuda_ind:
-            return (total_run_hours < tp['maxMonthlyStarts']) & (hours_shut >= tp['minDownTime'])
-
-        # cuda section
-        if not isinstance(total_run_hours, GPUArray) and not isinstance(hours_shut, GPUArray):
-            return (total_run_hours < tp['maxMonthlyStarts']) & (hours_shut >= tp['minDownTime'])
-
-        return and_bool( smaller_gpa(total_run_hours, tp['maxMonthlyStarts'])
-                       , bigger_gpa(hours_shut, tp['minDownTime']) )
+        return (total_run_hours < tp['maxMonthlyStarts']) & (hours_shut >= tp['minDownTime'])
 
     def _peak_only_startup( self
                           , total_starts : Union[int, np.ndarray]
@@ -241,15 +232,8 @@ class TollingModel(ComSkewTolling):
 
         tp = self.tolling_params
 
-        cnd_1 = total_starts < tp['maxMonthlyStarts']
-        cnd_2 = block_name == 'peak'
-        cnd_3 = hours_shut >= tp['minDownTime']
-
-        if not self.cuda_ind:
-            return cnd_1 & cnd_2 & cnd_3
-
-        # cuda section
-        return minimum(minimum(cnd_1, cnd_2), cnd_3)
+        # TODO: the string comparison will not work in cuda
+        return (total_starts < tp['maxMonthlyStarts']) & (block_name == 'peak') & (hours_shut >= tp['minDownTime'])
 
     def _offpeak_only_startup( self
                              , total_starts : Union[int, np.ndarray]
@@ -265,16 +249,8 @@ class TollingModel(ComSkewTolling):
 
         tp = self.tolling_params
 
-        cnd_1 = total_starts < tp['maxMonthlyStarts']
-        cnd_2 = block_name != 'peak'
-        cnd_3 = hours_shut >= tp['minDownTime']
-
-        if not self.cuda_ind:
-            return cnd_1 & cnd_2 & cnd_3
-
-        # Cuda version
-        return minimum(minimum(cnd_1, cnd_2), cnd_3)
-        # return cuda_ops.min_int_three_cons(cnd_1, cnd_2, cnd_3)
+        # TODO: string comparison will not work in cuda.
+        return (total_starts < tp['maxMonthlyStarts']) & (block_name != 'peak') & (hours_shut >= tp['minDownTime'])
 
     def _startup_decision(self, cs):
         """ Decision whether to start up, depending on the dispatch method.
@@ -352,11 +328,7 @@ class TollingModel(ComSkewTolling):
 
         tp = self.tolling_params
 
-        if not self.cuda_ind or not isinstance(hours_run, GPUArray):  # part cuda section
-            return hours_run >= tp['minRunTime']
-
-        # cuda section for GPUArray
-        return bigger_gpa(hours_run, tp['minRunTime'])
+        return hours_run >= tp['minRunTime']
 
     def _peak_only_shutdown(self, block_name : str, hours_run : Union[int, np.ndarray, GPUArray]) -> Union[bool, np.ndarray, GPUArray]:
         """ Whether the power plant can shut at a particular block.
@@ -366,15 +338,8 @@ class TollingModel(ComSkewTolling):
         :returns: indicator whether it should shutdown.
         """
 
-        cnd_2 = block_name != 'peak'
-        cnd_3 = hours_run >= self.tolling_params['minRunTime']
-
-        if not self.cuda_ind:
-            return cnd_2 & cnd_3
-
-        # TODO: THIS BELOW IS WRONG - FIX FIX FIX
-        # STRING COMPARISONS FOR GPUArray
-        return cuda_ops.min_int_two(cnd_2, cnd_3.astype(np.int32), cs['can_shut'])
+        # TODO: string operations for CUDA will not work
+        return (block_name != 'peak') & (hours_run >= self.tolling_params['minRunTime'])
 
     def _offpeak_only_shutdown(self, block_name : str, hours_run : Union[int, np.ndarray, GPUArray]) -> Union[np.ndarray, GPUArray]:
         """ Shut down only in offpeak.
@@ -384,14 +349,8 @@ class TollingModel(ComSkewTolling):
         :returns: array indicating whether to shutdown or not.
         """
 
-        cnd_2 = block_name == 'peak'
-        cnd_3 = hours_run  >= self.tolling_params['minRunTime']
-
-        if not self.cuda_ind:
-            return cnd_2 & cnd_3  # cs['can_shut']
-
-        # cuda version
-        return cuda_ops.min_int_two(cnd_2, cnd_3, cs['can_shut'])  # TODO: that's wrong - FIX THIS HERE
+        # TODO: string comparison will not work for cuda.
+        return (block_name == 'peak') & (hours_run  >= self.tolling_params['minRunTime'])
 
     def _shutdown_decision(self, block_name : str, hours_run : Union[np.ndarray, GPUArray, int]) -> Union[bool, np.ndarray, GPUArray]:
         """ Decision whether it is sensible to shut down
@@ -470,10 +429,13 @@ class TollingModel(ComSkewTolling):
         :returns: array of size size and value set to value, either np.array or gpu array
         """
 
-        res = (np.empty if not self.cuda_ind else gpa_empty)(size, dtype=dtype_)
-        res.fill(value)
 
-        return res
+        return const_array(size, value, dtype_=dtype_, cuda_ind=self.cuda_ind)
+
+        # res = (np.empty if not self.cuda_ind else gpa_empty)(size, dtype=dtype_)
+        # res.fill(value)
+        #
+        # return res
 
     def _set_initial_current_state(self, nb_sims : int) -> Dict[str, Union[np.ndarray, GPUArray]]:
         """ Set up the initial current state dictionaries.
