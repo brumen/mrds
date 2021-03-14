@@ -20,7 +20,7 @@ def tolling_params_default():
            , 'fixedStartupCost'    : 10.
            , 'fixedStartupCostCold': 10.
            , 'maxMonthlyStarts': 5
-           , 'coldStartup'     : 10.
+           , 'coldStartup'     : 10
            , 'startupHorizon'  : 16
            , 'shutdownHorizon' : 16
            , 'rampUpSPin'      : 10.
