@@ -2,22 +2,19 @@
 
 import json
 
-from sqlalchemy                 import ( Column
-                                       , String
-                                       , Date
-                                       , BigInteger
-                                       , Enum
-                                       # , LargeBinary  # this is used if pickle.dumps is used
-                                       , JSON
-                                       , )
+from sqlalchemy import ( Column
+                       , String
+                       , Date
+                       , BigInteger
+                       , Enum
+                       , JSON
+                       , )
 from sqlalchemy.ext.declarative import declarative_base
 
 from ao.flight   import create_session
 from mrds.config import brumen_pass
 
 DB = f'postgres://brumen:{brumen_pass}@localhost:5434/com_skew'
-
-DEFAULT_SESSION = create_session(db=DB)
 
 ComSkewParamsBaseORM = declarative_base()  # common base class
 
@@ -67,8 +64,9 @@ class ComSkewCParams(ComSkewParamsBaseORM):
 
 # Example of usage
 # p1 = ComSkewParams(market_date=datetime.date(2015, 4, 1), commodity='WTI', param='sigma', value=json.dumps({'a': 1}))
-# DEFAULT_SESSION.add(p1)
-# DEFAULT_SESSION.commit()
+# session = create_session(db=DB)
+# session.add(p1)
+# session.commit()
 
 # typical query which implements AOTrade:
 # select fid.flight_id_long, fo.price
