@@ -1,7 +1,6 @@
-#
-# testing of cuda operations
-#
-import config 
+""" Tests regarding the CUDA operations.
+"""
+
 import numpy as np
 import pycuda.driver as drv
 import pycuda.gpuarray as gpa
@@ -29,7 +28,6 @@ def test_vpm_cols(pt_ind='network_struct',
         res_gpu = m1_d.get()
         res_diff = np.abs(res_cpu - res_gpu)
         res_bool = (res_diff < 1e-4)
-        print "rows, cols: ", (rows, cols), "gpu speedup :", t1/t2
 
     for rows_nb in rows_l:
         for cols_nb in cols_l:
@@ -42,6 +40,7 @@ def test_vtpv(pt_ind='t',
     """
     testing the vector + vector that makes a matrix
     """
+
     def execute_vpm(rows, cols):
         v1 = np.random.random(rows).astype(np.float32)
         v1_d = gpa.to_gpu(v1)
@@ -49,14 +48,8 @@ def test_vtpv(pt_ind='t',
         m1_d = gpa.to_gpu(m1)
         t1, res_cpu = time_normal_call(lambda: v1.reshape((rows, 1)) * m1)
         t2, res_gpu = time_cuda_call(drv.Event(), drv.Event(), co.vtpv, v1_d, m1_d, 't')
-        # for i in range(10000):
-        #     res_gpu = co.vtpv(v1_d, m1_d, 't')
-        # t2 = 1.
+
         res_gpu = res_gpu.get()
-        # print "V1", v1_d, m1_d
-        # print "RES_GPU", res_gpu, "\n", res_cpu
-        res_diff = np.abs(res_cpu - res_gpu)
-        print "rows, cols: ", (rows, cols), "gpu speedup :", t1 / t2, "diff:", np.max(res_diff)
 
     for rows_nb in rows_l:
         for cols_nb in cols_l:
@@ -88,7 +81,7 @@ def test_rowsum_cuda(rows_l=[31, 300, 3000, 10000],
         res_gpu = res_cpu  # res_gpu_d.get()
         res_diff = res_cpu - res_gpu
         res_bool = np.abs(res_diff) < 1e-2
-        print "row, nb_sims, sppedup:", (row_nb, col_nb), t1/t2
+
         return res_bool.all()
 
     for rows_nb in rows_l:
@@ -114,8 +107,6 @@ class modulesTest (unittest.TestCase):
             self.rows = self.rows_small
             self.cols = self.cols_small
 
-        print "Matrix size = (", self.rows, ",", self.cols, ")"
-
     def test_colsum_cuda(self):
 
         sample_size_rows = 31
@@ -132,11 +123,6 @@ class modulesTest (unittest.TestCase):
         res_gpu = m1_d.get() 
         res_bool = np.abs(res_cpu - res_gpu) < 1e-2
 
-        # print "rcpu = ", res_cpu
-        # print "rgpu = ", res_gpu
-        print "time cpu = ", t1
-        print "time gpu = ", t2
-        print "speedup = ", t1/t2
         self.assertTrue(res_bool.all())
 
     def test_colsum_cuda_last(self):
@@ -157,11 +143,6 @@ class modulesTest (unittest.TestCase):
         t2, res_d = time_cuda_call(start, end, co.colsum_cuda_last, m1_d)
         res_gpu = res_d.get() 
         res_bool = np.abs(res_cpu - res_gpu) < 1e-2
-        print "rcpu = ", res_cpu
-        print "rgpu = ", res_gpu
-        print "time cpu = ", t1
-        print "time gpu = ", t2
-        print "speedup = ", t1/t2
 
         self.assertTrue(res_bool.all())
 
@@ -181,10 +162,6 @@ class modulesTest (unittest.TestCase):
         res_diff = res_cpu - res_gpu
         res_bool = np.abs(res_diff) < 1e-2
 
-        print "time cpu = ", t1
-        print "time gpu = ", t2
-        print "speedup = ", t1/t2
-        
         self.assertTrue(res_bool.all())
 
     def test_maximum_cuda(self):
@@ -204,10 +181,6 @@ class modulesTest (unittest.TestCase):
         res_diff = res_cpu - res_gpu
         res_bool = (res_diff < 1e-2) & (res_diff > -1e-2)
 
-        print "time cpu = ", t1
-        print "time gpu = ", t2
-        print "speedup = ", t1/t2
-        
         self.assertTrue(res_bool.all())
 
     def test_write_vec_to_mat_col(self):
@@ -248,11 +221,6 @@ class modulesTest (unittest.TestCase):
         res_diff = cpu_r - t_v_d1.get()
         res_bool = (res_diff < 1e-2) & (res_diff > -1e-2)
 
-        print "t_cpu = ", t1
-        print "t_gpu = ", t2
-        print "t_gpu_2 = ", t3
-        print "speedup = ", t1/t2
-
         self.assertTrue( res_bool.all())
 
     def test_exp_fct(self):
@@ -271,12 +239,6 @@ class modulesTest (unittest.TestCase):
 
         res_diff = cpu_r - t_v_d1.get()
         res_bool = (res_diff < 1e-2) & (res_diff > -1e-2)
-
-        print "t_cpu = ", t1
-        print "t_gpu (Mine) = ", t2
-        print "t_gpu (Builtin) = ", t3
-        print "speedup (Mine) = ", t1/t2
-        print "speedup (Builtin) = ", t1/t3
 
         self.assertTrue(res_bool.all())
 
@@ -306,40 +268,12 @@ def test_vtpm_ao(pt_ind='t',
         v_mult_d = gpa.to_gpu(v_mult_h)
         m_h = np.random.random((rows, cols))
         m_d = gpa.to_gpu(m_h)
-        # t1, res_cpu = time_normal_call(lambda: v1.reshape((rows, 1)) * m1)
-        # t2, res_gpu = time_cuda_call(drv.Event(), drv.Event(), co.vtpv, v1_d, m1_d, 't')
-        print "start cpu"
         m_h *= v_mult_h
         m_h += v_plus_h
-        print "finish cpu"
-        print "start gpu"
         res_gpu = co.vtpm_cols_new_hd_ao(v_plus_h, v_mult_h, m_d)
-        print "finish gpu"
         res_gpu = res_gpu.get()
         res_diff = np.abs(m_h - res_gpu)
-        print "RR", rows, cols, np.max(res_diff)
-        # print "rows, cols: ", (rows, cols), "gpu speedup :", t1 / t2, "diff:", np.max(res_diff)
 
     for rows_nb in rows_l:
         for cols_nb in cols_l:
             execute_vpm(rows_nb, cols_nb)
-
-
-class smallTest (unittest.TestCase):
-    """
-    conducts small range tests
-    """
-    def test_1(self):
-        self.assertTrue(True)
-
-
-# running the above tests 
-# suite = unittest.TestLoader().loadTestsFromTestCase(smallTest)
-# suite = unittest.TestLoader().loadTestsFromTestCase(modulesTest)
-# unittest.TextTestRunner(verbosity=2).run(suite)
-
-# a1 = 5. * np.ones((500,1000)).astype(np.float32)
-# a1_d = gpa.to_gpu(a1)
-# co.cumsum_cuda(a1_d)
-# print a1_d
-# test_vtpv()

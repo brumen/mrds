@@ -9,7 +9,6 @@ from unittest import TestCase
 from typing   import Tuple, List
 
 from mrds.freight.freight         import Freight
-from mrds.freight.freight_display import FreightDisplay
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +263,7 @@ class SmallFreightTest(FreightTest):
 
     def test_just_run(self):
         """ Runs the test and reports results.
-        NYC is low freigth
+        NYC is low freight
         """
 
         freight_1 = self._simple_freight_object(nb_days=10)

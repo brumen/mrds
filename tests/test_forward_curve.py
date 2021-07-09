@@ -9,6 +9,7 @@ class FwdCurveTest(TestCase):
 
     MKT_DATE = datetime.date(2015, 4, 1)
 
+    # TODO: FIX THESE TESTS.
     def test_fwd_curve_1(self):
         """ Elementary test if the forward curve even runs.
 
@@ -25,7 +26,7 @@ class FwdCurveTest(TestCase):
 
         self.assertEqual(True, False)
 
-    def test_fwd_curve_1(self):
+    def test_fwd_curve_2(self):
         """ Elementary test if the forward curve even runs.
         """
 
