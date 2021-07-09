@@ -2,13 +2,34 @@
 # Volatility testing class
 
 import datetime
+import numpy as np
 
 from unittest import TestCase
 
-from forward_curve   import FwdCurve
-from vols.jwss7      import JWSS7Volatility, JWSS7VolatilityDisplay
-from vols.c0c1c2     import C0C1C2Volatility
-from data.c0c1c2vols import wti2_vol
+from mrds.forward_curve   import FwdCurve
+from mrds.vols.jwss7      import JWSS7Volatility, JWSS7VolatilityDisplay
+from mrds.vols.c0c1c2     import C0C1C2Volatility
+from mrds.data.c0c1c2vols import wti2_vol
+from mrds.vols.vols_basic import black_vol_inverse
+
+
+class VolsBasicTest(TestCase):
+
+    def test_black_vol_inverse(self):
+        """ Tests the inverse black volatility.
+        """
+
+        dt = 1.
+        DF = 0.99
+        theta = 1
+        tol = 1e-6
+
+        for F in np.linspace(10., 1500., 200):
+            for K in np.linspace(10., 1500., 200):
+                for p in np.linspace ( max(F-K, 0.)+ 1.e-6, 5 * max(F-K, 0.) + 5.e-6, 100):
+                    res = black_vol_inverse(F, K, p, dt, DF, theta, tol)
+
+        self.assertTrue(True)
 
 
 class JWVolTest(TestCase):

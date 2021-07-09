@@ -4,7 +4,7 @@
 
 import datetime
 
-from unittest import TestCase
+from unittest import TestCase, TestLoader, TextTestRunner
 
 from mrds.tolling.tolling import TollingModel
 
@@ -44,15 +44,13 @@ class TestTolling(TestCase):
                                  , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK']
                                  , cuda_ind = True )
         tm.multi_thread_calib = False  # Multi-threading doesnt allow for pickling of ORM session
-        import time
 
-        t1 = time.time()
         res = tm.dispatch_all(datetime.date(2015, 5, 1), datetime.date(2015, 6, 20), nb_simulations=10000)
-        print(time.time() -t1)
 
         self.assertTrue(True)
 
 
-# running the above tests 
-# suite = unittest.TestLoader().loadTestsFromTestCase(TollingSimpleTest)
-# unittest.TextTestRunner(verbosity=2).run(suite)
+def main():
+    # running the above tests
+    suite = TestLoader().loadTestsFromTestCase(TestTolling)
+    TextTestRunner(verbosity=2).run(suite)

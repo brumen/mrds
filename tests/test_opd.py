@@ -1,12 +1,12 @@
+""" One-period dispatch tests.
+"""
+
 import numpy as np
 import pycuda.gpuarray as gpa
 
 from unittest import TestCase
 
-from mrds.config import CUDA_PRESENT
-
-if CUDA_PRESENT:
-    import pycuda.autoinit  # IMPORTANT: This line HAS TO BE HERE
+import pycuda.autoinit  # IMPORTANT: This line HAS TO BE HERE
 
 from mrds.tolling.opd              import opd_avx
 from mrds.tolling.opd.opd_1fuel_cu import one_period_dispatch
@@ -25,36 +25,6 @@ class TestOpd(TestCase):
     c = np.random.rand(N)
     d = np.random.rand(N)
     y = np.empty(N)
-
-    # def sample_inputs(self):
-    #     """ Sample cuda params.
-    #     """
-    #
-    #     return ( 6.     # hrAtMax
-    #            , 7.     # hrAtMin
-    #            , 1000.  # maxCap - maximum capacity
-    #            , 100.   # minDisp - minimum dispatch
-    #            , 10.    # startFuel - startup fuel
-    #            , 15.    # startFuelCold - startup fuel from cold.
-    #            , 5.     # addFuelCost - added fuel costs
-    #            , 10.    # VC - variable costs
-    #            , 3.     # rampRate - ramp rate
-    #            , 0.1    # shutdownSPin - shutdown shadow price in
-    #            , 8.     # minDownTime - minimum downtime
-    #            , 16.    # minRunTime - minimum run time.
-    #            , 10.    # fixedStartupCost
-    #            , 10.    # fixedStartupCostCold
-    #            , 5.     # maxMonthlyStarts
-    #            , 10.    # coldStartup
-    #            , 16.    # startupHorizon
-    #            , 16.    # shutdownHorizon
-    #            , 10.    # rampUpSPin
-    #            , 10.    # rampDownSPin
-    #            , 10.    # rampUpCost
-    #            , 10.    # rampDownCost
-    #            , 15.    # rampUpHorizon
-    #            , 25.    # rampDownHorizon
-    #            )
 
     def test_add4_function(self):
         """ Tests whether add4 function works correctly.
