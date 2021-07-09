@@ -1,5 +1,5 @@
 import time
-import tolling_cmg
+import mrds.tolling.tolling_cmg as tolling_cmg
 import test_params
 import mrds
 import opd_1fuel
@@ -282,12 +282,3 @@ class TestTolling(TestCase):
 
         # res = tolling_model.dispatch_cmg()
         return tolling_model
-
-    # try it with:
-    # test_simplest_toll(cuda_ind=True)
-
-    def run_tests_1():
-        t1 = time.time()
-        test_simplest_toll_2(cuda_ind=True, nb_sim=50000)
-        t1 = time.time()
-        test_simplest_toll_2(cuda_ind=False, nb_sim=50000)
