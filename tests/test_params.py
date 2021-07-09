@@ -1,4 +1,3 @@
-import config
 import tolling_cmg
 
 CONST_MIN = 1e-3

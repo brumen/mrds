@@ -3,7 +3,7 @@
 # write unittests
 # 
 
-import config
+import mrds.config as config
 import numpy as np
 
 import pycuda.autoinit

@@ -5,13 +5,8 @@
 \input {pagesetting.tex} %% page sizes 
 
 
-\title{{\bf MRD skew model for commodity prices}}
+\title{{\bf Polynomial 2-factor skew model for commodity prices}}
 \author{Gorazd Brumen}
-\date{First Version: July 28, 2010 
-  \vskip 1mm
-  This Version: \today
-}
-
 
 
 \begin{document}
@@ -19,7 +14,7 @@
 
 \section {Model specification}
 
-The {\it log-normal model} that the MRD proposes is given as follows. 
+The {\it log-normal model} for commodity prices is given as follows. 
 Let $\{ X_i \}_{i=1}^n$ be $n$ factors defined as 
 \begin {eqnarray*}
   dX_i (t,T) = e^{-\kappa_i  (T - t) } \sigma_i \beta (T) \dd W_i 
@@ -223,7 +218,7 @@ Therefore the $\sigma_{ATM}$ we can write as
   \frac { e^{- (\podcc {\kappa}_1 + \podcc {\kappa}_2 ) (T_k - T)  } - e^{- (\podcc {\kappa}_1 + \podcc {\kappa}_2 ) T_k } }
     {\podcc {\kappa}_1 + \podcc {\kappa}_2 } 
 \end{eqnarray*}
-The case for all tenors can be realized using tensor algebra INSERT HERE. 
+The case for all tenors can be realized using tensor algebra.
 
 \vskip 5mm
 %

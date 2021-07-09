@@ -1,12 +1,11 @@
 import numpy as np
 from scipy.special import comb
+from typing        import Tuple, List, Callable
 
 import mrds.quad1d as quad1d
 from mrds.tolling.opd import opd_avx
 
 
-#
-# My own sparse grid implementation
 #
 # Abbreviations:
 #   sparse_grid abbreviated with sg
@@ -14,11 +13,28 @@ from mrds.tolling.opd import opd_avx
 #   weights ... w
 
 
-def index_grid(K, l):
+# TODO: WRITE THIS RECURSION NICELY.
+def index_grid_help(k, R, K, N_low, N_up, Acc_ind, Acc_w):
+    if k == K:
+        R_sum = int(np.sum(R))
+        Acc_ind.append(R)
+        Acc_w.append((-1) ** (N_up - R_sum) * comb(K - 1, R_sum - N_low))  # comb (K - 1, R_sum-N_low ) )
+    elif k == (K - 1):
+        R_sum = int(np.sum(R))
+        for ind in range(max(N_low - R_sum, 0), N_up + 1 - R_sum):  # special case on the last k_d
+            index_grid_help(k + 1, R + [ind], K, N_low, N_up, Acc_ind, Acc_w)
+    else:
+        R_sum = int(np.sum(R))
+        for ind in range(0, N_up + 1 - R_sum):  # !!!!! Used to be 0 and N-Rsum
+            index_grid_help(k + 1, R + [ind], K, N_low, N_up, Acc_ind, Acc_w)
+
+
+def index_grid(K : int , l : int) -> Tuple[List, List]:
     """  Constructs all K- length vectors of integers 1... which sum to less than N
 
     :param K: dimension of the vectors
     :param l: level of sparse grid
+    :returns: tuple of accumulated indices, and accumulated weights.
     # constructs the index grid for sparse grid and saves it into Acc
     # k ... helper index that counts on what level we are
     # R ... current list
@@ -31,25 +47,12 @@ def index_grid(K, l):
     N_low = l
     N_up = l + K - 1
 
-    def index_grid_help(k, R, K, N_low, N_up, Acc_ind, Acc_w):
-        if k == K:
-            R_sum = int(np.sum(R))
-            Acc_ind.append(R)
-            Acc_w.append((-1)**(N_up - R_sum) * comb(K - 1, R_sum - N_low))  # comb (K - 1, R_sum-N_low ) )
-        elif k == (K-1):
-            R_sum = int(np.sum(R))
-            for ind in range(max(N_low-R_sum, 0), N_up + 1 - R_sum):  # special case on the last k_d
-                index_grid_help(k+1, R + [ind], K, N_low, N_up, Acc_ind, Acc_w)
-        else:
-            R_sum = int(np.sum(R))
-            for ind in range(0, N_up + 1 - R_sum):  # !!!!! Used to be 0 and N-Rsum
-                index_grid_help(k+1, R + [ind], K, N_low, N_up, Acc_ind, Acc_w)
-
     Acc_ind = []
     Acc_w = [] 
+
     index_grid_help(0, [], K, N_low, N_up, Acc_ind, Acc_w)
 
-    return [Acc_ind, Acc_w]
+    return Acc_ind, Acc_w
 
 
 def pairs_final(vec_list):
@@ -73,18 +76,20 @@ def pairs_final(vec_list):
     return pairs(map(lambda y: map(lambda x: [x], y), vec_list))
 
 
-def sg_p(D : int, l : int, one_d_discret='gauss_hermite', one_d_grid=[]):
+def sg_p(D : int, l : int, one_d_grid : List[float], one_d_discret : str ='gauss_hermite' ):
     """ Construct sparse grid points:
 
     :param D: dimension of sparse grid
-    :param level: sparse grid level
-      one_d_discret ... 1-D discretization of points
+    :param l: sparse grid level
+    :param one_d_grid: one dimensional grid given
+    :param one_d_discret:  grid used for 1-D discretization of points
         gauss_hermite ... G-H discretization
         linear ... equidistantly  spaced
         manual ... suplied in one_d_grid
+    :returns:
     """
 
-    ig = index_grid(D, l)[0]
+    ig, _ = index_grid(D, l)
 
     if one_d_discret is 'gauss_hermite':
         hg = [[list(quad1d.gh_pw(n)[0]) for n in B] for B in ig]
@@ -99,15 +104,12 @@ def sg_p(D : int, l : int, one_d_discret='gauss_hermite', one_d_grid=[]):
         raise RuntimeError('one_d_discret parameter not one of gauss_hermite, linear, manual')
 
     # flattening, this is really effective !!!!
-    spg = []
-    for par_list in [pairs_final(y) for y in hg]:
-        for inv_list in par_list:
-            spg.append(inv_list)
-
-    return spg
+    return [inv_list
+            for par_list in [pairs_final(y) for y in hg]
+                for inv_list in par_list ]
 
 
-def sg_w(D : int, l : int, one_d_discret='gauss_hermite'):
+def sg_w(D : int, l : int, one_d_discret='gauss_hermite') -> List[float]:
     """ Constructs weights for sparse grid of dimension D and level l
 
     :param D: dimension of sparse grid.
@@ -115,9 +117,7 @@ def sg_w(D : int, l : int, one_d_discret='gauss_hermite'):
     :param one_d_discret: type of 1-dimensional discretization.
     """
 
-    iwg = index_grid(D, l)  # index and weight grid
-    ig = iwg[0]  # index grid
-    wg = iwg[1]  # weight grid
+    ig, wg = index_grid(D, l)  # index and weight grid
 
     if one_d_discret is 'gauss_hermite':
         hg = [[list(quad1d.gh_pw(n)[1]) for n in B] for B in ig]
@@ -126,17 +126,17 @@ def sg_w(D : int, l : int, one_d_discret='gauss_hermite'):
     else:
         raise RuntimeError('one_d_discret not one of gauss_hermite, linear')
 
-    spg = []
-    for par_list, w_list in zip([pairs_final(y) for y in hg], wg):
-        for inv_list in par_list:
-            spg.append([inv_list, w_list])
+    # sparse grid
+    spg = [ [inv_list, w_list]
+            for par_list, w_list in zip([pairs_final(y) for y in hg], wg)
+                for inv_list in par_list ]
 
     # mapping the product
     return [np.prod(x[0]) * x[1] for x in spg]
 
 
-def sg_quad(D : int, l : int, f, one_d_discret='gauss_hermite', xmm_use=True):
-    """ Sparse grid quadrature.
+def sg_quad(D : int, l : int, f : Callable, one_d_discret : str = 'gauss_hermite', xmm_use : bool = True) -> float:
+    """ Sparse grid quadrature of the function f.
         Integrates \int f(x) e^(-x**2) / (2 * pi)^(D/2)
 
     :param D: dimension of function f
@@ -145,16 +145,16 @@ def sg_quad(D : int, l : int, f, one_d_discret='gauss_hermite', xmm_use=True):
     :param one_d_discret: 1 dimen. discretization, can be either
         gauss_hermite (support -inf, inf)
         linear (support [-1, 1] )
-    :param xmm_use: whether to use xmm optimization.
+    :param xmm_use: indicator whether to use xmm optimization.
     """
 
     sqrt2 = np.sqrt(2.)
     sqrt_pi = np.sqrt(np.pi)
     g = lambda x: f(x * sqrt2) / sqrt_pi**D
     weights = np.array(sg_w(D, l, one_d_discret))
-    vals = np.array(map(g, [np.array(x) for x in sg_p(D, l, one_d_discret)])).flatten()
+    vals = np.array(map(g, [np.array(x) for x in sg_p(D, l, [], one_d_discret)])).flatten()
 
-    if not xmm_use:
-        return np.sum(weights*vals)
+    if xmm_use:
+        return opd_avx.num_quad(weights, vals, len(vals))
 
-    return opd_avx.num_quad(weights, vals, len(vals))
+    return np.sum(weights*vals)
