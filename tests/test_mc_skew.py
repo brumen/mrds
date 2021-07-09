@@ -7,10 +7,10 @@ import scipy
 import scipy.optimize
 from scipy.integrate import quad
 
-import pricers
+import mrds.pricers as pricers
 import unittest
 import pickle
-import vols
+import vols.vols as vols
 
 
 class ComSkewTests(unittest.TestCase):
@@ -55,23 +55,6 @@ class ComSkewTests(unittest.TestCase):
                               quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
                               quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0] ] )
             self.assertTrue( norm ( mo_res - num_res) < 1e-7 )
-
-    def test_inverse_naive (self):
-        """ Comparing the black_vol_inverse: advanced function and _naive function.
-        """
-
-        F = 100
-        K = 100.0
-        p = 21
-        dt = 1
-        DF = 0.99
-        theta = 1
-        tol = 1e-8
-        inv1 = array([vols.black_vol_inverse_naive(F, K, p, dt, DF, theta, tol) for K in range (80,120,1)])
-        inv2 = array([vols.black_vol_inverse(F, K, p, dt, DF, theta, tol) for K in range (80,120,1)])
-        
-        res = reduce (lambda x,y: x and y, abs (inv1 - inv2) < 1e-5, True)
-        self.assertTrue ( res )
 
     def test_negative_forwards(self):
         """ Tests whether the model simulation produces negative prices
