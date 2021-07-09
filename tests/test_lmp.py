@@ -1,6 +1,6 @@
 
 import numpy as np
-from lmp import LMP
+from mrds.lmp import LMP
 
 from unittest import TestCase
 

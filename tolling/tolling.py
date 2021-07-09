@@ -13,10 +13,9 @@ except:
     logger.info('Could not initialize CUDA. Cuda functionality will not work.')
 
 from pycuda.gpuarray import GPUArray, zeros
-from mrds.tolling.tolling_states import const_array
 
 from mrds.tolling.opd              import opd_1fuel
-from mrds.tolling.tolling_states   import TollingState, BlockStates
+from mrds.tolling.tolling_states   import TollingState, const_array
 from mrds.tolling.com_skew_tolling import ComSkewTolling
 from mrds.tolling.default_tolling  import tolling_params_default
 from mrds.forward_curve            import FwdCurve
@@ -101,9 +100,6 @@ class TollingModel(ComSkewTolling):
 
         self.fuel_idx           = fuel_idx
         self.tolling_params     = tolling_params
-
-        # TODO: FIX THIS HERE.
-        # fixed_monthly_val = None if self.fuel_idx_name is not 'FIXED' else self.tolling_params['fixedCostPerMonth']
 
         # for usage w/ this class
         self.__dispatch_mode    = 'cmg'  # default mode

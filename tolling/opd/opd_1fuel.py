@@ -16,8 +16,7 @@ except:
 import pycuda.gpuarray as gpa
 
 from mrds.tolling.opd   import opd_avx
-from cuda.cuda.cuda_ops import selection_kernel
-from pycuda.gpuarray    import GPUArray
+from pycuda.gpuarray    import GPUArray, where as gpawhere
 
 SMALL_EPS = 1e-5
 
@@ -122,12 +121,13 @@ def do_startup_f( can_start             : Union[bool, np.ndarray, GPUArray]
 
     # cuda section
     if isinstance(can_start, bool):
+        # TODO: THIS IS WRONG HERE - FIX THIS
         return (force_start or is_startup_profitable) if can_start else False
 
     # GPUArray is can_start
-    return gpa_where( can_start
-                    , force_start or is_startup_profitable
-                    , False )
+    return gpawhere( can_start
+                   , force_start or is_startup_profitable
+                   , False )
 
 
 def gpa_where( cond       : Union[np.ndarray, GPUArray]
@@ -144,34 +144,50 @@ def gpa_where( cond       : Union[np.ndarray, GPUArray]
     if isinstance(cond, bool):
         return cond_true if cond else cond_false
 
-    return selection_kernel(cond, cond_true, cond_false)
+    return gpawhere(cond, cond_true, cond_false)
 
 
-def new_state_f(state_state, do_startup, do_shutdown, cuda_ind=False) -> Union[np.ndarray, GPUArray]:
+def new_state_f( curr_state  : Union[bool, np.ndarray, GPUArray]
+               , do_startup  : Union[bool, np.ndarray, GPUArray]
+               , do_shutdown : Union[bool, np.ndarray, GPUArray]
+               , cuda_ind    : bool = False ) -> Union[bool, np.ndarray, GPUArray]:
+    """ Computes the new state of the system, from the old (current state), and decision variables.
+
+    :param curr_state: vector of current state.
+    :param do_startup: whether to do the startup
+    :param do_shutdown: whether to shut it down.
+    :param cuda_ind: indicator for cuda.
+    :returns: new state of the system.
+    """
 
     if not cuda_ind:
-        return  np.where( (state_state == TollingState.NOT_RUNNING) & do_startup
+        return  np.where( (curr_state == TollingState.NOT_RUNNING) & do_startup
                         , TollingState.MAX_DISPATCH
-                        , np.where( (state_state == TollingState.MAX_DISPATCH) & do_shutdown
+                        , np.where( (curr_state == TollingState.MAX_DISPATCH) & do_shutdown
                                   , TollingState.NOT_RUNNING
-                                  , state_state)
-                        )  # remain in the same state
+                                  , curr_state )  # remain in the same state
+                        )
 
     # cuda version
-    max_dispatch = const_array(len(state_state), TollingState.MAX_DISPATCH.value, np.short, cuda_ind=True)
-    not_running  = const_array(len(state_state), TollingState.NOT_RUNNING.value , np.short, cuda_ind=True)
+    max_dispatch = const_array(len(curr_state), TollingState.MAX_DISPATCH.value, np.short, cuda_ind=True)
+    not_running  = const_array(len(curr_state), TollingState.NOT_RUNNING.value , np.short, cuda_ind=True)
 
-    return gpa_where( (state_state == TollingState.NOT_RUNNING.value) and do_startup
+    return gpa_where( (curr_state == TollingState.NOT_RUNNING.value) and do_startup
                     , max_dispatch
-                    , gpa_where( (state_state == TollingState.MAX_DISPATCH.value) and do_shutdown
+                    , gpa_where( (curr_state == TollingState.MAX_DISPATCH.value) and do_shutdown
                                , not_running
-                               , state_state )  # remain in state
+                               , curr_state )  # remain in state
                     )
 
 
-def curr_generation_f(new_state, max_cap, min_disp, cuda_ind=False):
-    """
+def curr_generation_f(new_state : Union[np.ndarray, GPUArray], max_cap : float, min_disp : float, cuda_ind : bool = False):
+    """ Computes current generation.
 
+    :param new_state: new state of the system.
+    :param max_cap: maximum capacity of the power plant.
+    :param min_disp: minimum dispatch
+    :param cuda_ind: indicator for cuda
+    :returns: current generation of the power plant.
     """
 
     if not cuda_ind:
@@ -185,15 +201,25 @@ def curr_generation_f(new_state, max_cap, min_disp, cuda_ind=False):
     return gpa_where( new_state == TollingState.NOT_RUNNING.value
                     , gpa.zeros(len(new_state), dtype=float)
                     , gpa_where( new_state == TollingState.MAX_DISPATCH.value
-                              , const_array(len(new_state), max_cap , dtype_=float, cuda_ind = True )
-                              , const_array(len(new_state), min_disp, dtype_=float, cuda_ind = True )
-                              , )
+                               , const_array(len(new_state), max_cap , dtype_=float, cuda_ind = True )
+                               , const_array(len(new_state), min_disp, dtype_=float, cuda_ind = True )
+                               , )
                     , )
 
 
-def ramp_cost_f(curr_state, new_state, ramp_up_cost : float, ramp_down_cost : float, cuda_ind : bool = False):
-    """ Ramp up cost function - either ramping down or ramping up.
+def ramp_cost_f( curr_state     : Union[np.ndarray, GPUArray]
+               , new_state      : Union[np.ndarray, GPUArray]
+               , ramp_up_cost   : float
+               , ramp_down_cost : float
+               , cuda_ind       : bool = False ) -> Union[np.ndarray, GPUArray]:
+    """ Cost of ramping up or down.
 
+    :param curr_state: current state of the system
+    :param new_state: new state of the system.
+    :param ramp_up_cost: ramp up costs.
+    :param ramp_down_cost: ramp down costs.
+    :param cuda_ind: indicator for cuda
+    :returns: costs of ramping up.
     """
 
     if not cuda_ind:
@@ -264,7 +290,7 @@ def opd_1fuel( power_prices   : np.ndarray
     start_fuel_cold = tolling_params['startFuelCold']
     add_fuel_cost   = tolling_params['addFuelCost']
     VC              = tolling_params['VC']
-    ramp_rate       = tolling_params['rampRate']
+    # ramp_rate       = tolling_params['rampRate']
     shutdown_sp_in  = tolling_params['shutdownSPin']  # TODO: THIS IS WRONG, THIS HAS TO BE UPDATED
     # min_downtime    = tolling_params['minDownTime']
     # min_runtime     = tolling_params['minRunTime']

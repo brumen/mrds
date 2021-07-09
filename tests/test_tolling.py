@@ -42,7 +42,7 @@ class TestTolling(TestCase):
                                    , 'WEEKEND': [('ATSI-PEAK', 16), ('ATSI_7X8', 8), ]}
                                  , 'NG_MICHCON_GD-PEAK'
                                  , ['ATSI-PEAK', 'ATSI_7X8', 'NG_MICHCON_GD-PEAK']
-                                 , cuda_ind = False )
+                                 , cuda_ind = True )
         tm.multi_thread_calib = False  # Multi-threading doesnt allow for pickling of ORM session
         import time
 
