@@ -54,7 +54,7 @@ class JWVolTest(TestCase):
         self.assertTrue(True)
 
 
-class C0C1C2Tet(TestCase):
+class C0C1C2Test(TestCase):
 
     def test_c0c1c2(self):
 
@@ -73,5 +73,3 @@ class C0C1C2Tet(TestCase):
                                        , mkt_date )
 
         self.assertTrue(False)
-
-JWVolTest().test_jwss7_display()

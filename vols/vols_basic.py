@@ -88,40 +88,6 @@ def black_vol_inverse( F         : float
                                        , tolerance) / sqrt(dt)
 
 
-def black_vol_inverse_naive( F      : float
-                           , K      : float
-                           , p      : float
-                           , dt     : float
-                           , DF     : float
-                           , theta  : int
-                           , tol    : float
-                           , solver : str = 'scipy_cobyla' ):
-    """ Inverse black volatility computation.
-
-    :param F: forward price
-    :param K: strike price
-    :param p: option price to infer black vol from
-    :param dt: time to maturity
-    :param DF: discount factor
-    :param theta:  = 1 ... call option, -1 ... put option
-    :param tol: tolerance bound for the solver
-    :param solver: which NLP solver to use, default scipy_cobyla
-    :returns:
-    """
-
-    x = log(double(F) / double(K))  # insuring that no integer division is made
-    beta = p / (DF * sqrt(F * K))
-
-    # optimization search, initial guess = sigma_c
-    # TODO: THIS IS NOT GOOD!!! LACKING A LOT
-    optim_pr = NLP( lambda sigma: (b(x, sigma, theta) - beta)**2
-                  , sqrt(2 * abs(x))  # inflection point function  (sigma_c)
-                  , lb = 1e-6 )\
-                  .solve(solver)  # lower bound just above 0
-
-    return optim_pr.solve(solver).xf[0] / sqrt(dt)
-
-
 def sam_int(s : float, t : float, T_i : float, beta : float, sigma_L : float) -> float:
     """ Samuelson volatility function.
         Computes the squared integral of samuelson behavior
@@ -152,10 +118,10 @@ def forward_vols_sam( sigma   : np.array
                     , sigma_L : float) -> List[float]:
     """ Forward vols in the Samuelson model.
 
-    :param sigma_v: (atm) vols for maturities Ti
+    :param sigma: (atm) vols for maturities Ti
     :param T: forward time
-    :param Ti_v: array of forward tenors
-    :param taui_v: option tenors
+    :param Ti: array of forward tenors
+    :param taui: option tenors
     :param beta: beta in the samuelson parametrization
     :param sigma_L: sigma_L in the samuelson parameters
     :returns: samuelson volatilities using the samuelson parametrization.

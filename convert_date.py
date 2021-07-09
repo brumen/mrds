@@ -7,6 +7,13 @@ from typing import List
 
 def process_mm(m : int, year : int, month : int, day_b : int, day_e : int) -> List[datetime.date]:
     """ process the month matrix between day_b and day_e
+
+    :param m: TODO: WHAT IS THIS
+    :param year: year
+    :param month: month
+    :param day_b: beginning day
+    :param day_e: end day
+    :returns:
     """
 
     T_l = []
@@ -23,6 +30,7 @@ def construct_date_range( date_b : datetime.date
 
     :param date_b: begin date
     :param date_e: end date
+    :returns: dates between beginning and the end.
     """
 
     year_b, month_b, day_b = date_b.year, date_b.month, date_b.day

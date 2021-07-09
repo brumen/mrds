@@ -1,5 +1,6 @@
-#
-# tests for com_skew_tolling
+""" Tests for the com_skew_tolling 
+"""
+
 import datetime
 
 from unittest import TestCase
@@ -11,7 +12,7 @@ class ComSkewTollingTest(TestCase):
 
     MKT_DATE = datetime.date(2015, 4, 1)
 
-    def test_basic(self):
+    def test_smoke(self):
         """ Example of how to use ComSkewTolling class.
         """
 
@@ -26,8 +27,6 @@ class ComSkewTollingTest(TestCase):
                                             , 1000
                                             , datetime.date(2015, 5, 1)
                                             , datetime.date(2015, 6, 20))
-
-        print(1+1)
 
         self.assertTrue(True)
 
