@@ -327,63 +327,6 @@ class VolatilityDrawMixin:
         ax.plot_surface(K_mesh, ttm_mesh, vol_surf)
         plt.show()
 
-    def draw_surface_cuda( self
-                           , fwd_date  : datetime.date
-                           , S_min_max : Tuple[float, float, float]
-                           , t_min_max : Tuple[float, float, float]
-                           , impl_local_ind = 'impl' ):
-        """ Draws the implied/local vol surface from
-        [Sd, Su] x [Tmin, Tmax] with steps Sstep, Tstep
-
-        :param fwd_date: forward to be considered.
-        :param S_min_max: tuple of forward grid (low bound, high bound, step)
-        :param
-          vol = vol. parametrization: jw7, sabr, c0c1c2, ratiovol
-          impl_local_ind ... indicator for implied or local volatility
-          cuda_ind ... should the computations be performed on the cuda
-          fwd_idx ... forward index we are trying to plot
-        """
-
-        t_min, t_max, t_step = t_min_max
-        S_min, S_max, S_step = S_min_max
-
-        K_grid   = np.arange(S_min, S_max, S_step)
-        ttm_grid = np.arange(t_min, t_max, t_step)
-
-        if cuda_ind:
-            K_grid = to_gpu(K_grid).astype(np.float32)  # K, ttm grid on device
-            ttm_grid = to_gpu(ttm_grid).astype(np.float32)
-
-        K_mesh, ttm_mesh = np.meshgrid(K_grid, ttm_grid)
-        impl_surf = np.zeros((len(ttm_grid), len(K_grid)))
-        lv_surf = np.zeros((len(ttm_grid), len(K_grid)))
-
-        c = model.get_params(fwd_idx)  # constructs the param array
-
-        self.lv_impl_surf()
-
-        root = tk.Tk()  # root canvas
-        # plot initial market as initial
-        fig = plt.figure()
-        # construct canvas
-        dataPlot_canvas = FigureCanvasTkAgg(fig, master=root)
-        dataPlot_canvas.get_tk_widget().grid(row=0, column=0, rowspan=8)
-        ax = Axes3D(fig)  # plot it
-
-        if impl_local_ind == 'impl':  # cuda not important, so not implemented
-            impl_surf = model.gen_impl_surf(
-                fwd_idx,
-                ttm_grid,
-                K_grid)  # impl. vol surface
-            ax.plot_surface(ttm_mesh, K_mesh, impl_surf)  # initial impl. plot
-        else:
-            lv_surf = gen_lv_surf()  # updating the local vol surface
-            ax.plot_surface(ttm_mesh, K_mesh, lv_surf)  # initial lv. plot
-
-        # draw graphs
-        self._draw_buttons()
-
-
     def _K_ttm_grid( self
                    , S_min_max : Tuple[float, float, float]
                    , t_min_max : Tuple[float, float, float] ) -> Tuple[np.ndarray, np.ndarray]:
@@ -391,38 +334,6 @@ class VolatilityDrawMixin:
         S_min, S_max, S_step = S_min_max
 
         return np.arange(S_min, S_max, S_step), np.arange(t_min, t_max, t_step)
-
-    def _K_ttm_grid_cuda( self
-                        , S_min_max : Tuple[float, float, float]
-                        , t_min_max : Tuple[float, float, float] ) -> Tuple[np.ndarray, np.ndarray]:
-        K_grid, ttm_grid = self._K_ttm_grid(S_min_max, t_min_max)
-
-        return (to_gpu(K_grid), to_gpu(ttm_grid))
-
-    def _lv_impl_surf_cuda(self, K_grid : [GPUArray], ttm_grid : [GPUArray]):
-        """ Generates the local volatility surface.
-        """
-
-
-        K_size = len(K_grid)
-        ttm_size = len(ttm_grid)
-
-        impl_surf_d = to_gpu(impl_surf).astype(np.float32)  # impl. surf on cuda
-        lv_surf_d = to_gpu(lv_surf).astype(np.float32)  # lv surf. on cuda
-
-        with open(config.work_dir + "imp_vol_kern.cu") as impVolKernFile:
-            imp_vol_mod    = SourceModule(impVolKernFile.read() % {'K_size': K_size, 'ttm_size': ttm_size})
-            comp_imp_vol   = imp_vol_mod.get_function('comp_imp_vol')
-            comp_local_vol = imp_vol_mod.get_function('comp_local_vol')
-
-        c_d = to_gpu(c).astype(np.float32)
-        # compute both local and implied vol
-        comp_imp_vol(impl_surf_d, c_d, K_grid, ttm_grid, block=(ttm_size, 1, 1), grid=(K_size, 1))
-        impl_surf = impl_surf_d.get()  # get impl. surf from device
-        comp_local_vol(lv_surf_d, c_d, K_grid, ttm_grid, block=(ttm_size, 1, 1), grid=(K_size, 1))
-        lv_surf = lv_surf_d.get()  # get local. surf from device
-
-        return lv_surf
 
 
 class ATMFVolatility(Volatility):

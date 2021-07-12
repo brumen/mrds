@@ -5,13 +5,13 @@ import numpy as np
 from tkinter import Scale, Button, HORIZONTAL
 from typing  import List, Dict, Tuple
 
-import ds
-from forward_curve import FwdCurve
-from vols.vols import Volatility, VolatilityDrawMixin
+import mrds.ds as ds
+from mrds.forward_curve import FwdCurve
+from mrds.vols.vols import Volatility, VolatilityDrawMixin
 
 
-class C0C1C2Volatility(Volatility):
-    """ c0-c1-c2 volatility parametrization
+class QuadraticVol(Volatility):
+    """ Quadratic volatility parametrization, i.e.
         _smooth_ind is the smoothness indicator
         _alpha is the smoothness factor
     """
@@ -20,8 +20,10 @@ class C0C1C2Volatility(Volatility):
                  , com_name : str
                  , mkt_date : datetime.date
                  , fwd_params : FwdCurve
-                 , vol_params : Dict[datetime.date, List]):
-        super(C0C1C2Volatility, self).__init__(com_name, mkt_date, fwd_params=fwd_params, vol_params=vol_params)
+                 , vol_params : Dict[datetime.date, List]
+                 , ):
+
+        super(QuadraticVol, self).__init__(com_name, mkt_date, fwd_params=fwd_params, vol_params=vol_params)
         self.__vol_dates = list(vol_params.keys())  # TODO: CHECK THIS PART
 
     @classmethod
@@ -63,22 +65,31 @@ class C0C1C2Volatility(Volatility):
         # else returns the last date on the curve
         return self._vol_dates[-1]
 
-    def _get_c0c1c2(self, ttm : datetime.date) -> Tuple[float, float, float, float, float]:
+    def _get_params(self, ttm : datetime.date) -> Tuple[float, float, float, float, float]:
+        """ Gets the parameters for the time to maturity.
+
+        :param ttm: time-to-maturity
+        :returns:
+
+        """
+
         next_date = self._get_next_date(ttm)
+
         return self._vol_params[next_date]
 
-    def implied_vol(self, fwd_value : float, ttm : datetime.date, smooth_ind=True) -> float:
+    def implied_vol(self, fwd_value : float, ttm : datetime.date, smooth_ind = True) -> float:
         """ Computes the implied volatility of quadratic volatility surface.
 
         :param fwd_value: forward value for which to compute
         :param ttm: time-to-maturity
         :param smooth_ind: indicator whether to smooth the curve.
+        :returns: implied volatility for the parameters indicated.
         """
 
         atm_strike = self._fwd_params.fwd_value(ttm)
         z = np.log(fwd_value / atm_strike)
 
-        c0, c1, c2, theta, alpha = self._get_c0c1c2(ttm)
+        c0, c1, c2, theta, alpha = self._get_params(ttm)
 
         v = c0 + c1 * z + c2**2 * z**2
         sigma_star = c0 * theta - alpha * (c0 * theta - c0)
@@ -95,7 +106,7 @@ class C0C1C2Volatility(Volatility):
         return v
 
 
-class C0C1C2VolatilityDraw(C0C1C2Volatility, VolatilityDrawMixin):
+class QuadraticVolDraw(QuadraticVol, VolatilityDrawMixin):
     """ c0c1c2 vol class w/ the ability to draw implied vol surfaces.
     """
 
