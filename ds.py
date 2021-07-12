@@ -5,44 +5,44 @@ import matplotlib.pyplot as plt
 
 from typing import Dict, List, Tuple
 
-from mrds.data               import ds_data
-from mrds.data.discount_data import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
+from mrds.data               import curves_vols
+from mrds.data.discount_rates import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
 from mrds.vols.fwd_codes     import fwd_mth_codes
 
 
 # mapping of commodity names to vol parametrization
-vol_hash = { 'WTI'       : ('JWSS7', ds_data.wti_vol_curve_dates, ds_data.wti_vol_curve_vals, ds_data.wti_vol_curve_dates_vals)
-           , 'BRENT'     : ('JWSS7', ds_data.brent_vol_dates    , ds_data.brent_vol_vals    , ds_data.brent_vol_curve_dates_vals)
-           , 'ATSI-PEAK' : ('JWSS7', ds_data.atsi_peak_vol_dates, ds_data.atsi_peak_vol_vals, ds_data.atsi_peak_vol_dates_vals )
-           , 'ATSI_2X16'  : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals, dict(zip(ds_data.atsi_2x16_vol_dates, ds_data.atsi_2x16_vol_vals)))
-           , 'ATSI_7X8'         : ('JWSS7', ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals, dict(zip(ds_data.atsi_2x16_vol_dates, ds_data.atsi_7x8_vol_vals)))
-           , 'NG_MICHCON_GD-PEAK': ('ATM', ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals, dict(zip(ds_data.ng_michcon_gd_peak_vol_dates, ds_data.ng_michcon_gd_peak_vol_vals)))
-           , 'NG_MICHCON_CASHVOL': ('ATM', ds_data.ng_michcon_cv_vol_dates, ds_data.ng_michcon_cv_vol_vals)
-           , 'PJMW-OFFPEAK_CV'   : ('ATM', ds_data.pjm_offpeak_cv_vol_dates, ds_data.pjm_offpeak_cv_vol_vals)
-           , 'PJMW-PEAK_CV'      : ('ATM', ds_data.pjm_peak_cv_vol_dates, ds_data.pjm_peak_cv_vol_vals)}
+vol_hash = { 'WTI'       : ('JWSS7', curves_vols.wti_vol_curve_dates, curves_vols.wti_vol_curve_vals, curves_vols.wti_vol_curve_dates_vals)
+           , 'BRENT'     : ('JWSS7', curves_vols.brent_vol_dates    , curves_vols.brent_vol_vals    , curves_vols.brent_vol_curve_dates_vals)
+           , 'ATSI-PEAK' : ('JWSS7', curves_vols.atsi_peak_vol_dates, curves_vols.atsi_peak_vol_vals, curves_vols.atsi_peak_vol_dates_vals)
+           , 'ATSI_2X16'  : ('JWSS7', curves_vols.atsi_2x16_vol_dates, curves_vols.atsi_2x16_vol_vals, dict(zip(curves_vols.atsi_2x16_vol_dates, curves_vols.atsi_2x16_vol_vals)))
+           , 'ATSI_7X8'         : ('JWSS7', curves_vols.atsi_2x16_vol_dates, curves_vols.atsi_7x8_vol_vals, dict(zip(curves_vols.atsi_2x16_vol_dates, curves_vols.atsi_7x8_vol_vals)))
+           , 'NG_MICHCON_GD-PEAK': ('ATM', curves_vols.ng_michcon_gd_peak_vol_dates, curves_vols.ng_michcon_gd_peak_vol_vals, dict(zip(curves_vols.ng_michcon_gd_peak_vol_dates, curves_vols.ng_michcon_gd_peak_vol_vals)))
+           , 'NG_MICHCON_CASHVOL': ('ATM', curves_vols.ng_michcon_cv_vol_dates, curves_vols.ng_michcon_cv_vol_vals)
+           , 'PJMW-OFFPEAK_CV'   : ('ATM', curves_vols.pjm_offpeak_cv_vol_dates, curves_vols.pjm_offpeak_cv_vol_vals)
+           , 'PJMW-PEAK_CV'      : ('ATM', curves_vols.pjm_peak_cv_vol_dates, curves_vols.pjm_peak_cv_vol_vals)}
 
 
 def brentCurve():
     """ Ancillary routine to generate brent curve.
     """
 
-    curve_dates = ds_data.brent_curve_dates
-    curve_vals_init = ds_data.brent_curve_vals
+    curve_dates = curves_vols.brent_curve_dates
+    curve_vals_init = curves_vols.brent_curve_vals
     brent_spread = np.linspace(6, 7, len(curve_vals_init))  # fictitious spread
     curve_vals = [x + s for x, s in zip(curve_vals_init, brent_spread)]
 
     return curve_dates, curve_vals
 
 
-fwd_hash = { 'WTI':                (ds_data.wti_curve_dates, ds_data.wti_curve_vals)
+fwd_hash = { 'WTI':                (curves_vols.wti_curve_dates, curves_vols.wti_curve_vals)
            , 'BRENT':              brentCurve()
-           , 'ATSI-PEAK':          (ds_data.atsi_peak_curve_dates, ds_data.atsi_peak_curve_vals)
-           , 'ATSI_7X8':           (ds_data.atsi_7x8_curve_dates, ds_data.atsi_7x8_curve_vals)
-           , 'ATSI_2X16':          (ds_data.atsi_2x16_curve_dates, ds_data.atsi_2x16_curve_vals)
-           , 'NG_MICHCON_GD-PEAK': (ds_data.ng_michcon_gd_peak_dates, ds_data.ng_michcon_gd_peak_curve_vals)
-           , 'NG_MICHCON_CASHVOL': (ds_data.ng_michcon_cv_curve_dates, ds_data.ng_michcon_cv_curve_vals)
-           , 'PJMW-OFFPEAK_CV':    (ds_data.pjm_offpeak_cv_curve_dates, ds_data.pjm_offpeak_cv_curve_vals)
-           , 'PJMW-PEAK_CV':       (ds_data.pjm_peak_cv_curve_dates, ds_data.pjm_peak_cv_curve_vals)
+           , 'ATSI-PEAK':          (curves_vols.atsi_peak_curve_dates, curves_vols.atsi_peak_curve_vals)
+           , 'ATSI_7X8':           (curves_vols.atsi_7x8_curve_dates, curves_vols.atsi_7x8_curve_vals)
+           , 'ATSI_2X16':          (curves_vols.atsi_2x16_curve_dates, curves_vols.atsi_2x16_curve_vals)
+           , 'NG_MICHCON_GD-PEAK': (curves_vols.ng_michcon_gd_peak_dates, curves_vols.ng_michcon_gd_peak_curve_vals)
+           , 'NG_MICHCON_CASHVOL': (curves_vols.ng_michcon_cv_curve_dates, curves_vols.ng_michcon_cv_curve_vals)
+           , 'PJMW-OFFPEAK_CV':    (curves_vols.pjm_offpeak_cv_curve_dates, curves_vols.pjm_offpeak_cv_curve_vals)
+           , 'PJMW-PEAK_CV':       (curves_vols.pjm_peak_cv_curve_dates, curves_vols.pjm_peak_cv_curve_vals)
            , 'DISCOUNT':           (discount_curve_dates, discount_curve_vals)
            , 'DISCOUNT_QL'       : discount_curve_ois_rates  # QuantLib ois rates.
            , }

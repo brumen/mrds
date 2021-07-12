@@ -8,7 +8,6 @@ import matplotlib  as mpl
 from typing              import List
 from numpy               import double, log, exp, sqrt
 from scipy.interpolate   import splev, splrep  # spline package
-from openopt             import NLP
 from mrds.vols.vols_fast import black_vol_inverse_normalized
 
 mpl.use('TkAgg')

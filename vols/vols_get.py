@@ -28,8 +28,8 @@ def get_vol_object(com_name : str, mkt_date : datetime.date) -> Volatility:
         from mrds.vols.vols import ATMFVolatility
         vol_class = ATMFVolatility
     elif vol_type == 'C0C1C2':
-        from mrds.vols.c0c1c2 import C0C1C2Volatility
-        vol_class = C0C1C2Volatility
+        from mrds.vols.quadratic import QuadraticVol
+        vol_class = QuadraticVol
     else:
         raise RuntimeError('Volatility class for {0} not yet implemented'.format(com_name))
 
