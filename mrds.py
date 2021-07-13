@@ -1351,6 +1351,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self._V_cross_factor(asset, factor_1, factor_2, fwd_tenor, fwd_tenor, t_start, t_end)
 
+    # TODO: REWRITE THIS AS A GENERATOR, AND SEPARATED BY SIMULATION TIMES.
     def simulate_curves( self
                        , assets           : List[str]
                        , nb_simulations   : int
