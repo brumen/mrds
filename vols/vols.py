@@ -7,19 +7,14 @@ import scipy.stats
 import scipy.interpolate  # spline package
 import numpy      as np
 import matplotlib as mpl
-import tkinter    as tk
 import matplotlib.pyplot as plt
 
 
 from typing  import List, Tuple, Dict, Union
 from openopt import NLP
 from scipy.interpolate import splev, splrep
-from pycuda.compiler import SourceModule
-from pycuda.gpuarray import to_gpu, GPUArray
 from mpl_toolkits.mplot3d              import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-# if config.CUDA_PRESENT:
-#     import pycuda.autoinit  # this needs to be here.
 
 import mrds.ds as ds
 from mrds.pricers.pricers import black_greeks
@@ -28,22 +23,6 @@ from mrds.forward_curve   import FwdCurve
 mpl.use('TkAgg')
 
 logger = logging.Logger(__name__)
-
-
-# def extract_param_matrix(date_, fwd_name, vol_name, nb_fwds_taken=-1):
-#     """ Array with forwards and vol params.
-#     """
-#
-#     fvm = ds.read_data_matched_tenors(date_, fwd_name, vol_name)
-#     nb_fwds = len(fvm['fwd_curve']) if nb_fwds_taken == -1 else nb_fwds_taken
-#
-#     fwd_curve = fvm['fwd_curve'][:nb_fwds]
-#     option_tenors_dt = fvm['option_tenors_dt'][:nb_fwds]
-#     vol_surface_params = fvm['vol_surface_params'][:nb_fwds]
-#     fv_array = np.append(np.array(fwd_curve).reshape((nb_fwds, 1)),
-#                          np.array(vol_surface_params), axis=1)
-#
-#     return fv_array, option_tenors_dt
 
 
 class VolatilityException(Exception):

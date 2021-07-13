@@ -1,13 +1,14 @@
-# ONLY MARKET DATE POSSIBLE: 20150401, i.e. 2015, 04, 01; Apr 4, 2015
+""" Data structures - forward and vol curves.
+    IMPORTANT: ONLY MARKET DATE POSSIBLE: 20150401, i.e. 2015, 04, 01; Apr 1, 2015, datetime.date(2015, 4, 1)
+"""
+
 import datetime
 import numpy as np
-import matplotlib.pyplot as plt
 
 from typing import Dict, List, Tuple
 
-from mrds.data               import curves_vols
+from mrds.data                import curves_vols
 from mrds.data.discount_rates import discount_curve_dates, discount_curve_vals, discount_curve_ois_rates
-from mrds.vols.fwd_codes     import fwd_mth_codes
 
 
 # mapping of commodity names to vol parametrization
@@ -49,65 +50,15 @@ fwd_hash = { 'WTI':                (curves_vols.wti_curve_dates, curves_vols.wti
 
 
 def get_forward_curve( commodity : str
-                     , mkt_date  : datetime.date ):
-    """
-    Gets the forward curve (ALWAYS USE DATE 20150410) for a particular date.
+                     , mkt_date  : datetime.date ) -> Tuple[List[datetime.date], List[float]]:
+    """ Gets the forward curve (ALWAYS USE DATE 20150410) for a particular date.
 
     :param commodity: name of the commodity curve
     :param mkt_date: market date for which the com curve is needed (not used here, but the interface should be such)
+    :returns: commodity forward curve, given as a tuple of dates, and values.
     """
 
     return fwd_hash[commodity]
-
-
-def get_forward_curve_slice( fwd : str
-                           , date_
-                           , date_b : [datetime.date, List[datetime.date]]
-                           , date_e : [datetime.date, List[datetime.date]]
-                           , adj_tenors_days = 0 ):
-    """ Returns the slice between date_b, date_e, both are in string formats
-    returns curve in [(date, value, com_coda)
-
-    :param fwd: comm
-    :param date_b:
-    """
-
-    fc1 = get_forward_curve(fwd, date_)
-    fc_tenors = get_forward_curve_pretty2(fwd, date_)[1]
-    adj_days_dt = datetime.timedelta(days=adj_tenors_days)
-
-    if isinstance(date_b, list):
-        return [[(fc1[0][k] - adj_days_dt, fc1[1][k], fc_tenors[k])
-                for k in range(len(fc1[0]))
-                if (fc1[0][k] >= date_b_dt_elt + adj_days_dt)
-                 and (fc1[0][k] <= date_e_dt_elt + adj_days_dt)]
-                for (date_b_dt_elt, date_e_dt_elt) in zip(date_b, date_e)]
-
-    return [(fc1[0][k]-adj_days_dt, fc1[1][k], fc_tenors[k])
-            for k in range(len(fc1[0]))
-            if (fc1[0][k] >= date_b + adj_days_dt) and (fc1[0][k] <= date_e + adj_days_dt)]
-
-
-def get_forward_curve_pretty2(fwd, date_):
-    tenors, curve = get_forward_curve(fwd, date_)
-    tenors_codes = [str(fwd_mth_codes[tenor.month-1]) + str(tenor.year-2000)
-                    for tenor in tenors]
-    return dict(zip(tenors_codes, curve)), tenors_codes
-
-
-def get_forward_curve_plot(fwd, date_):
-    tenors, curve = get_forward_curve(fwd, date_)
-    curve_len = len(tenors)
-    plt.plot(curve)
-    xtics = []
-    for i1 in range(curve_len):
-        if np.mod(i1, 50) == 0:
-            xtics.append(str(tenors[i1].year) + '-' + str(tenors[i1].month))
-        else:
-            xtics.append('')
-
-    plt.xticks(range(len(xtics)), xtics, size='small', rotation='vertical')
-    plt.show()
 
 
 def get_vol_curve( com_name : str
@@ -251,7 +202,6 @@ def read_data_matched_tenors( mktDate : datetime.date
 
         return res
 
-    # curve part
     return {'fwd_tenors'        : np.array(remove_duplicates(fwd_tenors_dt_final, fwd_tenors_final)),
             'fwd_curve'         : np.array(remove_duplicates(fwd_tenors_dt_final, fwd_curve_final)),
             'fwd_tenors_code'   : np.array(remove_duplicates(fwd_tenors_dt_final, fwd_tenors_code_final)),
@@ -262,13 +212,3 @@ def read_data_matched_tenors( mktDate : datetime.date
             'option_tenors_dt'  : remove_duplicates(option_tenors_dt_final, option_tenors_dt_final),
             'vol_surface_params': np.array(remove_duplicates(option_tenors_dt_final, vol_surface_params_final))
             , }
-
-    # return {'fwd_tenors'        : np.array(fwd_tenors_final),
-    #         'fwd_curve'         : np.array(fwd_curve_final),
-    #         'fwd_tenors_code'   : np.array(fwd_tenors_code_final),
-    #         'fwd_tenors_dt'     : fwd_tenors_dt_final,
-    #         # vol part
-    #         'option_tenors'     : np.array(option_tenors_final),
-    #         'option_tenors_code': np.array(option_tenors_code_final),
-    #         'option_tenors_dt'  : option_tenors_dt_final,
-    #         'vol_surface_params': np.array(vol_surface_params_final)}
