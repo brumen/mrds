@@ -14,16 +14,17 @@ def query_gpu():
     COMMAND_LINE = '/usr/bin/nvidia-smi'
 
     # line 80 - Compute mode
-    lines_to_print = [ 79, 80, 81 ]
+    lines_to_print = range(70, 85)
 
-    while 1:
+    while True:
         try:
             out, err = subprocess.Popen( [COMMAND_LINE, "-q"], stdout=subprocess.PIPE )\
                                  .communicate()
-        except Exception as e:
-            raise GPUCommunicationException("Could not connect to the nvidia card. Error: {0}.".format(e))
 
-        out_lines = out.split('\n')
+        except Exception as e:
+            raise GPUCommunicationException(f'Could not connect to the nvidia card. Error: {e}.')
+
+        out_lines = out.decode().split('\n')
 
         print('\n'.join([out_lines[line_nb] for line_nb in lines_to_print]))
         print("\033[12A")
