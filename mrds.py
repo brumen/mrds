@@ -1232,7 +1232,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
                                  for delta in deltas_used ])
 
         logger.debug(f'Calibrating {asset} for date {fwd_date}.')
-        print(f'Calibrating {asset} for date {fwd_date}.')
         initial_guess = np.array([1., 0., 0.])
         c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
                        , initial_guess)\
