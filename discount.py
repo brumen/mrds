@@ -37,7 +37,7 @@ class DiscountCurve:
         if isinstance(time_diff, float):
             time_diff_format = time_diff
         elif isinstance(time_diff, datetime.date):
-            time_diff_format = float((time_diff - mkt_date).days) / self._dcf
+            time_diff_format = float((time_diff - self._mkt_date).days) / self._dcf
 
         return splev(time_diff_format, self._interpolated_curve())
 

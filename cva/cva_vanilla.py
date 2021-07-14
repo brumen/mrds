@@ -1,17 +1,14 @@
+""" Vanilla CVA computations.
+"""
+
 import datetime
-import numpy as np
-import pycuda.gpuarray as gpa
 
 from typing          import List
 
-import matplotlib as mpl
-mpl.use('TkAgg')
-
-import mrds.cva.cva as cva
-import mrds.ds as ds
-
-from mrds.mrds import ComSkew
-from mrds.pricers.pricers import black_greeks  # , swap_cva
+from mrds.mrds            import ComSkew
+from mrds.pricers.pricers import black_greeks
+from mrds.instruments.vanilla_swap import VanillaSwap
+from mrds.forward_curve import FwdCurve
 
 
 def cva_eu_call( com       : str
@@ -55,98 +52,67 @@ def cva_eu_call( com       : str
                                     , )
 
 
-def swap_compute_exp(F_sims, tenor_t, exp_t, swap_rate, nb_sim, cuda_ind=False):
-    """
-    compute swap exposure
-
-    :param F_sims: simulation [exp_time, forward_idx, simulation repeat]
-    :param tenor_t: tenor times for forwards in F_sims
-    :param exp_t: exposure time
-    :param swap_rate: swap rate, a number
-    """
-    nb_exp_points = len(exp_t)
-    all_tenors = np.arange(len(tenor_t))
-    mpe = np.empty(nb_exp_points)
-    mne = np.empty(nb_exp_points)
-    me = np.empty(nb_exp_points)
-
-    for exp_one_ind, exp_one_t in enumerate(exp_t):
-        tenors_chosen = all_tenors[tenor_t >= exp_one_t]
-        if not cuda_ind:
-            F_sim_relevant = pricers.swap_cva(F_sims[exp_one_ind, tenors_chosen, :], swap_rate,
-                                              cuda_ind=cuda_ind)
-            me[exp_one_ind], mpe[exp_one_ind], mne[exp_one_ind] = np.mean(F_sim_relevant), \
-                np.mean(F_sim_relevant[F_sim_relevant > 0]), \
-                np.mean(F_sim_relevant[F_sim_relevant < 0])
-
-        else:
-            if tenors_chosen == []:
-                me[exp_one_ind], mpe[exp_one_ind], mne[exp_one_ind] = 0., 0., 0.
-            else:
-                F_sim_relevant = pricers.swap_cva(F_sims[exp_one_ind][tenors_chosen[0]:(tenors_chosen[-1]+1), :],
-                                                  swap_rate,
-                                                  cuda_ind=cuda_ind)
-                me[exp_one_ind], mpe[exp_one_ind], mne[exp_one_ind] = \
-                    np.float32(np.array(gpa.sum(F_sim_relevant).get()))/nb_sim, 1., 1.
-
-    return me, mpe, mne
-
-
-def cva_swap(mm, params,
-             cuda_ind=False):
-    """
-    cva exposure for swap
-    :param mm: market model
-    :param params: parameters
+def cva_swap( swap : VanillaSwap
+            , mkt_date: datetime.date
+            , exp_times: List[datetime.date]
+            , nb_sim: int = 50000
+            , dcf: float = 365.25 ):
+    """ CVA exposure for swap
     """
 
-    sim_times = params['sim_times']
-    sim_times_dt = [ds.convert_str_datetime(st) for st in sim_times]
-    sim_times_rev_idx = range(len(sim_times))[::-1]  # reversed index
-    nb_sims = params['nb_sims']
-    swap_start = params['swap_start']
-    swap_start_dt = ds.convert_str_datetime(swap_start)
-    swap_end = params['swap_end']
-    swap_end_dt = ds.convert_str_datetime(swap_end)
-    quantity = params['quantity']
+    com = swap.index_name
+    payments = swap.payments()
 
-    mm.update_sim_times(sim_times)
-    if cuda_ind:
-        mm.simulate_curves_cuda(nb_sims)
-    else:
-        mm.simulate_curves(nb_sims)
-    sc = mm.simulated_curves[0]
+    model = ComSkew.from_db(mkt_date, [com] )
+    F_sim = model.simulate_curves([com], nb_sim, exp_times, tenor_list=payments)
+    F_sim_by_exp_time = { exp_time: F_sim[com][exp_time_idx, :, :]  # Index 1 are payment blocks
+                          for exp_time_idx, exp_time in enumerate(exp_times) }
 
-    def swap_idx(sim_time_dt):
-        return [ix for (ix, td) in enumerate(mm.forward_tenors_dt_list[0])
-                if (td >= swap_start_dt) and (td <= swap_end_dt) and (td >= sim_time_dt)]
+    for exp_date, exp_sims in F_sim_by_exp_time.items():
+        swap.pricing_date = exp_date
 
-    time_points, nb_tenors, nb_sims = sc.shape
-    optimal_value = np.zeros((time_points, nb_sims))
-    if cuda_ind:
-        sc = sc.get()
-    optimal_value[-1, :] = pricers.swap_cva(sc[-1, swap_idx(sim_times_dt[-1]), :],
-                                            params['swap_rate'])
-    for time_step_idx in sim_times_rev_idx[1:]:
-        F_curr = sc[time_step_idx, swap_idx(sim_times_dt[time_step_idx]), :]
-        optimal_value[time_step_idx, :] = pricers.swap_cva(F_curr, params['swap_rate'])
-    optimal_value *= quantity
-    me_v, mpe_v, mne_v, q95_v, q05_v = cva.exposure_compute(optimal_value)
-    return {"me": me_v, "mpe": mpe_v, "mne": mne_v, "q95": q95_v, "q05": q05_v}
+        swap_sims_for_exp = []
+        for sim_nb in range(nb_sim):
+            swap.index_curve = FwdCurve( mkt_date
+                                       , com
+                                       , payments
+                                       , F_sim_by_exp_time[exp_date][:, sim_nb]
+                                       , dcf = dcf )
+            swap_sims_for_exp.append(swap.PV())
+
+        yield exp_date, swap_sims_for_exp
 
 
-def main():
-    """ examples of functions.
+def main_eu_call(mkt_date, sample_exp_times):
+    """ EU CALL EXAMPLE
     """
 
     cva_eu = cva_eu_call( 'WTI'
-                        , datetime.date(2015, 4, 1)
+                        , mkt_date
                         , 50.
                         , datetime.date(2015, 12, 31)
-                        , [datetime.date(2015, 7, 1), datetime.date(2015, 11, 1)]
+                        , sample_exp_times
                         , )
 
-    for e in cva_eu:
-        print(e)
+    exp_eu = list(cva_eu)
+    return exp_eu
+
+
+def main_swap(mkt_date, sample_exp_times):
+    """ CVA SWAP EXAMPLE
+    """
+
+    cva_swap_2 = cva_swap( VanillaSwap(mkt_date, mkt_date, maturity='1Y'), mkt_date, sample_exp_times)
+
+    exp_swap = list(cva_swap_2)
+    return exp_swap
+
+
+def main():
+    MKT_DATE = datetime.date(2015, 4, 1)
+    sample_exp_times = [datetime.date(2015, 7, 1), datetime.date(2015, 11, 1)]
+
+    res_swap = main_swap(MKT_DATE, sample_exp_times)
+
 
 main()
