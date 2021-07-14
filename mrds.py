@@ -193,6 +193,22 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         return self._com_fwd_curves
 
+    @fwd_curves.setter
+    def fwd_curves(self, new_fwd_curves) -> None:
+        """ Setter for the purpose of CVA.
+
+        :param new_fwd_curves: list of new forward curves
+        """
+
+        # checks about to correspond to the old forward curves
+        existing_fwd_names = [fwd_curve.fwd_name for fwd_curve in self.fwd_curves]
+        new_fwd_curves     = [new_curve.fwd_name for new_curve in new_fwd_curves]
+
+        assert set(new_fwd_curves) == set(existing_fwd_names), f'New curves {new_fwd_curves} not equal to existing ones {existing_fwd_names}'
+
+        # all is ok, set the curves
+        self._com_fwd_curves = new_fwd_curves
+
     def fwd_curve_names(self, asset : str) -> FwdCurve:
         """ Memoizes the forward curve names and returns the forward curve for a particular asset.
 
