@@ -1,18 +1,14 @@
-# Tolling model
+""" Tolling model.
+"""
+
 import datetime
 import numpy as np
 
+import pycuda.autoinit  # IMPORTANT: DO NOT REMOVE: This line has to stay to initialize the GPU
+from pycuda.gpuarray import GPUArray, zeros
+
 from logging import getLogger
 from typing import List, Tuple, Union, Dict, Callable, Optional, Any
-
-logger = getLogger(__name__)
-
-try:
-    import pycuda.autoinit  # leave this here to initialize the GPU
-except:
-    logger.info('Could not initialize CUDA. Cuda functionality will not work.')
-
-from pycuda.gpuarray import GPUArray, zeros
 
 from mrds.tolling.opd              import opd_1fuel
 from mrds.tolling.tolling_states   import TollingState, const_array
@@ -21,6 +17,8 @@ from mrds.tolling.default_tolling  import tolling_params_default
 from mrds.forward_curve            import FwdCurve
 from mrds.vols.vols                import Volatility
 from mrds.vols.vols_get            import get_vol_object
+
+logger = getLogger(__name__)
 
 
 class TollingModel(ComSkewTolling):
@@ -425,13 +423,7 @@ class TollingModel(ComSkewTolling):
         :returns: array of size size and value set to value, either np.array or gpu array
         """
 
-
         return const_array(size, value, dtype_=dtype_, cuda_ind=self.cuda_ind)
-
-        # res = (np.empty if not self.cuda_ind else gpa_empty)(size, dtype=dtype_)
-        # res.fill(value)
-        #
-        # return res
 
     def _set_initial_current_state(self, nb_sims : int) -> Dict[str, Union[np.ndarray, GPUArray]]:
         """ Set up the initial current state dictionaries.
@@ -559,5 +551,4 @@ class TollingModel(ComSkewTolling):
 
             dispatch_per_month[date_month_fuel] = (cash_flows_cum, value_per_month)
 
-        print("HELP", t_total)
         return dispatch_per_month
