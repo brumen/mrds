@@ -1,4 +1,5 @@
-# flight class for ORM, trade access
+""" SQL setting for commodity skew model.
+"""
 
 import json
 
@@ -11,7 +12,6 @@ from sqlalchemy import ( Column
                        , )
 from sqlalchemy.ext.declarative import declarative_base
 
-from ao.flight   import create_session
 from mrds.config import brumen_pass
 
 DB = f'postgres://brumen:{brumen_pass}@localhost:5434/com_skew'
@@ -63,6 +63,7 @@ class ComSkewCParams(ComSkewParamsBaseORM):
 
 
 # Example of usage
+# from ao.flight   import create_session
 # p1 = ComSkewParams(market_date=datetime.date(2015, 4, 1), commodity='WTI', param='sigma', value=json.dumps({'a': 1}))
 # session = create_session(db=DB)
 # session.add(p1)
