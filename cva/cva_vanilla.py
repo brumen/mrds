@@ -2,13 +2,15 @@
 """
 
 import datetime
+import numpy as np
 
-from typing          import List
+from typing import List
 
-from mrds.mrds            import ComSkew
-from mrds.pricers.pricers import black_greeks
+from mrds.mrds                     import ComSkew
+from mrds.mrds_orm                 import ComSkewORM
+from mrds.pricers.pricers          import black_greeks
 from mrds.instruments.vanilla_swap import VanillaSwap
-from mrds.forward_curve import FwdCurve
+from mrds.forward_curve            import FwdCurve
 
 
 def cva_eu_call( com       : str
@@ -31,7 +33,7 @@ def cva_eu_call( com       : str
     :returns: generator of exposure for the european call option.
     """
 
-    model = ComSkew.from_db(mkt_date, [com] )
+    model = ComSkewORM.from_db(mkt_date, [com] )
     F_sim = model.simulate_curves([com], nb_sim, exp_times, tenor_list=[d_expiry])
     F_sim_by_exp_time = { exp_time: F_sim[com][exp_time_idx, 0, :]
                           for exp_time_idx, exp_time in enumerate(exp_times) }
@@ -63,7 +65,7 @@ def cva_swap( swap : VanillaSwap
     com = swap.index_name
     payments = swap.payments()
 
-    model = ComSkew.from_db(mkt_date, [com] )
+    model = ComSkewORM.from_db(mkt_date, [com] )
     F_sim = model.simulate_curves([com], nb_sim, exp_times, tenor_list=payments)
     F_sim_by_exp_time = { exp_time: F_sim[com][exp_time_idx, :, :]  # Index 1 are payment blocks
                           for exp_time_idx, exp_time in enumerate(exp_times) }
@@ -92,7 +94,7 @@ def main_eu_call(mkt_date, sample_exp_times):
                         , 50.
                         , datetime.date(2015, 12, 31)
                         , sample_exp_times
-                        , )
+                        , nb_sim=100)
 
     exp_eu = list(cva_eu)
     return exp_eu
@@ -110,9 +112,11 @@ def main_swap(mkt_date, sample_exp_times):
 
 def main():
     MKT_DATE = datetime.date(2015, 4, 1)
-    sample_exp_times = [datetime.date(2015, 7, 1), datetime.date(2015, 11, 1)]
+    sample_exp_times = [datetime.date(2015, 7, 1), datetime.date(2015, 11, 1), datetime.date(2016, 1, 1), datetime.date(2016, 3, 21)]
 
     res_swap = main_swap(MKT_DATE, sample_exp_times)
+
+    mean_exp = {date_exp: np.mean(exp_sims) for date_exp, exp_sims in res_swap}
 
 
 main()
