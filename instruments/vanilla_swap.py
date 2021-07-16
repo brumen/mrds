@@ -4,7 +4,6 @@ import datetime
 import QuantLib as ql
 
 from typing    import List
-from functools import lru_cache
 
 from mrds.forward_curve import FwdCurve
 from mrds.discount      import DiscountCurve

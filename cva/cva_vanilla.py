@@ -6,7 +6,6 @@ import numpy as np
 
 from typing import List
 
-from mrds.mrds                     import ComSkew
 from mrds.mrds_orm                 import ComSkewORM
 from mrds.pricers.pricers          import black_greeks
 from mrds.instruments.vanilla_swap import VanillaSwap
@@ -78,7 +77,7 @@ def cva_swap( swap : VanillaSwap
             swap.index_curve = FwdCurve( mkt_date
                                        , com
                                        , payments
-                                       , F_sim_by_exp_time[exp_date][:, sim_nb]
+                                       , exp_sims[:, sim_nb]  # F_sim_by_exp_time[exp_date][:, sim_nb]
                                        , dcf = dcf )
             swap_sims_for_exp.append(swap.PV())
 
