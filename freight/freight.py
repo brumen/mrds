@@ -29,8 +29,8 @@ class Freight:
 
     def __init__(self
                  , mkt_date          : datetime.date
-                 , fwd_curves        : Callable
-                 , vol_curves        : Callable
+                 , fwd_curves        : Callable[[str, datetime.date], float]
+                 , vol_curves        : Callable[[str, datetime.date], float]
                  , corr_matrix       : Dict[Tuple[str, str], float]
                  , travel_times      : Dict[Tuple[str, str], int]
                  , cost_matrix       : Dict[Tuple[str, str], float]
@@ -39,7 +39,7 @@ class Freight:
                  , dcf               : float = 365.25 ):
         """
         :param mkt_date: market date
-        :param fwd_curves: function of (mkt_date, location, future date), returns forward curve for the future date.
+        :param fwd_curves: function of (location, future date), returns forward curve for the future date.
         :param vol_curves: same as fwd_curves, except that it gives future volatility for that date
         :param initial_locations: dictionary of how many ships are in a particular location at which date, can be in the future
                                  {location: (future_date, nb_ships) }
@@ -167,26 +167,6 @@ class Freight:
     def _nbs_to_time_grid(self) -> Dict[int, datetime.date]:
         return {idx: time_step for (idx, time_step) in enumerate(self._time_grid)}
 
-    def fwd_curves_curr(self, location: str, future_date: datetime.date) -> float:
-        """ Gets the forward curves for market date for the times requested in timeList.
-
-        :param location: location
-        :param future_date: time for which the forward curve is requested
-        :returns: forward rate for the future date.
-        """
-
-        return self.fwd_curves(self.mkt_date, location, future_date)
-
-    def vol_curves_curr(self, location: str, future_date: datetime.date) -> float:
-        """ Gets the volatility curves for market date for the times requested in timeList.
-
-        :param location: location
-        :param future_date: time for which the forward curve is requested
-        :returns: forward volatility for the future date.
-        """
-
-        return self.vol_curves(self.mkt_date, location, future_date)
-
     @property
     def _discount_factor(self) -> Callable:
         """ Constructs the discount function for market date.
@@ -242,11 +222,11 @@ class Freight:
         :param end_date: end date for the travel between those locations.
         """
 
-        return spread_option_kirk( self.fwd_curves_curr(start_loc, start_date)
-                                 , self.fwd_curves_curr(end_loc  , end_date  )
+        return spread_option_kirk( self.fwd_curves(start_loc, start_date)
+                                 , self.fwd_curves(end_loc  , end_date  )
                                  , self._cost_btw_locs(start_loc, end_loc)
-                                 , self.vol_curves_curr(start_loc, start_date)
-                                 , self.vol_curves_curr(end_loc, end_date)
+                                 , self.vol_curves(start_loc, start_date)
+                                 , self.vol_curves(end_loc, end_date)
                                  , self._corr_matrix[(start_loc, end_loc) if (start_loc, end_loc) in self._corr_matrix else (end_loc, start_loc)]
                                  , (end_date - start_date).days / self._dcf
                                  , self.DF(end_date) )  # TODO: Check if this is correct here
@@ -414,8 +394,8 @@ class Freight:
                                                                                                                 , start_time
                                                                                                                 , end_time ) if travel_allowed else self.LARGE_NUMBER
                         # either a full tanker, or just the cost of transporting it.
-                        value_vec[self._Y(start_loc, end_loc, start_period, end_period)] = - max(  self.fwd_curves_curr(location_end  , end_time)
-                                                                                                  - self.fwd_curves_curr(location_start, start_time)
+                        value_vec[self._Y(start_loc, end_loc, start_period, end_period)] = - max(  self.fwd_curves(location_end  , end_time)
+                                                                                                  - self.fwd_curves(location_start, start_time)
                                                                                                   - costs_btw
                                                                                                 , - costs_btw) \
                                                               if travel_allowed  else self.LARGE_NUMBER
@@ -579,7 +559,6 @@ class Freight:
 
         result = copy.deepcopy(dest_list_1)
 
-        print('DL', dest_list_1)
         dest_dates_1 =  [(dest_1, dest_date_1) for dest_1, dest_date_1, nb_tankers_1, _ in dest_list_1]  # TODO: CHECK THIS LAST _ nb_value_1
 
         for destination_2, dest_date_2, nb_tankers_2, nb_value_2 in dest_list_2:
