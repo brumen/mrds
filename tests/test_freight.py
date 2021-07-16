@@ -2,13 +2,13 @@
 
 import datetime
 import numpy as np
-import scipy.interpolate
 import logging
 
 from unittest import TestCase
-from typing   import Tuple, List
 
-from mrds.freight.freight         import Freight
+from mrds.freight.freight import Freight
+from mrds.forward_curve   import FwdCurve
+from mrds.vols.vols       import ATMFVolatility
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +26,20 @@ class FreightTest(TestCase):
              , 'LA' : (mkt_date, 1)
              , 'SHA': (mkt_date + datetime.timedelta(days=5), 8) }
 
-    fwd_curves = { 'AMS': np.array([95., 96., 97., 98.])
-                 , 'NYC': np.array([92., 93., 94., 95.])
-                 , 'MIA': np.array([91., 92., 93., 94.])
-                 , 'LA' : np.array([90., 91., 95., 100.])
-                 #  , 'SHA': np.array([105., 106., 107., 109.]) }
-                 , 'SHA': np.array([85., 90., 95., 100.]) }
+    locations = list(N_init.keys())  # possible locations
 
-    fwd_curves_2 = { 'MIA': np.array([97., 98., 99., 100.])
-                 , 'NYC': np.array([92., 93., 94., 95.])
-                 , 'AMS': np.array([91., 92., 93., 94.])
-                 , 'LA' : np.array([90., 91., 95., 100.])
-                 , 'SHA': np.array([85., 90., 95., 100.]) }
+    fwd_curves = { 'AMS': [95., 96., 97., 98.]
+                 , 'NYC': [92., 93., 94., 95.]
+                 , 'MIA': [91., 92., 93., 94.]
+                 , 'LA' : [90., 91., 95., 100.]
+                 #  , 'SHA': np.array([105., 106., 107., 109.]) }
+                 , 'SHA': [85., 90., 95., 100.] }
+
+    fwd_curves_2 = { 'MIA': [97., 98., 99., 100.]
+                   , 'NYC': [92., 93., 94., 95.]
+                   , 'AMS': [91., 92., 93., 94.]
+                   , 'LA' : [90., 91., 95., 100.]
+                   , 'SHA': [85., 90., 95., 100.] }
 
     fwd_dates_d = [ datetime.date(2015, 4, 1)
                   , datetime.date(2015, 5, 1)
@@ -50,25 +52,6 @@ class FreightTest(TestCase):
                 , 'MIA': fwd_dates_d
                 , 'LA' : fwd_dates_d
                 , 'SHA': fwd_dates_d }
-
-    def fwd_function( self
-                    , fwd_curves_dates : Tuple[np.array, List[datetime.date]]
-                    , mkt_date      : datetime.date
-                    , future_date   : datetime.date
-                    , dcf           : float = 365.25):
-        """ Sample forward/vol function.
-
-        :param fwd_curves_dates: tuple of list of forward values, and forward dates corresponding to the curve.
-        :param mkt_date: market date for which forwards/vols are given
-        :param future_date: future date for which forward is desired
-        :param dcf: day-count factor
-        """
-
-        fwd_curve, fwd_dates = fwd_curves_dates
-        disc_tenors_numeric  = [(tenor - mkt_date).days/dcf for tenor in fwd_dates]
-        curve_numeric        = scipy.interpolate.splrep(disc_tenors_numeric, fwd_curve )
-
-        return scipy.interpolate.splev((future_date - mkt_date).days / dcf, curve_numeric)
 
     # volatility part of the model.
     vol_adder = 0.
@@ -124,13 +107,22 @@ class FreightTest(TestCase):
         """ Returns the simple freight object to be used later.
         """
 
+        # construction of fwd_curves
+        fwd_curves = { location: FwdCurve(self.mkt_date, location, self.fwd_dates[location], self.fwd_curves[location])
+                       for location in self.locations }
+
+        # construction of vol curves
+        vol_curves = { location: ATMFVolatility( location
+                                               , self.mkt_date
+                                               , fwd_curves[location]
+                                               , {vol_date: [vol_value]
+                                                  for vol_date, vol_value in zip(self.vol_dates[location], self.vol_curves[location]) }
+                                               , )
+                       for location in self.locations }
+
         return Freight( self.mkt_date
-                      , lambda mkt_date, location, fut_date: self.fwd_function( (self.fwd_curves[location], self.fwd_dates[location])
-                                                                              , mkt_date
-                                                                              , fut_date )
-                      , lambda mkt_date, location, fut_date: self.fwd_function( (self.vol_curves[location], self.vol_dates[location])
-                                                                              , mkt_date
-                                                                              , fut_date )
+                      , lambda location, fut_date: fwd_curves[location].fwd_value(fut_date)
+                      , lambda location, fut_date: vol_curves[location].atm_vol(fut_date)
                       , self.corr_mtx
                       , self.travel_times
                       , self.cost_mtx
