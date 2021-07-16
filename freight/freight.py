@@ -1,5 +1,5 @@
-# Freight model implementation
-#
+""" Freight model implemented as a linear programming problem.
+"""
 
 import copy
 import datetime
@@ -8,10 +8,10 @@ import logging
 
 from scipy.optimize import linprog
 from functools      import lru_cache
-from typing         import Dict, List, Callable, Tuple, Union
+from typing         import Dict, List, Callable, Tuple, Union, Any
 
 from mrds.discount        import DiscountCurve
-from mrds.pricers.pricers import spread_option_kirk, cdf_vec
+from mrds.pricers.pricers import spread_option_kirk
 
 
 class FreightException(Exception):
@@ -202,14 +202,13 @@ class Freight:
 
         # cost has to be in the cost matrix.
         assert (start_loc, end_loc) in self._cost_matrix or (end_loc, start_loc) in self._cost_matrix, \
-            '({0}, {1}) not in cost matrix: {2}'.format(start_loc, end_loc, list(self._cost_matrix.keys()))
+            f'({start_loc}, {end_loc}) not in cost matrix: {list(self._cost_matrix.keys())}'
 
         # actual cost between cities
         return self._cost_matrix[(start_loc, end_loc) if (start_loc, end_loc) in self._cost_matrix else (end_loc, start_loc)]
 
     @lru_cache(maxsize=1000)
     def _spread_option( self
-                      , market_date : datetime.date
                       , start_loc   : str
                       , end_loc     : str
                       , start_date  : datetime.date
@@ -235,12 +234,26 @@ class Freight:
         """ Conditional transport variable.
             Location of the variable x_(i,j,t,u) in the matrix, t<u
             Index corresponding to shipping from city i to city j between time t and u conditional.
+
+        :param i: source city
+        :param j: destination city
+        :param t: departure time
+        :param u: arrival time.
+        :returns: index of the variable in the vector
         """
 
         return i + j * self._nb_locations + self._nb_locations ** 2 * (self._nb_time_periods - 1 - u + (self._nb_time_periods * t - t * (t + 1) // 2))
 
     def _Y(self, i : int, j: int, t : int, u: int) -> int:
         """ Unconditional transport variable.
+            Location of the variable y_(i,j,t,u) in the matrix, t<u
+            Index corresponding to shipping from city i to city j between time t and u conditional.
+
+        :param i: source city
+        :param j: destination city
+        :param t: departure time
+        :param u: arrival time.
+        :returns: index of the variable in the vector
         """
 
         # first line is the number of variables X
@@ -249,6 +262,10 @@ class Freight:
 
     def _N(self, i : int, t : int) -> int:
         """ Number of tankers in city i at time t. Location of the variable n_(i,t) in the vector of all variables.
+
+        :param i: source city
+        :param t: departure time
+        :returns: index of the variable in the vector
         """
 
         return self._nb_locations ** 2 * self._nb_time_periods * (self._nb_time_periods - 1) \
@@ -257,6 +274,8 @@ class Freight:
     def _N_loc(self, location : str, time_point : datetime.date):
         """ Simple version of _N
 
+        :param location: location city, like 'NYC'
+        :param time_point:
         """
 
         assert time_point in self._time_grid, 'Time point {0} used not in time grid {1}'.format(time_point, self._time_grid)
@@ -375,7 +394,6 @@ class Freight:
         """
 
         value_vec = np.zeros(self.__nb_lp_variables())
-        mkt_date  = self.mkt_date
 
         for start_period in range(self._nb_time_periods):  # time period t = start_period
             for start_loc in range(self._nb_locations):  # cities  i = start_loc
@@ -388,8 +406,7 @@ class Freight:
                         end_time       = self._nbs_to_time_grid[end_period]
                         costs_btw      = self._cost_btw_locs(location_start, location_end)
 
-                        value_vec[self._X(start_loc, end_loc, start_period, end_period)] = - self._spread_option( mkt_date
-                                                                                                                , location_start
+                        value_vec[self._X(start_loc, end_loc, start_period, end_period)] = - self._spread_option( location_start
                                                                                                                 , location_end
                                                                                                                 , start_time
                                                                                                                 , end_time ) if travel_allowed else self.LARGE_NUMBER
@@ -465,9 +482,9 @@ class Freight:
 
         return locations
 
-    def _hedge_movements_cond_uncond( self
-                                    , cond_uncond      : str
-                                    , ignore_small_nbs : float = 0.001) -> Dict[datetime.date, Dict[str, Tuple[str, datetime.date, float, float]]]:
+    def _hedge_movements( self
+                        , cond_uncond      : str
+                        , ignore_small_nbs : float = 0.001) -> Dict[datetime.date, Dict[str, Tuple[str, datetime.date, float, float]]]:
         """ Conditional or unconditional representation of hedge movements.
 
         @param cond_uncond: 'cond' if conditional movments, else 'uncond'
@@ -532,19 +549,19 @@ class Freight:
                 print(curr_key)
                 Freight.pretty_dict(value, indent+1)
 
-    def represent_hedge(self, ignore_small_nbs :float = .0001 ) -> Dict:
+    def represent_hedge(self, ignore_small_nbs :float = .0001 ) -> Dict[str, Any]:
         """ Represents the hedge obtained from optimization.
 
         @param ignore_small_nbs: ignore all hedges below a certain threshold, e.g. 1e-4
-        @returns:
+        @returns: dictionary w/ various freight results.
         """
 
         transport_sched, transport_value = self._freight_hedge()
 
         return { 'portfolio_value' : - np.sum(transport_value * transport_sched)  # self._value is negative, cause linprog is minimized
                , 'locations'       : self._hedge_locations(ignore_small_nbs)
-               , 'movements_cond'  : self._hedge_movements_cond_uncond('cond', ignore_small_nbs)
-               , 'movements_uncond': self._hedge_movements_cond_uncond('uncond', ignore_small_nbs)
+               , 'movements_cond'  : self._hedge_movements('cond', ignore_small_nbs)
+               , 'movements_uncond': self._hedge_movements('uncond', ignore_small_nbs)
                , }
 
     @staticmethod
@@ -572,14 +589,14 @@ class Freight:
 
         return result
 
-    def show_dynamics(self, ignore_small_nbs : float = 0.0001) -> Dict:
+    def show_dynamics(self, ignore_small_nbs : float = 0.0001) -> Dict[str, Any]:
         """ Extract the tanker routes from the hedges.
 
         @param ignore_small_nbs: ignore all hedges below a certain threshold, e.g. 1e-4
         @returns:
         """
 
-        rh          = self.represent_hedge()  # rv ... represent value
+        rh          = self.represent_hedge(ignore_small_nbs=ignore_small_nbs)  # rh ... represent hedge
         move_cond   = rh['movements_cond'  ]
         move_uncond = rh['movements_uncond']
 
@@ -613,6 +630,9 @@ class Freight:
                , 'schedule' : ship_schedule }
 
     def show_dynamics_and_locations(self, ignore_small_nbs : float = 0.0001) -> None:
+        """ Displays the dynamics of the moving freights by dates.
+        """
+
         sd       = self.show_dynamics(ignore_small_nbs=ignore_small_nbs)
         locs     = sd['locations']
         schedule = sd['schedule']
