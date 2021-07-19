@@ -310,24 +310,26 @@ class Freight:
         return time_period_2 - time_period_1 >= self._travel_times[(city_i, city_j) if (city_i, city_j) in self._travel_times else (city_j, city_i)]
 
     def __lm_mat(self) -> np.array:
-        """ Constructs the inequality matrix self.__LM, i.e. for conditions:
-               self.__LM * x <= 0. (0. is a vector)
+        """ Constructs the inequality matrix LM, i.e. for conditions:
+               LM * x <= 0. (0. is a vector)
         """
 
-        constraints_mat = []  # constraint matrix
+        LM = []  # constraint matrix
+        nb_vars = self.__nb_lp_variables()
 
         # constraint n_{i,t} >= sum_{j,u} X(i,j,t,u) + Y(i,j,t,u)
-        for time_step_start in range(self._nb_time_periods):
-            for location_start  in range(self._nb_locations):
-                constraints_vec = np.zeros(self.__nb_lp_variables())
-                constraints_vec[self._N(location_start, time_step_start)] = -1.
-                for location_end in range(self._nb_locations):
-                    for time_step_end in range(time_step_start + 1, self._nb_time_periods):
-                        constraints_vec[self._X(location_start, location_end, time_step_start, time_step_end)] = 1.
-                        constraints_vec[self._Y(location_start, location_end, time_step_start, time_step_end)] = 1.
-                constraints_mat.append(constraints_vec)
+        # transformed as sum_{j,u} (X(i,j,t,u) + Y(i,j,t,u)) - n_{i,t} <= 0
+        for departure_time_step in range(self._nb_time_periods):
+            for departure_loc in range(self._nb_locations):
+                LM_row = np.zeros(nb_vars)  # one row in the LM matrix
+                LM_row[self._N(departure_loc, departure_time_step)] = -1.  # - n_{i,t}
+                for destination_loc in range(self._nb_locations):
+                    for destination_time_step in range(departure_time_step + 1, self._nb_time_periods):
+                        LM_row[self._X(departure_loc, destination_loc, departure_time_step, destination_time_step)] = 1.  # X_{i,j, t,u)
+                        LM_row[self._Y(departure_loc, destination_loc, departure_time_step, destination_time_step)] = 1.  # Y_{i,j,t,u)
+                LM.append(LM_row)
 
-        return np.array(constraints_mat)
+        return np.array(LM)
 
     def __EMV_mat(self) -> Tuple[List[np.array], List[float]]:
         """ Sets the equality matrix (EM) and equality vector (EV), for constraints:
