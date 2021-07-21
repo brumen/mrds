@@ -256,8 +256,7 @@ class SmallFreightTest(FreightTest):
 
         freight_1 = self._simple_freight_object(nb_days=10)
 
-        # rh ... hedge representation.
-        rh = freight_1.represent_hedge()
+        rh = freight_1.represent_hedge()  # rh ... hedge representation.
         print('VALUE')
         print(rh['portfolio_value'])
         print('LOCATIONS')
