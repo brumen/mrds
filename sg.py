@@ -1,9 +1,9 @@
 import numpy as np
-from scipy.special import comb
+from scipy.special import comb, roots_hermite
 from typing        import Tuple, List, Callable
 
-import mrds.quad1d as quad1d
-from mrds.tolling.opd import opd_avx
+# import mrds.quad1d as quad1d
+# from mrds.tolling.opd import opd_avx
 
 
 #
@@ -11,6 +11,19 @@ from mrds.tolling.opd import opd_avx
 #   sparse_grid abbreviated with sg
 #   points ... network_struct
 #   weights ... w
+
+
+def roots_hermite_ch(n):
+    """ Somewhat changed version of the roots-hermite weights/points.
+
+    :param n: level of gauss-hermite polyn.
+    returns: Tuple[
+    """
+
+    if n > 0:
+        return roots_hermite(n)
+
+    return [0.], [0.]
 
 
 # TODO: WRITE THIS RECURSION NICELY.
@@ -73,7 +86,7 @@ def pairs_final(vec_list):
                  for i in range(len(v1))
                  for j in range(len(v2)) ]
 
-    return pairs(map(lambda y: map(lambda x: [x], y), vec_list))
+    return pairs(list(map(lambda y: list(map(lambda x: [x], y)), vec_list)))
 
 
 def sg_p(D : int, l : int, one_d_grid : List[float], one_d_discret : str ='gauss_hermite' ):
@@ -92,7 +105,8 @@ def sg_p(D : int, l : int, one_d_grid : List[float], one_d_discret : str ='gauss
     ig, _ = index_grid(D, l)
 
     if one_d_discret is 'gauss_hermite':
-        hg = [[list(quad1d.gh_pw(n)[0]) for n in B] for B in ig]
+
+        hg = [[list(roots_hermite_ch(n)[0]) for n in B] for B in ig]
 
     elif one_d_discret is 'linear':
         hg = [[list(np.arange(-2**n, 2**n+1)/np.double(2**n)) for n in B] for B in ig]
@@ -120,7 +134,7 @@ def sg_w(D : int, l : int, one_d_discret='gauss_hermite') -> List[float]:
     ig, wg = index_grid(D, l)  # index and weight grid
 
     if one_d_discret is 'gauss_hermite':
-        hg = [[list(quad1d.gh_pw(n)[1]) for n in B] for B in ig]
+        hg = [[list(roots_hermite_ch(n)[1]) for n in B] for B in ig]
     elif one_d_discret is 'linear':  # weights are all of 1
         hg = [[list(np.repeat(np.double(2**(-n)), 2**(n+1)+1)) for n in B] for B in ig]
     else:
@@ -151,10 +165,8 @@ def sg_quad(D : int, l : int, f : Callable, one_d_discret : str = 'gauss_hermite
     sqrt2 = np.sqrt(2.)
     sqrt_pi = np.sqrt(np.pi)
     g = lambda x: f(x * sqrt2) / sqrt_pi**D
-    weights = np.array(sg_w(D, l, one_d_discret))
-    vals = np.array(map(g, [np.array(x) for x in sg_p(D, l, [], one_d_discret)])).flatten()
 
-    if xmm_use:
-        return opd_avx.num_quad(weights, vals, len(vals))
+    weights = np.array(sg_w(D, l, one_d_discret))
+    vals = np.array(list(map(g, [np.array(x) for x in sg_p(D, l, [], one_d_discret)]))).flatten()
 
     return np.sum(weights*vals)
