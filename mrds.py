@@ -30,9 +30,9 @@ from mrds.quartic.quartic_cy  import QuadRoots, CubicRoots, QuarticRoots
 from mrds.tolling.opd.opd_avx import skew_fom
 
 
-logging.basicConfig(level=DEBUG)
+logging.basicConfig(level=DEBUG)  # TODO: CHECK THIS HERE
 logger = getLogger(__name__)
-# logger.setLevel(DEBUG)
+logger.setLevel(INFO)
 
 
 class ComSkewError(Exception):
