@@ -24,14 +24,11 @@ class LoadTest(TestCase):
 
     load_obj = Load(gl_compl, p_compl)
 
-    # TODO: FINISH THIS TEST.
     def test_smoke_test(self):
         """ Runs the smoke test for the load optimizer.
         """
 
-        res_compl = self.load_obj.cons_lp()
-
-        self.load_obj.draw_network( res_compl['solution_edges']
-                                  , pos = self.gl_compl_pos )
+        res_compl = self.load_obj.loads()
+        res_compl['solution_edges']
 
         self.assertTrue(True)

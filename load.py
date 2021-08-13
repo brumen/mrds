@@ -61,7 +61,7 @@ class Load:
 
         return None if not pot_res_raw else pot_res_raw[0]
 
-    def cons_lp(self):
+    def loads(self):
         """ Constructs the linear program to determine the load distribution.
         """
 

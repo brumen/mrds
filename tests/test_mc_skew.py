@@ -1,54 +1,56 @@
-# Unit Testing script of mrds module 
-# 
+""" Basic tests of the ComSkew class
+"""
 
-from numpy import exp, sqrt, pi, inf, arange, array
-from numpy.linalg.linalg import norm
+import datetime
 import scipy
 import scipy.optimize
-from scipy.integrate import quad
+import numpy as np
 
-import mrds.pricers as pricers
-import unittest
-import pickle
-import vols.vols as vols
+from numpy               import exp, sqrt, pi, inf, arange, array
+from numpy.linalg.linalg import norm
+from scipy.integrate     import quad
+from unittest            import TestCase
+
+from mrds.mrds            import ComSkew
+from mrds.vols.vols_basic import black_vol_inverse_vec
+# from mrds.pricers.pricers import call
 
 
-class ComSkewTests(unittest.TestCase):
+class ComSkewTests(TestCase):
 
-    # reads the market object 
-    def setUp (self):
-        # TODO: FIX THIS CONSIDERABLY
-        self.mo = pickle.load (open ('/home/brumen/workspace/mrds/mobj/wti_skew.obj') ) # loading the calibrated object
+    MKT_DATE = datetime.date(2015, 4, 1)
+
+    m_1 = ComSkew.from_db(MKT_DATE, ['WTI'])
 
     def test_trunc_normal_above(self):
         """ Tests the _trunc_normal_above function of the ComSkewMaths class.
         """
 
         for a in arange(-3, 3, 0.1):
-            mo_res = self.mo._trunc_normal_above(a)
+            mo_res = self.m_1._trunc_normal_above(a)
             num_res = array([ quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
                               quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
                               quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
                               quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0],
                               quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), -inf, a)[0] ] )
 
-            self.assertTrue(norm ( mo_res - num_res) < 1e-7 )
+            self.assertLess(norm ( mo_res - num_res), 1e-7 )
 
     def test_trunc_normal_below(self):
 
         for a in arange (-3, 3, 0.1):
-            mo_res = self.mo._trunc_normal_below(a)
+            mo_res = self.m_1._trunc_normal_below(a)
             num_res = array([ quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
                               quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
                               quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
                               quad (lambda x: x**3 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0],
                               quad (lambda x: x**4 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, inf)[0] ] )
-            self.assertTrue( norm ( mo_res - num_res) < 1e-7 )
+            self.assertLess( norm ( mo_res - num_res), 1e-7 )
 
     def test_trunc_normal_interval(self):
 
         for a in arange (-3,3,0.1):
-            mo_res = self.mo._trunc_normal_interval(a, a + 1.)
+            mo_res = self.m_1._trunc_normal_interval(a, a + 1.)
             num_res = array([ quad (lambda x: 1. / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
                               quad (lambda x: x / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
                               quad (lambda x: x**2 / sqrt ( 2. * pi ) * exp ( - x**2 / 2.0 ), a, a+1.)[0],
@@ -59,151 +61,93 @@ class ComSkewTests(unittest.TestCase):
     def test_negative_forwards(self):
         """ Tests whether the model simulation produces negative prices
         """
-        model='skew' # CHOOSE: skew, ln_ln, ln
-        sim_times = arange (0,5)/10. #array([0., 0.1, 0.2, 0.3, 0.4, 0.5]) # half a year extension 
-        # sim_times = array ([0., 1.]) 
-        nb_sims = 100000
-        self.mo.model_skew_ln_ind = model
-        self.mo.update_sim_times (sim_times)
-        self.mo.simulate_curves(nb_sims)
-        skew_ind = sum (self.mo.simulated_curves[0] < 0 ) < 50 
 
-        # TODO: THIS SHOULD BE THE NEXT CASE
-        model='ln_ln' # CHOOSE: skew, ln_ln, ln
-        sim_times = arange (0,5)/10. #array([0., 0.1, 0.2, 0.3, 0.4, 0.5]) # half a year extension 
+        sim_times = arange(0, 5)/10.
         nb_sims = 100000
-        self.mo.model_skew_ln_ind = model
-        self.mo.update_sim_times (sim_times)
-        self.mo.simulate_curves(nb_sims)
-        ln_ln_ind = sum (self.mo.simulated_curves[0] < 0 ) < 50 
 
-        #
-        # print "Log-normal (LN simulation): Testing the non-negativity of futures prices"
-        model='ln' # CHOOSE: skew, ln_ln, ln 
-        sim_times = arange (0,5)/10. #array([0., 0.1, 0.2, 0.3, 0.4, 0.5]) # half a year extension 
-        nb_sims = 100000
-        self.mo.model_skew_ln_ind = model
-        self.mo.update_sim_times (sim_times)
-        self.mo.simulate_curves(nb_sims)
-        ln_ind = sum (self.mo.simulated_curves[0] < 0 ) < 50 
-
-        self.assertTrue ( skew_ind and ln_ln_ind and ln_ind )
+        sim_curves = self.m_1.simulate_curves(['WTI'], nb_sims, sim_times, tenor_list = LLL)
+        self.assertLess(sum (sim_curves[0]) < 0, 50)
 
     def test_martingale (self):
         """ Tests whether the futures prices are martingales (at 0)
         """
 
-        model='skew' # CHOOSE: skew, ln_ln, ln
-        sim_times = arange (0,12)/12. # 1 year, monthly simulations
-        nb_sims = 1000000
-        self.mo.model_skew_ln_ind = model
-        self.mo.update_sim_times (sim_times)
-        self.mo.simulate_curves(nb_sims)
+        sim_times = arange(0, 12)/12.
+        nb_sims = 100000
 
-        nb_cms = len (self.mo.simulated_curves) # nb_sims. of commodities
-        skew_ind = [False] * nb_cms # placeholder
+        sim_curves = self.m_1.simulate_curves(['WTI'], nb_sims, sim_times, tenor_list = LLL)
+
+        nb_cms = len (sim_curves)
         for cm in range (nb_cms): # do this for every commodity
-            for fwd in range ( sum (self.mo.option_tenors_list[cm] <= sim_times[-1]), 
-                               len (self.mo.forward_curve_list[cm]) ):
-                # print "Skew: Testing the martingale of futures prices for com.", cm," and future nb_sims. ", fwd
-                skew_ind[cm] = scipy.linalg.norm ( mean ( self.mo.simulated_curves[cm][:,fwd,:], axis=1) - 
-                                                   self.mo.simulated_curves[cm][0,fwd,0] ) < 1e-3
-                
-                # print "Simulated values = ", mean ( self.mo.simulated_curves[cm][:,fwd,:], axis=1)
-                # print "Theoretical values = ", self.mo.simulated_curves[cm][0,fwd,0]
-
-        self.assertTrue ( reduce (lambda x,y: x and y, skew_ind, True) ) # all skew indicators have to be 0
+            for fwd in range ( sum (self.m_1.option_tenors_list[cm] <= sim_times[-1]),
+                               len (self.m_1.forward_curve_list[cm]) ):
+                self.assertTrue(scipy.linalg.norm ( np.mean ( self.m_1.simulated_curves[cm][:,fwd,:], axis=1) -
+                                                   self.m_1.simulated_curves[cm][0,fwd,0] ) < 1e-3 )
 
     def test_poly_eu_no_roots (self):
         """ Testing the roots part of _polynomial_european"
         """
-        C1_range = arange (-1., 1., 0.05)
-        C2_range = arange (-2., 2., 0.05)
-        C3_range = arange (-2., 4., 0.05)
-        var_C = self.mo.C_vec_list[0][11]
+
+        var_C = self.m_1.C_vec_list[0][11]  # TODO: CHANGE THIS
         K = 130.
-        assert1 = True
-        assert2 = True
-        assert3 = True
 
         # CALL option testing 
         # C1 testing of the poly. european 
-        for C1 in C1_range:
+        for C1 in arange (-1., 1., 0.05):
             var_C_cur = array([C1, var_C[1], var_C[2]])
-            self.mo.debug_mode = False
-            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
-            self.mo.debug_mode = True
-            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
-            assert1 = assert1 and ( norm ( res1 - res2) < 1e-6 )
+            res1 = self.m_1._polynomial_european(0, var_C_cur, 11, K, 1)
+            res2 = self.m_1._polynomial_european(0, var_C_cur, 11, K, 1)
+            self.assertLess( norm ( res1 - res2), 1e-6 )
 
-
-        for C2 in C2_range:
+        for C2 in arange (-2., 2., 0.05):
             var_C_cur = array([var_C[0], C2, var_C[2]])
-            self.mo.debug_mode = False
-            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
-            self.mo.debug_mode = True
-            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
-            assert2 = assert2 and ( norm ( res1 - res2) < 1e-6 )
+            res1 = self.m_1._polynomial_european(0, var_C_cur, 11, K, 1)
+            res2 = self.m_1._polynomial_european(0, var_C_cur, 11, K, 1)
+            self.assertTrue( norm ( res1 - res2) < 1e-6 )
 
-
-        for C3 in C3_range:
+        for C3 in arange (-2., 4., 0.05):
             var_C_cur = array([var_C[0], var_C[1], C3])
-            self.mo.debug_mode = False
-            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
-            self.mo.debug_mode = True
-            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, 1)
-            assert3 = assert3 and ( norm ( res1 - res2) < 1e-6 )
-
+            res1 = self.m_1._polynomial_european(0, var_C_cur, 11, K, 1)
+            res2 = self.m_1._polynomial_european(0, var_C_cur, 11, K, 1)
+            self.assertTrue ( norm ( res1 - res2) < 1e-6 )
 
         # PUT option testing
         K = 70.
-        assert4 = True
-        assert5 = True
-        assert6 = True
 
         # C1 testing of the poly. european 
-        for C1 in C1_range:
+        for C1 in arange (-1., 1., 0.05):
             var_C_cur = array([C1, var_C[1], var_C[2]])
-            self.mo.debug_mode = False
-            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
-            self.mo.debug_mode = True
-            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
-            assert4 = assert4 and ( norm ( res1 - res2) < 1e-6 )
+            res1 = self.m_1._polynomial_european(0, var_C_cur, 11, K, -1)
+            res2 = self.m_1._polynomial_european(0, var_C_cur, 11, K, -1)
+            self.assertLess( norm ( res1 - res2), 1e-6 )
 
-
-        for C2 in C2_range:
+        for C2 in arange (-2., 2., 0.05):
             var_C_cur = array([var_C[0], C2, var_C[2]])
-            self.mo.debug_mode = False
-            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
-            self.mo.debug_mode = True
-            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
-            assert5 = assert5 and ( norm ( res1 - res2) < 1e-6 )
+            res1 = self.m_1._polynomial_european(0, var_C_cur, 11, K, -1)
+            res2 = self.m_1._polynomial_european(0, var_C_cur, 11, K, -1)
+            self.assertLess( norm ( res1 - res2), 1e-6 )
 
-
-        for C3 in C3_range:
+        for C3 in arange (-2., 4., 0.05):
             var_C_cur = array([var_C[0], var_C[1], C3])
-            self.mo.debug_mode = False
-            res1 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
-            self.mo.debug_mode = True
-            res2 = self.mo._polynomial_european(0, var_C_cur, 11, K, -1)
-            assert6 = assert6 and ( norm ( res1 - res2) < 1e-6 )
-
-        self.assertTrue(assert1 and assert2 and assert3 and assert4 and assert5 and assert6)
+            res1 = self.m_1._polynomial_european(0, var_C_cur, 11, K, -1)
+            res2 = self.m_1._polynomial_european(0, var_C_cur, 11, K, -1)
+            self.assertLess( norm ( res1 - res2), 1e-6 )
 
     def test_ln_model(self):
+
         sim_times = array([0.5, 1.])
         nb_sims = 10000000
-        self.mo.model_skew_ln_ind = 'ln_ln'
-        self.mo.update_sim_times (sim_times)
-        self.mo.simulate_curves(nb_sims)
+        self.m_1.model_skew_ln_ind = 'ln_ln'
+        self.m_1.update_sim_times (sim_times)
+        self.m_1.simulate_curves(nb_sims)
 
-        pr1 = pricers.call (self.mo, [self.mo.forward_curve_list[0][15], 
+        pr1 = pricers.call (self.m_1, [self.m_1.forward_curve_list[0][15],
                                       15, 1])
 
-        disc_fact = self.mo.DF (1.)
+        disc_fact = self.m_1.DF (1.)
         theta = 1 # call options 
-        iv = vols.black_vol_inverse_vec (self.mo.forward_curve_list[0][15], 
-                                         [self.mo.forward_curve_list[0][15]], 
+        iv = black_vol_inverse_vec (self.m_1.forward_curve_list[0][15],
+                                         [self.m_1.forward_curve_list[0][15]],
                                          [pr1], 1., disc_fact, theta, 1e-4)
 
-        self.assertTrue(abs (iv - self.mo.atm_vol_list[0][15] ) < 1e-4)
+        self.assertTrue(abs (iv - self.m_1.atm_vol_list[0][15] ) < 1e-4)
