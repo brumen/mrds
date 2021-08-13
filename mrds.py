@@ -1578,3 +1578,12 @@ class ComSkewChecks(ComSkew):
                 logger.info('Calibration of ATM vols for asset {0} is LARGER than prescribed. Market - calibrated diff: {1}.'.format(asset, diff))
 
         logger.debug('Calibration of ATM vols for asset nb. {0} succeeded. Diff = {1}'.format(asset, str(diff)))
+
+
+def main():
+    # examples
+    MKT_DATE = datetime.date(2015, 4, 1)
+    model_1 = ComSkew.from_db(MKT_DATE, ['WTI', ])
+
+
+# main()
