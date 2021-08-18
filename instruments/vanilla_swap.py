@@ -3,7 +3,7 @@
 import datetime
 import QuantLib as ql
 
-from typing    import List
+from typing import List, Dict
 
 from mrds.forward_curve import FwdCurve
 from mrds.discount      import DiscountCurve
@@ -68,6 +68,40 @@ class VanillaSwap:
 
         return sum([ (self.index_curve.fwd_value(payment_date) - self.swap_rate) * discount_curve(payment_date)
                      for payment_date in self.payments() ])
+
+    @staticmethod
+    def _params_db(params : Dict) -> Dict:
+        """ Converts the params for Vanilla swap in the order one would want.
+
+        :param params: parameters as read from the database.
+        """
+
+        change_params = ('start_date', 'pricing_date', )  # parameters to be changed
+        new_params = {}
+
+        start_date = params.get('start_date')
+        if start_date is None:
+            raise RuntimeError('start_date missing from the parameter set')
+        else:
+            new_params['start_date'] = datetime.date.fromisoformat(start_date)
+
+        pricing_date = params.get('pricing_date')
+        new_params['pricing_date'] = None if pricing_date is None else datetime.date.fromisoformat(pricing_date)
+
+        chg_params = {k: v for k, v in params.items() if k not in change_params }
+        chg_params.update(new_params)
+
+        return chg_params
+
+    @classmethod
+    def from_db(cls, market_date : datetime.date, params : Dict):
+        """ Returns the vanilla swap object from the params given in the db.
+
+        :param market_date: market date
+        :param params: database parameters, see method _params_db
+        """
+
+        return cls( market_date = market_date, **cls._params_db(params) )
 
 
 def main():
