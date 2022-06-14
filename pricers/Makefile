@@ -1,4 +1,4 @@
-PYTHON_COMMAND=python
+PYTHON_COMMAND=python3
 
 pricers_fast: pricers_setup.py
 	$(PYTHON_COMMAND) pricers_setup.py build_ext --inplace
