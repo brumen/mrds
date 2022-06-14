@@ -62,7 +62,8 @@ class TestMrds(TestCase):
 
         res1 = self.model.simulate_1nb( ['WTI', ], nb_sims, sim_times )
 
-        self.assertIn('WTI', res1)
+        self.assertIn(datetime.date(2015, 4, 20), res1)
+        self.assertIn(datetime.date(2015, 5, 1), res1)
 
 
 class TestComSkewMultiple(TestCase):

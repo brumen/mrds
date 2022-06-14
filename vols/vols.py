@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 
 
 from typing  import List, Tuple, Dict, Union
-from openopt import NLP
+# from openopt import NLP
+from scipy.optimize    import minimize, Bounds
 from scipy.interpolate import splev, splrep
 from mpl_toolkits.mplot3d              import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -214,11 +215,10 @@ class Volatility:
         """
 
         try:
-            nlp_solution = NLP( lambda K: self.skewed_cdf_analy(K, quantile)
-                              , S0
-                              , lb      = 0.001
-                              , ub      = np.inf
-                              , maxIter = maxIter).solve(self.__class__.SOLVER)
+            nlp_solution = minimize( lambda K: self.skewed_cdf_analy(K, quantile)
+                                   , S0
+                                   , bounds = Bounds([0.001], [np.inf])
+                                   , )
 
         except Exception as e:
             raise VolatilityException('Unable to invert the skewed cdf in inversion_skewed_cdf: {0}'.format(str(e)))

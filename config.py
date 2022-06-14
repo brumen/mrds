@@ -21,3 +21,5 @@ work_dir = prod_dir
 
 # for One-period dispatch
 opd_1_fuel_cuda_code = 'opd_1fuel_cu_by_block_new.c'
+
+brumen_pass = 'c2D779Mu'
