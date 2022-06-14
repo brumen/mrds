@@ -90,7 +90,7 @@ def get_fwd_vol_curve_numeric_tenor( curve_name : str
     :param adj_tenors_days: integer, to adjust the number of days in the forward/vol curve.
     """
 
-    if fwd_vol_ind is 'fwd':
+    if fwd_vol_ind == 'fwd':
         fwd_vol_tenors_raw, fwd_vol_values_raw = get_forward_curve(curve_name, mkt_date)
         if adj_tenors_days is not None:
             fwd_vol_tenors_vals = [(ot - datetime.timedelta(days=adj_tenors_days), val)
@@ -163,7 +163,7 @@ def read_data_matched_tenors( mktDate : datetime.date
         """ Selects the elements from array arr given the indices in idx
 
         """
-        if fwd_opt_ind is 'fwd':
+        if fwd_opt_ind == 'fwd':
             return [arr[elt_fwd] for (elt_fwd, elt_opt) in idx]
 
         return [arr[elt_opt] for (elt_fwd, elt_opt) in idx]

@@ -76,7 +76,7 @@ def pairs_final(vec_list):
     def pairs(vec_list_mod):
         vec_list_mod_len = len(vec_list_mod)
 
-        if vec_list_mod_len is 1:
+        if vec_list_mod_len == 1:
             return vec_list_mod[0]
 
         v1 = vec_list_mod[0]
@@ -104,14 +104,14 @@ def sg_p(D : int, l : int, one_d_grid : List[float], one_d_discret : str ='gauss
 
     ig, _ = index_grid(D, l)
 
-    if one_d_discret is 'gauss_hermite':
+    if one_d_discret == 'gauss_hermite':
 
         hg = [[list(roots_hermite_ch(n)[0]) for n in B] for B in ig]
 
-    elif one_d_discret is 'linear':
+    elif one_d_discret == 'linear':
         hg = [[list(np.arange(-2**n, 2**n+1)/np.double(2**n)) for n in B] for B in ig]
 
-    elif one_d_discret is 'manual':
+    elif one_d_discret == 'manual':
         hg = [[list(one_d_grid)] * len(B) for B in ig]
 
     else:
@@ -133,9 +133,9 @@ def sg_w(D : int, l : int, one_d_discret='gauss_hermite') -> List[float]:
 
     ig, wg = index_grid(D, l)  # index and weight grid
 
-    if one_d_discret is 'gauss_hermite':
+    if one_d_discret == 'gauss_hermite':
         hg = [[list(roots_hermite_ch(n)[1]) for n in B] for B in ig]
-    elif one_d_discret is 'linear':  # weights are all of 1
+    elif one_d_discret == 'linear':  # weights are all of 1
         hg = [[list(np.repeat(np.double(2**(-n)), 2**(n+1)+1)) for n in B] for B in ig]
     else:
         raise RuntimeError('one_d_discret not one of gauss_hermite, linear')

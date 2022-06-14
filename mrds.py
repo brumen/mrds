@@ -9,7 +9,8 @@ import scipy.stats
 import scipy.interpolate  # spline package
 import logging
 
-from openopt         import NLP, NSP
+# from openopt         import NLP, NSP
+from scipy.optimize  import minimize, Bounds
 from logging         import getLogger, DEBUG, INFO
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
@@ -321,13 +322,13 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         #        , 'corr_lb': np.array([[1., -0.99], [-0.99, 1.]])
         #        , 'corr_ub': np.array([[1., 0.99], [0.99, 1.]])} ):
 
-        lb_ub_fact = -0.999 if lb_ub_ind is 'lb' else 0.999
+        lb_ub_fact = -0.999 if lb_ub_ind == 'lb' else 0.999
 
         if asset_1 == asset_2:
             tmp_1 = np.ones((self.nb_factors_for_asset(asset_1), self.nb_factors_for_asset(asset_1)))
             tmp_ut = np.triu(tmp_1, 1)
             tmp_lt = np.tril(tmp_1, -1)
-            return tmp_1 - tmp_ut * 0.001 - tmp_lt * 0.001 if lb_ub_ind is 'ub' else \
+            return tmp_1 - tmp_ut * 0.001 - tmp_lt * 0.001 if lb_ub_ind == 'ub' else \
                 tmp_1 - tmp_ut * 1.999 - tmp_lt * 1.999
 
         return lb_ub_fact * np.ones((self.nb_factors_for_asset(asset_1), self.nb_factors_for_asset(asset_2)))
@@ -903,21 +904,39 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         print(f'Calibrating sigma, kappa, rho for: {asset}.')
         logger.debug(f'Calibrating sigma, kappa, rho for: {asset}.')
 
-        pr_solve = NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
+        # pr_solve = NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
+        #                                                                               , kappa_sigma_rho_vec[:nbf]
+        #                                                                               , kappa_sigma_rho_vec[nbf:(2*nbf)]
+        #                                                                               , kappa_sigma_rho_vec[(2*nbf):] )
+        #            , init_kappa_sigma_rho
+        #            , lb = np.concatenate([self._kappa_default(nbf, 'lb'),
+        #                                   self._sigma_default(nbf, 'lb'),
+        #                                   np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ])
+        #            , ub = np.concatenate([self._kappa_default(nbf, 'ub'),
+        #                                   self._sigma_default(nbf, 'ub'),
+        #                                   np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
+        #            .solve(self.__class__.NLP_SOLVER)
+
+        lower_bounds = np.concatenate( [ self._kappa_default(nbf, 'lb')
+                                       , self._sigma_default(nbf, 'lb')
+                                       , np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ]
+                                       , )
+
+        upper_bounds = np.concatenate([ self._kappa_default(nbf, 'ub')
+                                      , self._sigma_default(nbf, 'ub')
+                                      , np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]
+                                      , )
+
+        pr_solve = minimize( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
                                                                                       , kappa_sigma_rho_vec[:nbf]
                                                                                       , kappa_sigma_rho_vec[nbf:(2*nbf)]
                                                                                       , kappa_sigma_rho_vec[(2*nbf):] )
-                   , init_kappa_sigma_rho
-                   , lb = np.concatenate([self._kappa_default(nbf, 'lb'),
-                                          self._sigma_default(nbf, 'lb'),
-                                          np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ])
-                   , ub = np.concatenate([self._kappa_default(nbf, 'ub'),
-                                          self._sigma_default(nbf, 'ub'),
-                                          np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
-                   .solve(self.__class__.NLP_SOLVER)
+                           , init_kappa_sigma_rho
+                           , bounds=Bounds(lower_bounds, upper_bounds)
+                           , )
 
-        if pr_solve.isFeasible:
-            return pr_solve.xf  # return solution
+        if pr_solve.success:
+            return pr_solve.x  # return solution
 
         # problem is not feasible: TODO: FOR NOW RETURN DEFAULT VALUES
         return init_kappa_sigma_rho
@@ -1249,12 +1268,12 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
 
         logger.debug(f'Calibrating {asset} for date {fwd_date}.')
         initial_guess = np.array([1., 0., 0.])
-        c_vec_sol = NLP( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
-                       , initial_guess)\
-                       .solve(self.__class__.NLP_SOLVER)
+        c_vec_sol = minimize( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
+                            , initial_guess)
+                            # .solve(self.__class__.NLP_SOLVER)
 
-        if c_vec_sol.isFeasible:
-            return c_vec_sol.xf
+        if c_vec_sol.success:
+            return c_vec_sol.x
 
         # solution not feasible  # TODO: MAYBE THERE IS SOMETHING MORE TO DO HERE
         return initial_guess
