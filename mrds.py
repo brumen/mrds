@@ -9,12 +9,11 @@ import scipy.stats
 import scipy.interpolate  # spline package
 import logging
 
-# from openopt         import NLP, NSP
 from scipy.optimize  import minimize, Bounds
 from logging         import getLogger, DEBUG, INFO
 from multiprocessing import Pool, cpu_count
 from functools       import lru_cache
-from typing          import List, Dict, Tuple, Union, Callable
+from typing          import List, Dict, Union, Callable
 
 # mrds imports
 from mrds.mrds_maths    import ComMathsMixin
@@ -1270,7 +1269,6 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         initial_guess = np.array([1., 0., 0.])
         c_vec_sol = minimize( lambda C_vec: scipy.linalg.norm(np.array(self.__model_vol_surface(asset, C_vec, fwd_date)) - implied_vols)
                             , initial_guess)
-                            # .solve(self.__class__.NLP_SOLVER)
 
         if c_vec_sol.success:
             return c_vec_sol.x
