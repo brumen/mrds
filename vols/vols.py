@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 
 
 from typing  import List, Tuple, Dict, Union
-# from openopt import NLP
 from scipy.optimize    import minimize, Bounds
 from scipy.interpolate import splev, splrep
 from mpl_toolkits.mplot3d              import Axes3D

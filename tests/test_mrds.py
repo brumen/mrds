@@ -3,6 +3,10 @@
 
 import datetime
 from unittest import TestCase
+import sys
+
+if '/home/brumen/work/' not in sys.path:
+    sys.path.append('/home/brumen/work/')
 
 from mrds.mrds import ComSkew
 

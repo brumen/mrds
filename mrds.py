@@ -900,21 +900,7 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin):
         init_kappa_sigma_rho = np.concatenate([ self._kappa_default(nbf, 'init')
                                               , self._sigma_default(nbf, 'init')
                                               , np.triu(fcm_init, 1)[np.triu(fcm_init, 1) != 0] ])
-        print(f'Calibrating sigma, kappa, rho for: {asset}.')
         logger.debug(f'Calibrating sigma, kappa, rho for: {asset}.')
-
-        # pr_solve = NLP( lambda kappa_sigma_rho_vec: self.__distance_model_market_black_vol( asset
-        #                                                                               , kappa_sigma_rho_vec[:nbf]
-        #                                                                               , kappa_sigma_rho_vec[nbf:(2*nbf)]
-        #                                                                               , kappa_sigma_rho_vec[(2*nbf):] )
-        #            , init_kappa_sigma_rho
-        #            , lb = np.concatenate([self._kappa_default(nbf, 'lb'),
-        #                                   self._sigma_default(nbf, 'lb'),
-        #                                   np.triu(fcm_lb, 1)[np.triu(fcm_lb, 1) != 0] ])
-        #            , ub = np.concatenate([self._kappa_default(nbf, 'ub'),
-        #                                   self._sigma_default(nbf, 'ub'),
-        #                                   np.triu(fcm_ub, 1)[np.triu(fcm_ub, 1) != 0] ]))\
-        #            .solve(self.__class__.NLP_SOLVER)
 
         lower_bounds = np.concatenate( [ self._kappa_default(nbf, 'lb')
                                        , self._sigma_default(nbf, 'lb')
