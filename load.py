@@ -1,6 +1,5 @@
-#
-# Load generation network
-#
+""" Load generation network
+"""
 
 import numpy             as np
 import networkx          as nx
