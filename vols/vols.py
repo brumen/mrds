@@ -5,20 +5,19 @@ import datetime
 import scipy
 import scipy.stats
 import scipy.interpolate  # spline package
-import numpy      as np
+import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-
-from typing  import List, Tuple, Dict, Union
-from scipy.optimize    import minimize, Bounds
+from typing import List, Tuple, Dict, Union
+from scipy.optimize import minimize, Bounds
 from scipy.interpolate import splev, splrep
-from mpl_toolkits.mplot3d              import Axes3D
+from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import mrds.ds as ds
-from mrds.pricers.pricers import black_greeks
-from mrds.forward_curve   import FwdCurve
+# from mrds.pricers.pricers import black_greeks
+from mrds.forward_curve import FwdCurve
 
 mpl.use('TkAgg')
 
@@ -35,11 +34,13 @@ class Volatility:
 
     SOLVER = 'scipy_cobyla'
 
-    def __init__(self
-                 , com_name : str
-                 , mkt_date : datetime.date
-                 , fwd_params : FwdCurve
-                 , vol_params : Dict[datetime.date, List]):
+    def __init__(
+            self,
+            com_name: str,
+            mkt_date: datetime.date,
+            fwd_params: FwdCurve,
+            vol_params: Dict[datetime.date, List]
+    ):
         """ Generic class for the volatility object. Most generic way of computing the volatility.
 
         :param com_name: name of the commodity to consider
@@ -48,13 +49,13 @@ class Volatility:
         :param vol_params: dictionary, where keys are volatility dates, and values are tuples of parameters (ATM, ....)
         """
 
-        self.mkt_date    = mkt_date
-        self.com_name    = com_name
+        self.mkt_date = mkt_date
+        self.com_name = com_name
         self._fwd_params = fwd_params
         self._vol_params = vol_params
 
     @classmethod
-    def from_db(cls, com_name : str, mkt_date : datetime.date):
+    def from_db(cls, com_name: str, mkt_date : datetime.date):
         """ Reads the forward and vol curve from external source.
 
         :param com_name: name of the commodity one wants, e.g. 'WTI', ...
@@ -320,12 +321,14 @@ class ATMFVolatility(Volatility):
 
     INTERPOLATION_DEGREE = 1
 
-    def __init__( self
-                , com_name : str
-                , mkt_date : datetime.date
-                , fwd_params
-                , vol_params
-                , dcf = 365.25 ):
+    def __init__(
+            self,
+            com_name: str,
+            mkt_date: datetime.date,
+            fwd_params,
+            vol_params,
+            dcf=365.25,
+    ):
         """ JWSS7 volatility init. the same as the volatility init, w/ some specific properties.
         All parameters are the same as in Volatility class, except for the following:
 
@@ -344,7 +347,7 @@ class ATMFVolatility(Volatility):
         :returns: volatility dates as a model input.
         """
 
-        return list( self._vol_params.keys() )
+        return list(self._vol_params.keys())
 
     @property
     def _atm_vol_curve(self):
@@ -358,12 +361,16 @@ class ATMFVolatility(Volatility):
 
         vol_dates = [(x - self.mkt_date).days / self._dcf for x in self.vol_dates]
 
-        vol_dates_values = sorted( zip(vol_dates, self._vol_params.values())
-                                 , key = lambda vol_date_val: vol_date_val[0])
+        vol_dates_values = sorted(
+            zip(vol_dates, self._vol_params.values()),
+            key=lambda vol_date_val: vol_date_val[0]
+        )
 
-        self._atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
-                                            , [x[1] for x in vol_dates_values]
-                                            , k=self.INTERPOLATION_DEGREE )
+        self._atm_vol_curve_interp = splrep(
+            [x[0] for x in vol_dates_values],
+            [x[1] for x in vol_dates_values],
+            k=self.INTERPOLATION_DEGREE
+        )
 
         return self._atm_vol_curve_interp
 

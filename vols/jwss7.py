@@ -5,13 +5,13 @@ import logging
 
 from scipy.stats import norm
 
-from typing  import List, Dict, Tuple, Union
+from typing import Dict, Tuple, Union
 from tkinter import Scale, Button, HORIZONTAL
 from scipy.interpolate import splrep
 
-from mrds.ds            import get_vol_curve
+from mrds.ds import get_vol_curve
 from mrds.forward_curve import FwdCurve
-from mrds.vols.vols     import VolatilityDrawMixin, ATMFVolatility
+from mrds.vols.vols import VolatilityDrawMixin, ATMFVolatility
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class JWSS7Volatility(ATMFVolatility):
     SCIPY_SOLVER = 'scipy_cobyla'
 
     @classmethod
-    def from_db(cls, com_name : str, mkt_date : datetime.date, dcf : float = 365.25):
+    def from_db(cls, com_name: str, mkt_date: datetime.date, dcf: float = 365.25):
         """ Obtains the volatility from database.
 
         :param com_name: commodity name, e.g. 'WTI'
@@ -42,11 +42,15 @@ class JWSS7Volatility(ATMFVolatility):
         if vol_type != 'JWSS7':
             raise RuntimeError(f'Fetching the wrong curve. {com_name} has type {vol_type}')
 
-        return cls( com_name
-                  , mkt_date
-                  , fwd_params = FwdCurve.from_db(mkt_date, com_name)
-                  , vol_params = vol_params
-                  , dcf        = dcf )
+        fwd_params = FwdCurve.from_db(mkt_date, com_name)
+
+        return cls(
+            com_name,
+            mkt_date,
+            fwd_params=fwd_params,
+            vol_params=vol_params,
+            dcf=dcf,
+        )
 
     @property
     def _atm_vol_curve(self):
@@ -57,36 +61,62 @@ class JWSS7Volatility(ATMFVolatility):
             return self._atm_vol_curve_interp
 
         vol_dates = [(x - self.mkt_date).days / self._dcf for x in self.vol_dates]
-        atm_vols  = [x[0] for x in self._vol_params.values()]
+        atm_vols = [x[0] for x in self._vol_params.values()]
 
-        vol_dates_values = sorted(zip(vol_dates, atm_vols), key=lambda vol_date_val: vol_date_val[0])
+        vol_dates_values = sorted(
+            zip(vol_dates, atm_vols),
+            key=lambda vol_date_val: vol_date_val[0]
+        )
 
-        self._atm_vol_curve_interp = splrep( [x[0] for x in vol_dates_values]
-                                            , [x[1] for x in vol_dates_values]
-                                            , k=self.INTERPOLATION_DEGREE )
+        self._atm_vol_curve_interp = splrep(
+            [x[0] for x in vol_dates_values],
+            [x[1] for x in vol_dates_values],
+            k=self.INTERPOLATION_DEGREE,
+        )
 
         return self._atm_vol_curve_interp
 
+    JWSS7_STRUCT = Tuple[float, float, float, float, float, float, float]
+
     @staticmethod
-    def _transform_from_jwss7( vol_curve : Dict[datetime.date, List]) -> Dict[datetime.date, Tuple]:
+    def _transform_params_jwss7(
+            jwss7_params: JWSS7_STRUCT,
+    ) -> JWSS7_STRUCT:
+        sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend = jwss7_params
+
+        B = (2. * skew + put_slope) / (put_slope + call_slope)
+        A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
+
+        # in the form of sigma_0, A, B, C, P, alphaC, alphaP
+        return (
+            sigma_0,
+            A,
+            B,
+            call_slope/A,
+            put_slope/A,
+            call_bend,
+            put_bend
+        )
+
+    @staticmethod
+    def _transform_from_jwss7(
+            vol_curve: Dict[datetime.date, JWSS7_STRUCT]
+    ) -> Dict[datetime.date, JWSS7_STRUCT]:
         """ Returns jw7 parametrization from jwss7 for particular fwd date.
 
         vol_params in Jwss7: [S0, atm, skew, smile, putslope, putbend, callslope, callbend]
         vol_params in jw7  : [S0, atm, A   , B    , C       , P      , alphaC   , alphaP  ]
         """
 
-        transformed_curve = {}
-        for fwd_vol_date, vol_params_for_date in vol_curve.items():
-            sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend = vol_params_for_date
-            B = (2. * skew + put_slope) / (put_slope + call_slope)
-            A = 0.5 * B * (1. - B) * (call_slope + put_slope)**2 / (smile + skew**2)
+        return {
+            fwd_vol_date: JWSS7Volatility._transform_from_jwss7(jwss7_params_for_date)
+            for fwd_vol_date, jwss7_params_for_date in vol_curve.items()
+        }
 
-            # in the form of sigma_0, A, B, C, P, alphaC, alphaP
-            transformed_curve[fwd_vol_date] = (sigma_0, A, B, call_slope / A, put_slope / A, call_bend, put_bend )
-
-            return transformed_curve
-
-    def _interpolate_params_for_fwd_date(self, fwd_date : datetime.date) -> datetime.date:
+    def _interpolate_params_for_fwd_date(
+            self,
+            fwd_date: datetime.date
+    ) -> datetime.date:
         """ Interpolate parameters for forward date fwd_date.
         In this case I just select the next larger date, or if not, the largest date in the self._vol_params
 
@@ -104,24 +134,49 @@ class JWSS7Volatility(ATMFVolatility):
                     selected_date = input_date
 
         if not selected_date:
-            selected_date = max(input_dates)
+            return max(input_dates)
 
         return selected_date
 
-    def _vol_compute(self, fwd_date : datetime.date, normalized_strike : float) -> float:
+    @staticmethod
+    def _vol_compute_from_jw7(z: float, jw7_params: JWSS7_STRUCT) -> float:
+        """ Compute jw7 vol from parameters.
+
+        :param z: normalized strike
+        :param jw7_params: tuple of jw7 parameters.
+        """
+
+        sigma_0, A, B, C, P, alpha_C, alpha_P = jw7_params
+
+        return sigma_0 * np.sqrt(
+            1. + A * np.log(
+                B * np.exp(C * (z / (1.0 + z*z) ** (alpha_C/2))) +
+                (1. - B) * np.exp(- P * (z / (1.0 + z*z) ** (alpha_P/2)))
+            )
+        )
+
+    def _vol_compute(
+            self,
+            fwd_date: datetime.date,
+            normalized_strike: float,
+    ) -> float:
         """ Computes the volatility given the following parameters:
 
         :param fwd_date: forward date on the vol curve.
-        :param normalized_strike: normalized strike
+        :param normalized_strike: normalized strike (log(F/S))
         """
 
-        sigma_0, A, B, C, P, alpha_C, alpha_P = self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)]
-        z = normalized_strike  # abbreviation, for simplicity
+        fwd_date_on_curve = self._interpolate_params_for_fwd_date(fwd_date)
+        jw7_params = self._vol_params[fwd_date_on_curve]
 
-        return sigma_0 * np.sqrt(1. + A * np.log(B * np.exp(C * (z / (1.0 + z * z) ** (alpha_C/2))) +
-                                          (1. - B) * np.exp(- P * (z / (1.0 + z * z) ** (alpha_P/2)))))
+        return self._vol_compute_from_jw7(normalized_strike, jw7_params)
 
-    def implied_vol(self, fwd_date : Union[datetime.date, int], strike : float, ttm : float) -> float:
+    def implied_vol(
+            self,
+            fwd_date: Union[datetime.date, int],
+            strike: float,
+            ttm: float
+    ) -> float:
         """ Implied vol for the fwd_date.
 
         :param fwd_date: date for which the volatility is to be computed.
@@ -129,13 +184,18 @@ class JWSS7Volatility(ATMFVolatility):
         :param ttm: time to maturity
         """
 
-        return self._vol_compute( fwd_date
-                                , JWSS7Volatility.normalized_strike(self._fwd_params.fwd_value(fwd_date)
-                                                                    , np.array([strike])
-                                                                    , self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)][0]  # atm vol is the first element
-                                                                    , ttm)[0] )
+        normalized_strike = JWSS7Volatility.normalized_strike(
+            self._fwd_params.fwd_value(fwd_date),
+            np.array([strike]),
+            self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)][0],  # atm vol is the first element
+            ttm
+        )[0]
 
-    def local_vol(self, fwd_date : datetime.date, T : float, S: float, ttm : float) -> float:
+        return self._vol_compute(
+            fwd_date, normalized_strike
+        )
+
+    def local_vol(self, fwd_date: datetime.date, T: float, S: float, ttm: float) -> float:
         """ Local volatility of the JWSS7 parametrization.
 
         :param fwd_date: forward index that we are computing the local vol of
