@@ -16,7 +16,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import mrds.ds as ds
-# from mrds.pricers.pricers import black_greeks
+from mrds.pricers.pricers import black_greeks
 from mrds.forward_curve import FwdCurve
 
 mpl.use('TkAgg')

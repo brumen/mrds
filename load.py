@@ -1,30 +1,35 @@
 """ Load generation network
 """
 
-import numpy             as np
-import networkx          as nx
+import numpy as np
+import networkx as nx
 import matplotlib.pyplot as plt
 
 from scipy.optimize import linprog
-from typing         import List, Tuple, Set
+from typing import List, Tuple, Set
 
 
 class Load:
     """ Computes the load distribution on the given network.
     """
 
-    def __init__(self
-                 , generation_nodes : List[Tuple[int, float, float]]
-                 , network_struct   : List[Tuple[int, int, float, float]]):
-        """
+    def __init__(
+            self,
+            generation_nodes: List[Tuple[int, float, float]],
+            network_struct: List[Tuple[int, int, float, float]],
+    ):
+        """ Initialization of the network from generation nodes and structure.
 
-        :param generation_nodes: graph in the form of: (node, generation or load, price). If generation is positive,
-                   it's generation, otherwise it's load. Price is always positive.
-        :param network_struct: structure of the network (first_node, second_node, capacity on that bus, cost of transmission)
+        :param generation_nodes: graph in the form of:
+            (node, generation or load, price). If generation is positive,
+            it's generation, otherwise it's load. Price is always positive.
+        :param network_struct: structure of the network
+           (first_node, second_node, capacity on that bus,
+              cost of transmission)
         """
 
         self.__generation_nodes = generation_nodes
-        self.__network_struct   = network_struct
+        self.__network_struct = network_struct
 
         # cached stuff
         self.__all_nodes = None  # all nodes extracted from the network
@@ -55,8 +60,11 @@ class Load:
         :param node: name of the node you are searching in graph generation_nodes
         """
 
-        pot_res_raw = [(gen_load, price) for (node_1, gen_load, price) in self.__generation_nodes
-                       if node is node_1]
+        pot_res_raw = [
+            (gen_load, price)
+            for (node_1, gen_load, price) in self.__generation_nodes
+            if node is node_1
+        ]
 
         return None if not pot_res_raw else pot_res_raw[0]
 
@@ -65,12 +73,14 @@ class Load:
         """
 
         nb_vars = 2 * len(self.__network_struct)
-        gen_load_nodes = [node for (node, gen_load, price) in self.__generation_nodes]
+        gen_load_nodes = [
+            node for (node, gen_load, price) in self.__generation_nodes
+        ]
 
         A_ineq = []
         b_ineq = []
-        A_eq   = []
-        b_eq   = []
+        A_eq = []
+        b_eq = []
 
         for node in self._all_nodes:
             if node in gen_load_nodes:  # some gen., load on these nodes
@@ -137,22 +147,28 @@ class Load:
                 else:
                     opt_vec[nb_conn_2+1] -= dest_price
 
-        problem = linprog( -opt_vec
-                         , A_eq = np.array(A_eq)
-                         , A_ub = np.array(A_ineq)
-                         , b_ub = np.array(b_ineq)
-                         , b_eq = np.array(b_eq) )
+        problem = linprog(
+            -opt_vec,
+            A_eq=np.array(A_eq),
+            A_ub=np.array(A_ineq),
+            b_ub=np.array(b_ineq),
+            b_eq=np.array(b_eq),
+        )
         solution_raw = problem.x
 
-        solution_pres = [t_left * (t_left >= t_right) - t_right * (t_right > t_left)
-                         for (t_left, t_right) in solution_raw.reshape((len(solution_raw)//2, 2))]
+        solution_pres = [
+            t_left * (t_left >= t_right) - t_right * (t_right > t_left)
+            for (t_left, t_right) in solution_raw.reshape((len(solution_raw)//2, 2))
+        ]
 
-        return { 'value'         : problem.fun
-               , 'solution'      : solution_raw
-               , 'solution_edges': zip(self.__network_struct, solution_pres)}
+        return {
+            'value': problem.fun,
+            'solution': solution_raw,
+            'solution_edges': list(zip(self.__network_struct, solution_pres)),
+        }
 
     @staticmethod
-    def draw_network(sol_edges : List[Tuple], pos = None, cutoff_value=1.):
+    def draw_network(sol_edges: List[Tuple], pos=None, cutoff_value=1.):
         """ Draws the transmission network graph.
 
         :param sol_edges: edges of the graph to display in the form

@@ -5,24 +5,27 @@
 import copy
 import numpy as np
 from scipy.optimize import linprog
-from typing         import List, Tuple
+from typing import List, Tuple
 
 
 class LMP:
     """ Locational marginal pricing.
     """
 
-    def __init__( self
-                , generation : List[Tuple[str, float, float, float]]
-                , network    : List[Tuple[str, str, float]]):
+    def __init__(
+            self,
+            generation: List[Tuple[str, float, float, float]],
+            network: List[Tuple[str, str, float]],
+    ):
         """ Nodes in the network are buses.
 
-        :param generation: generation list in the form (node, generation, load, price of generation)
+        :param generation: generation list in the form
+            (node, generation, load, price of generation)
         :param network: in the form of (node_1, node_2, transmission capacity)
         """
 
         self.generation = generation  # generation list gl
-        self.network    = network  # network list pl
+        self.network = network  # network list pl
 
         self.__all_nodes_int = None
 
@@ -48,7 +51,7 @@ class LMP:
 
         return self.__all_nodes_int
 
-    def __nodes_to_integer(self, node : str) -> int:
+    def __nodes_to_integer(self, node: str) -> int:
         """ Returns the integer index of the node
 
         :param node: node for which index is searched.
@@ -56,7 +59,7 @@ class LMP:
 
         return self.__all_nodes.index(node)
 
-    def __integers_to_nodes(self, node_int : int) -> str:
+    def __integers_to_nodes(self, node_int: int) -> str:
         """ Returns the node name from its integer number.
 
         :param node_int: integer number of the node.
@@ -64,8 +67,9 @@ class LMP:
 
         return self.__all_nodes[node_int]
 
-    def __find_pos_y(self, node_1 : str, node_2 : str) -> int:
-        """ Find the position of (node_1, node_2) connection in generation list generation.
+    def __find_pos_y(self, node_1: str, node_2: str) -> int:
+        """ Find the position of (node_1, node_2) connection
+            in generation list generation.
 
         :param node_1: origin node that we are searching in self.network
         :param node_2: destination node we are searching the connection from.
@@ -79,15 +83,16 @@ class LMP:
 
         return len(self.generation) + k
 
-    def __find_incoming(self, node_nb : str) -> List[str]:
+    def __find_incoming(self, node_nb: str) -> List[str]:
         """ Find incoming nodes into node_nb in generation list self.generation
 
         :param node_nb: node to search.
         """
 
-        return [node_1 for node_1, node_2, _ in self.network if node_2 == node_nb ]
+        return [node_1 for node_1, node_2, _ in self.network
+                if node_2 == node_nb]
 
-    def __find_outgoing(self, node_nb : str) -> List[str]:
+    def __find_outgoing(self, node_nb: str) -> List[str]:
         """ Find incoming nodes into node_nb.
 
         :param node_nb: node to search.
@@ -97,10 +102,11 @@ class LMP:
         return [node_2 for node_1, node_2, _ in self.network
                 if node_1 == node_nb]
 
-    def __find_connected(self, node_nb : str) -> List[str]:
+    def __find_connected(self, node_nb: str) -> List[str]:
         """ Find all nodes connected to node_nb, either incoming or outgoing.
 
         :param node_nb: node for which the connections are searched.
+        :returns: nodes connected to node_nb.
         """
 
         res_l = []
@@ -122,14 +128,17 @@ class LMP:
 
         A_ineq = []
         b_ineq = []
-        A_eq   = []
-        b_eq   = []
+        A_eq = []
+        b_eq = []
 
         # lower/upper bound on x, transmission
         lb = np.empty(nb_vars)  # lower bound
         lb[:nb_nodes] = 0.
+        # generation upper boundary
         ub = np.empty(nb_vars)
-        ub[:nb_nodes] = np.array([gen for (node, gen, load, p) in self.generation])  # generation upper boundary
+        ub[:nb_nodes] = np.array(
+            [gen for (node, gen, load, p) in self.generation]
+        )
         # line constraints ( abs(y) < c )
         for node_1, node_2, c in self.network:
             y_pos = self.__find_pos_y(node_1, node_2)
@@ -154,17 +163,21 @@ class LMP:
         opt_vec[:nb_nodes] = np.array([p for (node_nb, gen, load, p) in self.generation])
 
         if A_eq:  # linprog cannon handle empty matrices
-            return linprog( opt_vec
-                          , A_ub = np.array(A_ineq)
-                          , b_ub = np.array(b_ineq)
-                          , A_eq = A_eq
-                          , b_eq = b_eq
-                          , bounds = list(zip(lb, ub)) )
+            return linprog(
+                opt_vec,
+                A_ub=np.array(A_ineq),
+                b_ub=np.array(b_ineq),
+                A_eq=A_eq,
+                b_eq=b_eq,
+                bounds=list(zip(lb, ub)),
+            )
 
-        return linprog( opt_vec
-                      , A_ub = np.array(A_ineq)
-                      , b_ub = np.array(b_ineq)
-                      , bounds=list(zip(lb, ub)) )
+        return linprog(
+            opt_vec,
+            A_ub=np.array(A_ineq),
+            b_ub=np.array(b_ineq),
+            bounds=list(zip(lb, ub)),
+        )
 
     def __repr__(self):
         """ Prints out the result of optimization network.
@@ -177,14 +190,17 @@ class LMP:
         # bus generation: first nb_nodes
         print('Bus: {0}'.format(sol_v[:nb_nodes]))
         for line_idx, (node_1, node_2, c) in enumerate(self.network):
-            print('Line {0}, {1}, transm: {2}'.format(node_1, node_2, sol_v[nb_nodes + line_idx]))
+            print(
+                'Line {0}, {1}, transm: {2}'.format(node_1, node_2, sol_v[nb_nodes + line_idx])
+            )
 
     def compute_lmp(self, show_sol=False):
         """ Compute locational marginal pricing.
 
         """
 
-        comp_basic = self.compute_load_distribution().fun  # value of the optimization function
+        # value of the optimization function
+        comp_basic = self.compute_load_distribution().fun
         lmp = np.empty(len(self.generation))
 
         for node_nb, generation, load, gen_price in self.generation:

@@ -2,6 +2,9 @@ import numpy as np
 from mrds.load import Load
 
 from unittest import TestCase
+from logging import getLogger
+
+_logger = getLogger(__name__)
 
 
 class LoadTest(TestCase):
@@ -29,6 +32,9 @@ class LoadTest(TestCase):
         """
 
         res_compl = self.load_obj.loads()
-        res_compl['solution_edges']
+        solution = res_compl['solution_edges']
+        _logger.info(
+            f'Solution network: {solution}'
+        )
 
         self.assertTrue(True)
