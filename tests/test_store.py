@@ -21,14 +21,23 @@ class TestStore2(Store):
     def k2(self):
         return self.b **2
 
+    @property
+    def p1(self):
+        return self.a - 1
+
     def k3(self):
         return 222
+
+    @Store.stored_class()
+    @property
+    def k4(self):
+        return 'newest'
 
 
 # TODO: HOW TO LOAD, WHAT TO DO W/ PROPERTIES...
 #ts = TestStore2(1,2)
 #ts.write()
 
-k2 = TestStore2.load('object3', 10, 10)
-print(k2.k2())
-print(k2.k1())
+#k2 = TestStore2.load('object3', 10, 10)
+#print(k2.k2())
+#print(k2.k1())
