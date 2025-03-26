@@ -12,8 +12,8 @@ import matplotlib.pyplot as plt
 from typing import List, Tuple, Dict, Union
 from scipy.optimize import minimize, Bounds
 from scipy.interpolate import splev, splrep
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+# from mpl_toolkits.mplot3d import Axes3D
+# from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import mrds.ds as ds
 from mrds.pricers.pricers import black_greeks
@@ -76,21 +76,26 @@ class Volatility:
 
         raise NotImplementedError('_vol_dates is not implemented.')
 
-    def _vol_for_date(self, date_ : datetime.date) -> float:
+    def _vol_for_date(self, date_: datetime.date) -> float:
         """ Gets the volatility for a particular date.
 
         :param date_: date for which the volatility is obtained.
         """
 
-        nearest_vol = sum([vol_spine_date < date_ for vol_spine_date in self.vol_dates])
+        nearest_vol = sum([
+            vol_spine_date < date_
+            for vol_spine_date in self.vol_dates
+        ])
 
         return 1.  # TODO: FIX THIS HERE!!!
 
     @staticmethod
-    def normalized_strike( S0   : np.double
-                         , K_v  : np.array
-                         , sigma: np.double
-                         , ttm_v: np.array) -> np.array:
+    def normalized_strike(
+            S0: np.double,
+            K_v: np.array,
+            sigma: np.double,
+            ttm_v: np.array,
+    ) -> np.array:
         """ Vectorized form of normalized log(S0/K)/(sigma * sqrt(T))
 
         :param S0: initial stock (forward) price
@@ -103,9 +108,11 @@ class Volatility:
         return np.log(K_v / S0) / (sigma * np.sqrt(ttm_v))
 
     @staticmethod
-    def normalized_strike_inv(delta_v: np.array
-                              , sigma: np.double
-                              , ttm: np.double) -> np.array:
+    def normalized_strike_inv(
+            delta_v: np.array,
+            sigma: np.double,
+            ttm: np.double,
+    ) -> np.array:
         """ Inverse of the normalized strike.
 
         :param delta_v: vector of delta
@@ -145,11 +152,13 @@ class Volatility:
         return (fwd_date - self.mkt_date).days / dcf  # time to maturity
 
     # TODO: CHECK IF THIS IS ACTUALLY NEEDED!
-    def black_simple( self
-                    , fwd_date : datetime.date
-                    , strike   : float
-                    , dcf = 365.25
-                    , df = 1.):
+    def black_simple(
+            self,
+            fwd_date: datetime.date,
+            strike: float,
+            dcf=365.25,
+            df=1.,
+    ):
         """ Simple version of the black volatility.
 
         :param fwd_date: black vol for that date

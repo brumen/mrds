@@ -7,9 +7,9 @@ from Cython.Build import cythonize
 
 setup(
     name='Fast trivariate pricers module',
-    cmdclass={'build_ext': build_ext},
+    # cmdclass={'build_ext': build_ext},
     ext_modules=cythonize(
         'pricers_fast.pyx',
-        compiler_directives={'language_level': '3'}
+    #     compiler_directives={'language_level': '3'}
     )
 )

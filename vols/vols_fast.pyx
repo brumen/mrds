@@ -1,6 +1,8 @@
 # Fast version of the vol functions
 
 cimport numpy as np
+np.import_array()
+
 from mrds.pricers.pricers_fast import cdf  # This _HAS_ to be import and _not_ cimport
 
 # declarations of external functions

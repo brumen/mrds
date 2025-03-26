@@ -142,7 +142,7 @@ class JWSS7Volatility(ATMFVolatility):
     def _vol_compute_from_jw7(z: float, jw7_params: JWSS7_STRUCT) -> float:
         """ Compute jw7 vol from parameters.
 
-        :param z: normalized strike
+        :param z: normalized strike, log(K/F_0)
         :param jw7_params: tuple of jw7 parameters.
         """
 
@@ -383,27 +383,33 @@ class JWSS7Volatility(ATMFVolatility):
     def skewed_distribution(self, fwdDate, S0, K, ttm):
         return 1. + self.call_future_K(fwdDate, S0, K, ttm)
 
-    def inversion_skewed_cdf( self
-                            , fwdDate
-                            , S0
-                            , ttm
-                            , quantile
-                            , lb = 0.01
-                            , ub = np.inf
-                            , maxIter = 150):
+    def inversion_skewed_cdf(
+        self,
+        fwdDate,
+        S0,
+        ttm,
+        quantile,
+        lb=0.01,
+        ub=np.inf,
+        maxIter=150,
+    ):
         """ Function finds K such that: skewed_cdf_analy(K, quantile) = 0
 
         :param maxIter: maximum number of iterations for the iteration solver.
         """
 
         try:
-            return NLP( lambda K: (self.skewed_distribution(fwdDate, S0, K, ttm) - quantile)**2
-                      , S0
-                      , lb      = lb
-                      , ub      = ub
-                      , maxIter = maxIter).solve(self.__class__.SCIPY_SOLVER).xf[0]
+            return NLP(
+                lambda K: (self.skewed_distribution(fwdDate, S0, K, ttm) - quantile)**2,
+                S0,
+                lb=lb,
+                ub=ub,
+                maxIter=maxIter,
+            ).solve(self.__class__.SCIPY_SOLVER).xf[0]
         except Exception as e:
-            raise JWSS7Exception('Couldnt compute inversion_skewed_cdf: {0}'.format(str(e)))
+            raise JWSS7Exception(
+                'Couldnt compute inversion_skewed_cdf: {0}'.format(str(e))
+            )
 
 
 class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):

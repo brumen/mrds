@@ -42,20 +42,24 @@ def cdf_vec_cpu(x: np.array) -> np.array:
 
     """
 
-    l  = np.abs(x)
-    k  = 1. / (1. + 0.2316419 * l)
+    x_abs = np.abs(x)
+    k = 1. / (1. + 0.2316419 * x_abs)
     k2 = k**2
     k4 = k2**2
 
     # 0.39 = 1/sqrt(2*pi)
-    w = 1. - 0.3989422804 * np.exp(-l*l / 2) * (0.31938153 * k -0.356563782 * k2 +
-                                                1.781477937 * k2 * k + -1.821255978 * k4 + 1.330274429 * k4 * k)
+    w = 1. - 0.3989422804 * np.exp(-x_abs*x_abs / 2) * (
+        0.31938153 * k - 0.356563782 * k2 +
+        1.781477937 * k2 * k + -1.821255978 * k4 +
+        1.330274429 * k4 * k
+    )
 
-    xPos = x >= 0.
-    return w * xPos + (1. - w) * (~xPos)
+    x_pos = x >= 0.
+
+    return w * x_pos + (1. - w) * (~x_pos)
 
 
-def pdf_vec(x: np.array) -> np.array :
+def pdf_vec(x: np.array) -> np.array:
     """ Standardized normal vector of pdfs.
     """
 
@@ -63,9 +67,8 @@ def pdf_vec(x: np.array) -> np.array :
 
 
 def bvnd(dh, dk, r):
-    """
-    Bivariate distribution function at (dh, dk) for standard normals, correlated with r
-
+    """ Bivariate distribution function at (dh, dk) for standard
+    normals, correlated with r.
     """
 
     return bvnu(-dh, -dk, r)
@@ -166,20 +169,32 @@ def apo_long_f(args):
         sigma_c, rho_mat, forward_tenors, option_tenors, \
         t, beta, sigma_L, cp_ind = args
 
-    return pricers_fast.apo_long_fast(F_c_mat[:, sim], apo_c_K, df, swap_ext_mat,
-                                      sigma_c, rho_mat,
-                                      forward_tenors, option_tenors,
-                                      t, beta, sigma_L, cp_ind)
+    return pricers_fast.apo_long_fast(
+        F_c_mat[:, sim],
+        apo_c_K,
+        df,
+        swap_ext_mat,
+        sigma_c,
+        rho_mat,
+        forward_tenors,
+        option_tenors,
+        t,
+        beta,
+        sigma_L,
+        cp_ind,
+    )
 
 
-def black_greeks_local( S_0   : float
-                , K     : float
-                , r     : float
-                , sigma : float
-                , T     : float
-                , cp_ind     = 'c'
-                , price_only = False
-                , fast_appx  = True ) -> Union[float, Tuple]:
+def black_greeks_local(
+        S_0   : float
+        , K     : float
+        , r     : float
+        , sigma : float
+        , T     : float
+        , cp_ind     = 'c'
+        , price_only = False
+        , fast_appx  = True
+) -> Union[float, Tuple]:
     """
     Black's formula implementation.
 
@@ -233,7 +248,7 @@ def black_quantlib( S_0   : float
                   , sigma : float
                   , calc_date : ql.Date
                   , maturity  : ql.Date
-                  , day_count = ql.ActualActual()
+                  , day_count = ql.Actual360()
                   , cp_ind     = 'c'
                   , price_only = False ) -> Union[float, Tuple]:
 
