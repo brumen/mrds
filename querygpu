@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 import subprocess
 import time
+from lxml import etree
 
 
 class GPUCommunicationException(Exception):
@@ -8,25 +9,32 @@ class GPUCommunicationException(Exception):
 
 
 def query_gpu():
-    """ Query the working of the gpu. Prints out utilization and memory demands every second.
+    """ Query the working of the gpu. Prints out utilization
+        and memory demands every second.
     """
 
     COMMAND_LINE = '/usr/bin/nvidia-smi'
 
-    # line 80 - Compute mode
-    lines_to_print = range(70, 85)
-
     while True:
         try:
-            out, err = subprocess.Popen( [COMMAND_LINE, "-q"], stdout=subprocess.PIPE )\
-                                 .communicate()
+            # prints out the xml version
+            out, err = subprocess.Popen(
+                [COMMAND_LINE, "-q", "-x"],
+                stdout=subprocess.PIPE
+            ).communicate()
 
         except Exception as e:
-            raise GPUCommunicationException(f'Could not connect to the nvidia card. Error: {e}.')
+            raise GPUCommunicationException(
+                f'Could not connect to the nvidia card. Error: {e}.'
+            )
 
-        out_lines = out.decode().split('\n')
+        nvidia_xml = etree.fromstring(out)
 
-        print('\n'.join([out_lines[line_nb] for line_nb in lines_to_print]))
+        utilization_node = nvidia_xml.find('gpu/utilization/gpu_util')
+        util_memory_node = nvidia_xml.find('gpu/utilization/memory_util')
+
+        print(f'Utilization: {utilization_node.text}')
+        print(f'Memory: {util_memory_node.text}')
         print("\033[12A")
 
         time.sleep(1)
