@@ -6,9 +6,9 @@ import numpy as np
 
 from unittest import TestCase
 
-from mrds.forward_curve   import FwdCurve
-from mrds.vols.jwss7      import JWSS7Volatility, JWSS7VolatilityDisplay
-from mrds.vols.quadratic     import QuadraticVol
+from mrds.forward_curve import FwdCurve
+from mrds.vols.jwss7 import JWSS7Volatility, JWSS7VolatilityDisplay
+from mrds.vols.quadratic import QuadraticVol
 from mrds.data.quadratic_vols import wti2_vol
 from mrds.vols.vols_basic import black_vol_inverse
 
@@ -26,8 +26,10 @@ class VolsBasicTest(TestCase):
 
         for F in np.linspace(10., 1500., 200):
             for K in np.linspace(10., 1500., 200):
-                for p in np.linspace ( max(F-K, 0.)+ 1.e-6, 5 * max(F-K, 0.) + 5.e-6, 100):
+                for p in np.linspace(max(F-K, 0.) + 1.e-6, 5 * max(F-K, 0.) + 5.e-6, 100):
                     res = black_vol_inverse(F, K, p, dt, DF, theta, tol)
+
+        # TODO: WHAT TO DO W/ THIS???
 
         self.assertTrue(True)
 

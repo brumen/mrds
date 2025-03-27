@@ -109,7 +109,7 @@ class FwdCurve:
         return self.fwd_tenors[larger_dates], self.fwd_values[larger_dates]
 
     @classmethod
-    def from_db(cls, mkt_date : datetime.date, fwd_curve_name : str):
+    def from_db(cls, mkt_date: datetime.date, fwd_curve_name: str):
         """ Reads the forward curves from the database.
 
         :param mkt_date: market date
@@ -117,11 +117,15 @@ class FwdCurve:
         :returns: FwdCurve object for market date and curve.
         """
 
-        fwd_vol_matched = read_data_matched_tenors( mkt_date
-                                                  , fwd_curve_name
-                                                  , fwd_curve_name)
+        fwd_vol_matched = read_data_matched_tenors(
+            mkt_date,
+            fwd_curve_name,
+            fwd_curve_name,
+        )
 
-        return cls(mkt_date
-                   , fwd_curve_name
-                   , fwd_vol_matched['fwd_tenors_dt']
-                   , fwd_vol_matched['fwd_curve'])
+        return cls(
+            mkt_date,
+            fwd_curve_name,
+            fwd_vol_matched['fwd_tenors_dt'],
+            fwd_vol_matched['fwd_curve'],
+        )

@@ -41,12 +41,15 @@ class Volatility:
             fwd_params: FwdCurve,
             vol_params: Dict[datetime.date, List]
     ):
-        """ Generic class for the volatility object. Most generic way of computing the volatility.
+        """ Generic class for the volatility object. Most generic way of
+            computing the volatility.
 
         :param com_name: name of the commodity to consider
         :param mkt_date: market date
-        :param fwd_params: parameters about the forward curve, in the form of FwdCurve object
-        :param vol_params: dictionary, where keys are volatility dates, and values are tuples of parameters (ATM, ....)
+        :param fwd_params: parameters about the forward curve, in the
+            form of FwdCurve object
+        :param vol_params: dictionary, where keys are volatility dates,
+            and values are tuples of parameters (ATM, ....)
         """
 
         self.mkt_date = mkt_date
@@ -63,11 +66,14 @@ class Volatility:
         """
 
         _, vol_params = ds.get_vol_curve(com_name, mkt_date)
+        fwd_curve = ds.get_forward_curve(com_name, mkt_date)
 
-        return cls( com_name
-                  , mkt_date
-                  , fwd_params = ds.get_forward_curve(com_name, mkt_date)
-                  , vol_params = vol_params )
+        return cls(
+            com_name,
+            mkt_date,
+            fwd_params=fwd_curve,
+            vol_params=vol_params,
+        )
 
     @property
     def vol_dates(self) -> List[datetime.date]:
@@ -87,6 +93,7 @@ class Volatility:
             for vol_spine_date in self.vol_dates
         ])
 
+        # TODO: FINISH HERE!!!
         return 1.  # TODO: FIX THIS HERE!!!
 
     @staticmethod
@@ -169,37 +176,45 @@ class Volatility:
 
         ttm = self.time_to_maturity(fwd_date)
 
-        return black_greeks( self._fwd_params.fwd_value(fwd_date)
-                           , strike
-                           , -np.log(df) / ttm
-                           , self.implied_vol(fwd_date, strike, ttm)
-                           , ttm)
+        return black_greeks(
+            self._fwd_params.fwd_value(fwd_date),
+            strike,
+            -np.log(df) / ttm,
+            self.implied_vol(fwd_date, strike, ttm),
+            ttm,
+        )
 
-    def call_future_K(self
-                      , fwd_date : datetime.date
-                      , K        : float
-                      , ttm      : float
-                      , delta_K = 0.01
-                      , df = 1.):
+    def call_future_K(
+            self
+            , fwd_date : datetime.date
+            , K        : float
+            , ttm      : float
+            , delta_K = 0.01
+            , df = 1.
+    ):
         """ Computes the derivative of the call option value wrt strike price K - used for computing the skew
             distribution (dC/dK).
         """
 
         S0 = self._fwd_params.fwd_value(fwd_date)
 
-        pr_0 = black_greeks( S0
-                           , K
-                           , -np.log(df) / ttm
-                           , self.implied_vol(S0, K, ttm)
-                           , ttm
-                           , 0)
+        pr_0 = black_greeks(
+            S0,
+            K,
+            -np.log(df) / ttm,
+            self.implied_vol(S0, K, ttm),
+            ttm,
+            0,
+        )
 
-        pr_delta = black_greeks( S0
-                               , K + delta_K
-                               , -np.log(df) / ttm
-                               , self.implied_vol(S0, K + delta_K, ttm)
-                               , ttm
-                               , 0 )
+        pr_delta = black_greeks(
+            S0,
+            K + delta_K,
+            -np.log(df) / ttm,
+            self.implied_vol(S0, K + delta_K, ttm),
+            ttm,
+            0,
+        )
 
         return (pr_delta - pr_0) / delta_K
 
@@ -265,63 +280,27 @@ class Volatility:
                              for K in K_grid]
                             for ttm in ttm_grid ] )
 
-    def local_vol_surf(self, ttm_grid : List[float], K_grid : List[float], dT : float, dK : float) -> np.ndarray:
+    def local_vol_surf(
+            self,
+            ttm_grid: List[float],
+            K_grid: List[float],
+            dT: float,
+            dK: float,
+    ) -> np.ndarray:
         """  Local-vol surface for ttm_grid, K_grid
 
         :param ttm_grid: time to maturity grid
         """
 
-        return np.array ( [ [self.local_vol(K, ttm, dT, dK)
-                             for K in K_grid]
-                            for ttm in ttm_grid ] )
-
-
-class VolatilityDrawMixin:
-    """ Mixin for drawing the volatility surface.
-    """
-
-    def draw_surface( self
-                      , fwd_date  : datetime.date
-                      , S_min_max : Tuple[float, float, float]
-                      , t_min_max : Tuple[float, float, float] ):
-        """ Draws the implied/local vol surface from
-        [Sd, Su] x [Tmin, Tmax] with steps Sstep, Tstep
-
-        :param S_min_max: tuple of forward grid (low bound, high bound, step)
-        :param t_min_max: tuple of time grid (low_bound, high_bound, step)
-        """
-
-        t_min, t_max, t_step = t_min_max
-        S_min, S_max, S_step = S_min_max
-
-        K_grid   = np.arange(S_min, S_max, S_step)
-        K_len    = len(K_grid)
-        ttm_grid = np.arange(t_min, t_max, t_step)
-        ttm_len  = len(ttm_grid)
-
-        K_mesh, ttm_mesh = np.meshgrid(K_grid, ttm_grid)
-        vol_surf         = np.empty_like(K_mesh)
-
-        for K_idx, K in enumerate(K_grid):
-            for ttm_idx, ttm in enumerate(ttm_grid):
-                vol_surf[ttm_idx, K_idx] = self.implied_vol(fwd_date, K, ttm)
-
-        # plot machinery
-        # root = tk.Tk()
-        fig  = plt.figure()
-        #dataPlot_canvas = FigureCanvasTkAgg(fig, master=root)
-        #dataPlot_canvas.get_tk_widget().grid(row=0, column=0, rowspan=8)
-        ax = Axes3D(fig)  # plot it
-        ax.plot_surface(K_mesh, ttm_mesh, vol_surf)
-        plt.show()
-
-    def _K_ttm_grid( self
-                   , S_min_max : Tuple[float, float, float]
-                   , t_min_max : Tuple[float, float, float] ) -> Tuple[np.ndarray, np.ndarray]:
-        t_min, t_max, t_step = t_min_max
-        S_min, S_max, S_step = S_min_max
-
-        return np.arange(S_min, S_max, S_step), np.arange(t_min, t_max, t_step)
+        return np.array(
+            [
+                [
+                    self.local_vol(K, ttm, dT, dK)
+                    for K in K_grid
+                ]
+                for ttm in ttm_grid
+            ]
+        )
 
 
 class ATMFVolatility(Volatility):
@@ -396,10 +375,16 @@ class ATMFVolatility(Volatility):
 
         return to_return
 
-    def implied_vol(self, fwd_date : datetime.date, K : float, ttm : float) -> float:
+    def implied_vol(
+            self,
+            fwd_date: datetime.date,
+            K: float,
+            ttm: float,
+    ) -> float:
         """ Implied vol for ATM vol is simply atm vol.
 
-        :param fwd_date: date of the forward contract for which the volatility is required.
+        :param fwd_date: date of the forward contract for which the
+            volatility is required.
         :param K: strike price.
         :param ttm: time to maturity
         :returns: implied volatility, which equals the atm volatility.

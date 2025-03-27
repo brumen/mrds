@@ -1,17 +1,27 @@
-# JWSS7 volatility structure
+"""
+JWSS7 volatility structure - computation and display.
+
+"""
+
 import datetime
 import numpy as np
 import logging
+import tkinter as tk
 
 from scipy.stats import norm
 
 from typing import Dict, Tuple, Union
-from tkinter import Scale, Button, HORIZONTAL
 from scipy.interpolate import splrep
+
+from tkinter import ttk
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 
 from mrds.ds import get_vol_curve
 from mrds.forward_curve import FwdCurve
-from mrds.vols.vols import VolatilityDrawMixin, ATMFVolatility
+from mrds.vols.vols import ATMFVolatility
+from mrds.vols.vols_draw import VolatilityDrawMixin
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +131,8 @@ class JWSS7Volatility(ATMFVolatility):
         In this case I just select the next larger date, or if not, the largest date in the self._vol_params
 
         :param fwd_date: forward date for which parameters are requested.
+        :returns: date corresponding to the fwd_date, in our case the next
+           largest date.
         """
 
         input_dates = sorted(list(self.vol_dates))  # sort input dates
@@ -139,10 +151,56 @@ class JWSS7Volatility(ATMFVolatility):
         return selected_date
 
     @staticmethod
+    def _vol_from_jw7(
+            S0: float,
+            K: float,
+            ttm: float,
+            jw7_params: JWSS7_STRUCT,
+    ) -> float:
+        """ Computes the volatility for parameters.
+
+        :param S0: initial stock value.
+        :param K: strike.
+        :param ttm: time to maturity to which these parameters
+            correspond.
+        :param jw7_params: params in the jw7 form.
+        :returns: volatility for those parameters.
+        """
+
+        sigma_0 = jw7_params[0]
+        z = JWSS7Volatility.normalized_strike(S0, K, sigma_0, ttm)
+
+        return JWSS7Volatility._vol_compute_from_jw7(z, jw7_params)
+
+    @staticmethod
+    def _vol_from_jwss7(
+            S0: float,
+            K: float,
+            ttm: float,
+            jwss7_params: JWSS7_STRUCT,
+    ) -> float:
+        """ Computes the volatility for parameters.
+
+        :param S0: initial stock value.
+        :param K: strike.
+        :param ttm: time to maturity to which these parameters
+            correspond.
+        :param jw7_params: params in the jw7 form.
+        :returns: volatility for those parameters.
+        """
+
+        jw7_params = JWSS7Volatility._transform_params_jwss7(jwss7_params)
+
+        return JWSS7Volatility._vol_from_jw7(
+            S0, K, ttm, jw7_params,
+        )
+
+    @staticmethod
     def _vol_compute_from_jw7(z: float, jw7_params: JWSS7_STRUCT) -> float:
         """ Compute jw7 vol from parameters.
 
-        :param z: normalized strike, log(K/F_0)
+        :param z: normalized strike, log(K/F_0) - see normalized_strike
+           method on this class
         :param jw7_params: tuple of jw7 parameters.
         """
 
@@ -184,10 +242,11 @@ class JWSS7Volatility(ATMFVolatility):
         :param ttm: time to maturity
         """
 
+        atm_vol = self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)][0]  # TODO: THIS IS RISKY
         normalized_strike = JWSS7Volatility.normalized_strike(
             self._fwd_params.fwd_value(fwd_date),
             np.array([strike]),
-            self._vol_params[self._interpolate_params_for_fwd_date(fwd_date)][0],  # atm vol is the first element
+            atm_vol,  # atm vol is the first element
             ttm
         )[0]
 
@@ -414,45 +473,204 @@ class JWSS7Volatility(ATMFVolatility):
 
 class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
 
-    def _draw_buttons(self, fwd, root, ax, dataPlot_canvas):
+    def _strike_range(self, S0: float, sigma_0: float, ttm: float) -> Tuple[float, float]:
+        # solves the equation: N(log(K/S0)/sigma_0/sqrt(ttm)) = -0.5
+        # S0_factor = S0 * np.exp(sigma_0 * np.sqrt(ttm))
+        # lower_bound = S0_factor * norm.ppf(-0.5)
+        # upper_bound = S0_factor * norm.ppf(0.5)
+
+        lower_bound = S0 / 2
+        upper_bound = S0 * 2
+
+        return (lower_bound, upper_bound)
+
+    def _plot_data(self, nb_points: int = 50):
         """
-        # root ... Tk root
-        # ax ... Axes3D object
-        # dataPlot_canvas ... canvas object
 
+        :param nb_points: number of points to display in the graph.
         """
 
-        fct_update = lambda cc: self.update_graph( fwd
-                                                 , model
-                                                 , [c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]
-                                                 , ax
-                                                 , dataPlot_canvas )
+        S0 = self.slider_S0.get()
+        sigma_0 = self.slider_sig.get()
+        A = self.slider_A.get()
+        B = self.slider_B.get()
+        C = self.slider_C.get()
+        P = self.slider_P.get()
+        alpha_C = self.slider_alpha_C.get()
+        alpha_P = self.slider_alpha_P.get()
+        ttm = self.slider_ttm.get()
 
-        # parameter tk.SCALEs
-        c1 = Scale(root, from_=80.0, to=120.0, resolution=0.1 , label='S0' , orient=HORIZONTAL,command=fct_update)
-        c2 = Scale(root, from_=0.05, to=0.8  , resolution=0.05, label='sig', orient=HORIZONTAL,command=fct_update)
-        c3 = Scale(root, from_=0.0 , to=5.0  , resolution=0.25, label='A'  , orient=HORIZONTAL,command=fct_update)
-        c4 = Scale(root, from_=0.0 , to=1.0  , resolution=0.05, label='B'  , orient=HORIZONTAL,command=fct_update)
-        c5 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='C'  , orient=HORIZONTAL,command=fct_update)
-        c6 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='P'  , orient=HORIZONTAL,command=fct_update)
-        c7 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='alpha_C', orient=HORIZONTAL,command=fct_update)
-        c8 = Scale(root, from_=0.0 , to=5.0  , resolution=0.2 , label='alpha_P', orient=HORIZONTAL,command=fct_update)
+        K_loglinear_lower, K_loglinear_upper = self._strike_range(S0, sigma_0, ttm)
+        K_loglinear = np.linspace(K_loglinear_lower, K_loglinear_upper, nb_points)
+        # log_strike = np.array([JWSS7Volatility.normalized_strike(S0, K, sigma_0, ttm) for K in K_v])
 
-        c1.grid(row=0, column=1)
-        c2.grid(row=1, column=1)
-        c3.grid(row=2, column=1)
-        c4.grid(row=3, column=1)
-        c5.grid(row=4, column=1)
-        c6.grid(row=5, column=1)
-        c7.grid(row=6, column=1)
-        c8.grid(row=7, column=1)
+        jwss7_params = (sigma_0, A, B, C, P, alpha_C, alpha_P)
+        sigmas = np.array([
+            self._vol_from_jwss7(S0, K, ttm, jwss7_params)
+            for K in K_loglinear
+        ])
 
-        # replot button
-        b1 = Button(root, text='replot', command=lambda: update_graph( fwd
-                                                                     , model
-                                                                     , [c1.get(), c2.get(), c3.get(), c4.get(), c5.get(), c6.get(), c7.get(), c8.get()]
-                                                                     , ax
-                                                                     , dataPlot_canvas )).grid(row=8, column=0)
+        self._ax.clear()
+        self._ax.plot(K_loglinear, sigmas)
+        self._ax.set_title(f"Plot: S0={S0:.2f}, sigma_0={sigma_0:.2f}")
+        self._ax.set_xlabel("log-moneyness")
+        self._ax.set_ylabel("vol")
+        self._ax.grid(True)
+        self._canvas.draw()
 
-        dataPlot_canvas.show()
-        root.mainloop()
+    def _update_plot(self, event):
+        self._plot_data()
+
+    def _create_variables(self):
+        self.slider_S0 = tk.DoubleVar(value=100.)
+        self.slider_sig = tk.DoubleVar(value=0.2)
+        self.slider_A = tk.DoubleVar(value=1.)
+        self.slider_B = tk.DoubleVar(value=0.5)
+        self.slider_C = tk.DoubleVar(value=1.)
+        self.slider_P = tk.DoubleVar(value=0.2)
+        self.slider_alpha_C = tk.DoubleVar(value=1.)
+        self.slider_alpha_P = tk.DoubleVar(value=1.)
+        self.slider_ttm = tk.DoubleVar(value=0.1)
+
+    def _create_sliders(self):
+        slider_S0 = ttk.Scale(
+            self.root,
+            from_=0.1,
+            to=10.0,
+            # resolution=0.1,
+            # label='S0',
+            orient="horizontal",
+            variable=self.slider_S0,
+            command=self._update_plot,
+        )
+        slider_S0.pack(pady=10)
+
+        slider_sig = ttk.Scale(
+            self.root,
+            from_=0.05,
+            to=0.8,
+            # resolution=0.05,
+            # label='sigma_0',
+            orient="horizontal",
+            variable=self.slider_sig,
+            command=self._update_plot,
+        )
+        slider_sig.pack(pady=10)
+
+        slider_A = ttk.Scale(
+            self.root,
+            from_=0.0,
+            to=5,
+            # resolution=0.25,
+            # label='A',
+            orient="horizontal",
+            variable=self.slider_A,
+            command=self._update_plot,
+        )
+        slider_A.pack(pady=10)
+
+        slider_B = ttk.Scale(
+            self.root,
+            from_=0.0,
+            to=1.,
+            # resolution=0.05,
+            # label='B',
+            orient="horizontal",
+            variable=self.slider_B,
+            command=self._update_plot,
+        )
+        slider_B.pack(pady=10)
+
+        slider_C = ttk.Scale(
+            self.root,
+            from_=0.0,
+            to=5.,
+            # resolution=0.2,
+            # label='C',
+            orient="horizontal",
+            variable=self.slider_C,
+            command=self._update_plot,
+        )
+        slider_C.pack(pady=10)
+
+        slider_P = ttk.Scale(
+            self.root,
+            from_=0.0,
+            to=5.,
+            # resolution=0.2,
+            # label='P',
+            orient="horizontal",
+            variable=self.slider_P,
+            command=self._update_plot,
+        )
+        slider_P.pack(pady=10)
+
+        slider_alpha_C = ttk.Scale(
+            self.root,
+            from_=0.0,
+            to=5.,
+            # resolution=0.2,
+            # label='alpha_C',
+            orient="horizontal",
+            variable=self.slider_alpha_C,
+            command=self._update_plot,
+        )
+        slider_alpha_C.pack(pady=10)
+
+        slider_alpha_P = ttk.Scale(
+            self.root,
+            from_=0.0,
+            to=5.,
+            # resolution=0.2,
+            # label='alpha_P',
+            orient="horizontal",
+            variable=self.slider_alpha_P,
+            command=self._update_plot,
+        )
+        slider_alpha_P.pack(pady=10)
+
+        slider_ttm = ttk.Scale(
+            self.root,
+            from_=0.0,
+            to=5.,
+            # resolution=0.2,
+            # label='ttm',
+            orient="horizontal",
+            variable=self.slider_ttm,
+            command=self._update_plot,
+        )
+        slider_ttm.pack(pady=10)
+
+    def create_plot(self):
+        "Creates a plot and plots initial data."
+
+        self.root = tk.Tk()
+        self._fig, self._ax = plt.subplots(figsize=(6, 4))
+        self._canvas = FigureCanvasTkAgg(self._fig, master=self.root)
+        self._canvas_widget = self._canvas.get_tk_widget()
+        self._canvas_widget.pack(pady=10)
+
+        self._create_variables()
+        self._create_sliders()
+
+        self._plot_data()
+        self.root.mainloop()
+
+    #     # parameter tk.SCALEs
+    #     c1 = Scale(root, from_=80.0, to=120.0, # resolution=0.1 , # label='S0' , orient=HORIZONTAL,command=fct_update)
+    #     c2 = Scale(root, from_=0.05, to=0.8  , # resolution=0.05, # label='sig', orient=HORIZONTAL,command=fct_update)
+    #     c3 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.25, # label='A'  , orient=HORIZONTAL,command=fct_update)
+    #     c4 = Scale(root, from_=0.0 , to=1.0  , # resolution=0.05, # label='B'  , orient=HORIZONTAL,command=fct_update)
+    #     c5 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='C'  , orient=HORIZONTAL,command=fct_update)
+    #     c6 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='P'  , orient=HORIZONTAL,command=fct_update)
+    #     c7 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='alpha_C', orient=HORIZONTAL,command=fct_update)
+    #     c8 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='alpha_P', orient=HORIZONTAL,command=fct_update)
+
+    #     c1.grid(row=0, column=1)
+    #     c2.grid(row=1, column=1)
+    #     c3.grid(row=2, column=1)
+    #     c4.grid(row=3, column=1)
+    #     c5.grid(row=4, column=1)
+    #     c6.grid(row=5, column=1)
+    #     c7.grid(row=6, column=1)
+    #     c8.grid(row=7, column=1)
