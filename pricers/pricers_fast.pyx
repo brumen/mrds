@@ -70,7 +70,7 @@ cpdef double black_call_fast(double S_0, double K, double r, double sigma, doubl
     return exp(-r * T) * (S_0 * cdf(d1) - K * cdf(d2))
 
 # super fast black put option
-cdef double black_put_fast (double S_0, double K, double r, double sigma, double T):
+cpdef double black_put_fast (double S_0, double K, double r, double sigma, double T):
 
     cdef double d1 = ( log(S_0/K) + 0.5 *sigma**2 * T ) / (sigma * sqrt (T) )
     cdef double d2 = d1 - sigma * sqrt (T)

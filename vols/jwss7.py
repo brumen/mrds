@@ -7,10 +7,13 @@ import datetime
 import numpy as np
 import logging
 import tkinter as tk
+import scipy
 
 from scipy.stats import norm
+from scipy.optimize import minimize
+from enum import Enum
 
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, List
 from scipy.interpolate import splrep
 
 from tkinter import ttk
@@ -22,13 +25,25 @@ from mrds.ds import get_vol_curve
 from mrds.forward_curve import FwdCurve
 from mrds.vols.vols import ATMFVolatility
 from mrds.vols.vols_draw import VolatilityDrawMixin
+from mrds.pricers.pricers_fast import black_call_fast, black_put_fast
 
 
 logger = logging.getLogger(__name__)
 
 
+class CallPut(Enum):
+    Call = 'Call'
+    Put = 'Put'
+
+
 class JWSS7Exception(Exception):
     pass
+
+
+# structure representing JWSS7 params.
+# the parameters are:
+# sigma_0, A, B, C, P, alpha_C, alpha_P  # TODO: CHECK IF THIS IS THE CASE
+JWSS7_STRUCT = Tuple[float, float, float, float, float, float, float]
 
 
 class JWSS7Volatility(ATMFVolatility):
@@ -86,7 +101,6 @@ class JWSS7Volatility(ATMFVolatility):
 
         return self._atm_vol_curve_interp
 
-    JWSS7_STRUCT = Tuple[float, float, float, float, float, float, float]
 
     @staticmethod
     def _transform_params_jwss7(
@@ -228,6 +242,57 @@ class JWSS7Volatility(ATMFVolatility):
         jw7_params = self._vol_params[fwd_date_on_curve]
 
         return self._vol_compute_from_jw7(normalized_strike, jw7_params)
+
+    @staticmethod
+    def calibrate_params(
+            mkt_date: datetime.date,
+            S0: float,
+            prices_strikes_cp: List[Tuple[float, float, CallPut]],
+            maturity: datetime.date,
+            r: float,  # interest rate charged.
+    ) -> JWSS7_STRUCT:
+        """Calibrates the prices/strikes for the designated maturity
+            by least-squares.
+
+        :param mkt_date: market date
+        :param S0: current spot price
+        :param prices_strikes_cp: list of prices and strikes you are
+            calibrating, along w/ call/put indicator.
+        :param maturity: maturity of the option.
+        """
+
+        ttm = (maturity - mkt_date).days / 365.25
+
+        def calibrate_jwss7(jwss7_p: JWSS7_STRUCT) -> float:
+
+            diffs = 0
+            for price, strike, call_put in prices_strikes_cp:
+                black_pricer = black_call_fast if call_put == CallPut.Call \
+                    else black_put_fast
+                vol = JWSS7Volatility._vol_from_jw7(S0, strike, ttm, jwss7_p)
+                black_price = black_pricer(S0, strike, r, vol, ttm)
+                diffs += (black_price - price)**2
+
+            return diffs
+
+        res = minimize(
+            calibrate_jwss7,
+            x0=(0.2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+            method='nelder-mead',  # TODO: CHECK HERE!!
+            bounds=(
+                (0, np.inf),  # sigma_0
+                (0, np.inf),  # A - CHECK THIS BOUND
+                (0, np.inf),  # B - CHECK BOUND
+                (0, np.inf),  # C - CHECK THIS BOUND
+                (0, np.inf),  # P - CHECK BOUND
+                (0, np.inf),  # alpha_C - CHECK THIS BOUND
+                (0, np.inf),  # alpha_P - CHECK BOUND
+            ),
+        )
+
+        # check the results outcome
+
+        return res.x
 
     def implied_vol(
             self,
@@ -543,7 +608,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_S0,
             command=self._update_plot,
         )
-        slider_S0.pack(pady=10)
+        slider_S0.grid(row=0, column=1)
+        label_S0 = ttk.Label(text='S0')
+        label_S0.grid(row=0, column=2)
 
         slider_sig = ttk.Scale(
             self.root,
@@ -555,7 +622,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_sig,
             command=self._update_plot,
         )
-        slider_sig.pack(pady=10)
+        slider_sig.grid(row=1, column=1)
+        label_sig = ttk.Label(text='sigma_0')
+        label_sig.grid(row=1, column=2)
 
         slider_A = ttk.Scale(
             self.root,
@@ -567,7 +636,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_A,
             command=self._update_plot,
         )
-        slider_A.pack(pady=10)
+        slider_A.grid(row=2, column=1)
+        label_A = ttk.Label(text='A')
+        label_A.grid(row=2, column=2)
 
         slider_B = ttk.Scale(
             self.root,
@@ -579,7 +650,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_B,
             command=self._update_plot,
         )
-        slider_B.pack(pady=10)
+        slider_B.grid(row=3, column=1)
+        label_B = ttk.Label(text='B')
+        label_B.grid(row=3, column=2)
 
         slider_C = ttk.Scale(
             self.root,
@@ -591,7 +664,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_C,
             command=self._update_plot,
         )
-        slider_C.pack(pady=10)
+        slider_C.grid(row=4, column=1)
+        label_C = ttk.Label(text='C')
+        label_C.grid(row=4, column=2)
 
         slider_P = ttk.Scale(
             self.root,
@@ -603,7 +678,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_P,
             command=self._update_plot,
         )
-        slider_P.pack(pady=10)
+        slider_P.grid(row=5, column=1)
+        label_P = ttk.Label(text='P')
+        label_P.grid(row=5, column=2)
 
         slider_alpha_C = ttk.Scale(
             self.root,
@@ -615,7 +692,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_alpha_C,
             command=self._update_plot,
         )
-        slider_alpha_C.pack(pady=10)
+        slider_alpha_C.grid(row=6, column=1)
+        label_alpha_C = ttk.Label(text='alpha_C')
+        label_alpha_C.grid(row=6, column=2)
 
         slider_alpha_P = ttk.Scale(
             self.root,
@@ -627,7 +706,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_alpha_P,
             command=self._update_plot,
         )
-        slider_alpha_P.pack(pady=10)
+        slider_alpha_P.grid(row=7, column=1)
+        label_alpha_P = ttk.Label(text='alpha_P')
+        label_alpha_P.grid(row=7, column=2)
 
         slider_ttm = ttk.Scale(
             self.root,
@@ -639,7 +720,9 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             variable=self.slider_ttm,
             command=self._update_plot,
         )
-        slider_ttm.pack(pady=10)
+        slider_ttm.grid(row=8, column=1)
+        label_ttm = ttk.Label(text='ttm')
+        label_ttm.grid(row=8, column=2)
 
     def create_plot(self):
         "Creates a plot and plots initial data."
@@ -648,29 +731,10 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
         self._fig, self._ax = plt.subplots(figsize=(6, 4))
         self._canvas = FigureCanvasTkAgg(self._fig, master=self.root)
         self._canvas_widget = self._canvas.get_tk_widget()
-        self._canvas_widget.pack(pady=10)
+        self._canvas_widget.grid(column=0, rowspan=8)
 
         self._create_variables()
         self._create_sliders()
 
         self._plot_data()
         self.root.mainloop()
-
-    #     # parameter tk.SCALEs
-    #     c1 = Scale(root, from_=80.0, to=120.0, # resolution=0.1 , # label='S0' , orient=HORIZONTAL,command=fct_update)
-    #     c2 = Scale(root, from_=0.05, to=0.8  , # resolution=0.05, # label='sig', orient=HORIZONTAL,command=fct_update)
-    #     c3 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.25, # label='A'  , orient=HORIZONTAL,command=fct_update)
-    #     c4 = Scale(root, from_=0.0 , to=1.0  , # resolution=0.05, # label='B'  , orient=HORIZONTAL,command=fct_update)
-    #     c5 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='C'  , orient=HORIZONTAL,command=fct_update)
-    #     c6 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='P'  , orient=HORIZONTAL,command=fct_update)
-    #     c7 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='alpha_C', orient=HORIZONTAL,command=fct_update)
-    #     c8 = Scale(root, from_=0.0 , to=5.0  , # resolution=0.2 , # label='alpha_P', orient=HORIZONTAL,command=fct_update)
-
-    #     c1.grid(row=0, column=1)
-    #     c2.grid(row=1, column=1)
-    #     c3.grid(row=2, column=1)
-    #     c4.grid(row=3, column=1)
-    #     c5.grid(row=4, column=1)
-    #     c6.grid(row=5, column=1)
-    #     c7.grid(row=6, column=1)
-    #     c8.grid(row=7, column=1)

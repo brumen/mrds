@@ -79,3 +79,5 @@ jwss7_vol = JWSS7VolatilityDisplay(
     fwd_params=fwd_curve,
     vol_params=vol_params,
 )
+
+jwss7_vol.create_plot()
