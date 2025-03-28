@@ -281,12 +281,12 @@ class JWSS7Volatility(ATMFVolatility):
             method='nelder-mead',  # TODO: CHECK HERE!!
             bounds=(
                 (0, np.inf),  # sigma_0
-                (0, np.inf),  # A - CHECK THIS BOUND
-                (0, np.inf),  # B - CHECK BOUND
-                (0, np.inf),  # C - CHECK THIS BOUND
-                (0, np.inf),  # P - CHECK BOUND
-                (0, np.inf),  # alpha_C - CHECK THIS BOUND
-                (0, np.inf),  # alpha_P - CHECK BOUND
+                None,  # (0, np.inf),  # A - CHECK THIS BOUND
+                None,  # (0, np.inf),  # B - CHECK BOUND
+                None,  # (0, np.inf),  # C - CHECK THIS BOUND
+                None,  # (0, np.inf),  # P - CHECK BOUND
+                None,  # (0, np.inf),  # alpha_C - CHECK THIS BOUND
+                None,  # (0, np.inf),  # alpha_P - CHECK BOUND
             ),
         )
 
@@ -557,19 +557,19 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
 
         S0 = self.slider_S0.get()
         sigma_0 = self.slider_sig.get()
-        A = self.slider_A.get()
-        B = self.slider_B.get()
-        C = self.slider_C.get()
-        P = self.slider_P.get()
-        alpha_C = self.slider_alpha_C.get()
-        alpha_P = self.slider_alpha_P.get()
+        skew = self.slider_skew.get()
+        smile = self.slider_smile.get()
+        put_slope = self.slider_put_slope.get()
+        put_bend = self.slider_put_bend.get()
+        call_slope = self.slider_call_slope.get()
+        call_bend = self.slider_call_bend.get()
         ttm = self.slider_ttm.get()
 
         K_loglinear_lower, K_loglinear_upper = self._strike_range(S0, sigma_0, ttm)
         K_loglinear = np.linspace(K_loglinear_lower, K_loglinear_upper, nb_points)
         # log_strike = np.array([JWSS7Volatility.normalized_strike(S0, K, sigma_0, ttm) for K in K_v])
 
-        jwss7_params = (sigma_0, A, B, C, P, alpha_C, alpha_P)
+        jwss7_params = (sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend)
         sigmas = np.array([
             self._vol_from_jwss7(S0, K, ttm, jwss7_params)
             for K in K_loglinear
@@ -581,6 +581,16 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
         self._ax.set_xlabel("log-moneyness")
         self._ax.set_ylabel("vol")
         self._ax.grid(True)
+
+        self._label_sig.config(text=f'sigma_0: {sigma_0}')
+        self._label_skew.config(text=f'skew: {skew}')
+        self._label_smile.config(text=f'smile: {smile}')
+        self._label_put_slope.config(text=f'put_slope: {put_slope}')
+        self._label_put_bend.config(text=f'put_bend: {put_bend}')
+        self._label_call_slope.config(text=f'call_slope: {call_slope}')
+        self._label_call_bend.config(text=f'call_bend: {call_bend}')
+        self._label_ttm.config(text=f'ttm: {ttm}')
+
         self._canvas.draw()
 
     def _update_plot(self, event):
@@ -589,19 +599,19 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
     def _create_variables(self):
         self.slider_S0 = tk.DoubleVar(value=100.)
         self.slider_sig = tk.DoubleVar(value=0.2)
-        self.slider_A = tk.DoubleVar(value=1.)
-        self.slider_B = tk.DoubleVar(value=0.5)
-        self.slider_C = tk.DoubleVar(value=1.)
-        self.slider_P = tk.DoubleVar(value=0.2)
-        self.slider_alpha_C = tk.DoubleVar(value=1.)
-        self.slider_alpha_P = tk.DoubleVar(value=1.)
+        self.slider_skew = tk.DoubleVar(value=1.)
+        self.slider_smile = tk.DoubleVar(value=0.5)
+        self.slider_put_slope = tk.DoubleVar(value=1.)
+        self.slider_put_bend = tk.DoubleVar(value=0.2)
+        self.slider_call_slope = tk.DoubleVar(value=1.)
+        self.slider_call_bend = tk.DoubleVar(value=1.)
         self.slider_ttm = tk.DoubleVar(value=0.1)
 
     def _create_sliders(self):
         slider_S0 = ttk.Scale(
             self.root,
-            from_=0.1,
-            to=10.0,
+            from_=50.,
+            to=150.0,
             # resolution=0.1,
             # label='S0',
             orient="horizontal",
@@ -609,13 +619,13 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             command=self._update_plot,
         )
         slider_S0.grid(row=0, column=1)
-        label_S0 = ttk.Label(text='S0')
-        label_S0.grid(row=0, column=2)
+        self._label_S0 = ttk.Label(text=f'S0: {self.slider_S0.get()}')
+        self._label_S0.grid(row=0, column=2)
 
         slider_sig = ttk.Scale(
             self.root,
-            from_=0.05,
-            to=0.8,
+            from_=0.01,
+            to=1.8,
             # resolution=0.05,
             # label='sigma_0',
             orient="horizontal",
@@ -623,92 +633,94 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             command=self._update_plot,
         )
         slider_sig.grid(row=1, column=1)
-        label_sig = ttk.Label(text='sigma_0')
-        label_sig.grid(row=1, column=2)
+        self._label_sig = ttk.Label(text=f'sigma_0: {self.slider_sig.get()}')
+        self._label_sig.grid(row=1, column=2)
 
-        slider_A = ttk.Scale(
+        # sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend = jwss7_params
+
+        slider_skew = ttk.Scale(
             self.root,
-            from_=0.0,
-            to=5,
+            from_=-20.0,
+            to=20,
             # resolution=0.25,
             # label='A',
             orient="horizontal",
-            variable=self.slider_A,
+            variable=self.slider_skew,
             command=self._update_plot,
         )
-        slider_A.grid(row=2, column=1)
-        label_A = ttk.Label(text='A')
-        label_A.grid(row=2, column=2)
+        slider_skew.grid(row=2, column=1)
+        self._label_skew = ttk.Label(text=f'skew: {self.slider_skew.get()}')
+        self._label_skew.grid(row=2, column=2)
 
-        slider_B = ttk.Scale(
+        slider_smile = ttk.Scale(
             self.root,
-            from_=0.0,
-            to=1.,
+            from_=-20.0,
+            to=20.,
             # resolution=0.05,
             # label='B',
             orient="horizontal",
-            variable=self.slider_B,
+            variable=self.slider_smile,
             command=self._update_plot,
         )
-        slider_B.grid(row=3, column=1)
-        label_B = ttk.Label(text='B')
-        label_B.grid(row=3, column=2)
+        slider_smile.grid(row=3, column=1)
+        self._label_smile = ttk.Label(text=f'smile: {self.slider_smile.get()}')
+        self._label_smile.grid(row=3, column=2)
 
-        slider_C = ttk.Scale(
+        slider_put_slope = ttk.Scale(
             self.root,
-            from_=0.0,
-            to=5.,
+            from_=-20.,
+            to=20.,
             # resolution=0.2,
             # label='C',
             orient="horizontal",
-            variable=self.slider_C,
+            variable=self.slider_put_slope,
             command=self._update_plot,
         )
-        slider_C.grid(row=4, column=1)
-        label_C = ttk.Label(text='C')
-        label_C.grid(row=4, column=2)
+        slider_put_slope.grid(row=4, column=1)
+        self._label_put_slope = ttk.Label(text=f'put_slope: {self.slider_put_slope.get()}')
+        self._label_put_slope.grid(row=4, column=2)
 
-        slider_P = ttk.Scale(
+        slider_put_bend = ttk.Scale(
             self.root,
-            from_=0.0,
-            to=5.,
+            from_=-20.0,
+            to=20.,
             # resolution=0.2,
             # label='P',
             orient="horizontal",
-            variable=self.slider_P,
+            variable=self.slider_put_bend,
             command=self._update_plot,
         )
-        slider_P.grid(row=5, column=1)
-        label_P = ttk.Label(text='P')
-        label_P.grid(row=5, column=2)
+        slider_put_bend.grid(row=5, column=1)
+        self._label_put_bend = ttk.Label(text=f'put_bend: {self.slider_put_bend.get()}')
+        self._label_put_bend.grid(row=5, column=2)
 
-        slider_alpha_C = ttk.Scale(
+        slider_call_slope = ttk.Scale(
             self.root,
-            from_=0.0,
-            to=5.,
+            from_=-20.0,
+            to=20.,
             # resolution=0.2,
             # label='alpha_C',
             orient="horizontal",
-            variable=self.slider_alpha_C,
+            variable=self.slider_call_slope,
             command=self._update_plot,
         )
-        slider_alpha_C.grid(row=6, column=1)
-        label_alpha_C = ttk.Label(text='alpha_C')
-        label_alpha_C.grid(row=6, column=2)
+        slider_call_slope.grid(row=6, column=1)
+        self._label_call_slope = ttk.Label(text=f'call_slope: {self.slider_call_slope.get()}')
+        self._label_call_slope.grid(row=6, column=2)
 
-        slider_alpha_P = ttk.Scale(
+        slider_call_bend = ttk.Scale(
             self.root,
-            from_=0.0,
-            to=5.,
+            from_=-20.0,
+            to=25.,
             # resolution=0.2,
             # label='alpha_P',
             orient="horizontal",
-            variable=self.slider_alpha_P,
+            variable=self.slider_call_bend,
             command=self._update_plot,
         )
-        slider_alpha_P.grid(row=7, column=1)
-        label_alpha_P = ttk.Label(text='alpha_P')
-        label_alpha_P.grid(row=7, column=2)
+        slider_call_bend.grid(row=7, column=1)
+        self._label_call_bend = ttk.Label(text=f'call_bend: {self.slider_call_bend.get()}')
+        self._label_call_bend.grid(row=7, column=2)
 
         slider_ttm = ttk.Scale(
             self.root,
@@ -721,8 +733,8 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
             command=self._update_plot,
         )
         slider_ttm.grid(row=8, column=1)
-        label_ttm = ttk.Label(text='ttm')
-        label_ttm.grid(row=8, column=2)
+        self._label_ttm = ttk.Label(text=f'ttm: {self.slider_ttm.get()}')
+        self._label_ttm.grid(row=8, column=2)
 
     def create_plot(self):
         "Creates a plot and plots initial data."

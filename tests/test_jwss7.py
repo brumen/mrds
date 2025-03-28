@@ -18,13 +18,14 @@ P = 1.
 alpha_C = 1.
 alpha_P = 1.
 
+# TODO: REALISTIC VALUES.
 sigma_0 = 0.41
-skew = -0.27
-smile = 0.54
-call_slope = 1.1
-put_slope = -0.25
-call_bend = 0.53
-put_bend = 2.0
+skew = 2.9
+smile = 15.2
+call_slope = -6.4
+put_slope = -13.
+call_bend = -12
+put_bend = -5.8
 
 jwss7_params = (sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend)
 
