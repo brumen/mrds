@@ -63,7 +63,7 @@ fwd_curve = FwdCurve(
     fwd_values=[100., 110., 120.],
 )
 vol_params = {
-    datetime.date(2025, 5, 1): (sigma_0, skew, smile, call_slope, put_slope, call_bend, put_bend)
+    datetime.date(2025, 5, 1): (sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend)
 }
 
 jwss7_vol = JWSS7Volatility(
