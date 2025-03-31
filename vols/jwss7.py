@@ -26,7 +26,7 @@ from mrds.forward_curve import FwdCurve
 from mrds.vols.vols import ATMFVolatility
 from mrds.vols.vols_draw import VolatilityDrawMixin
 from mrds.pricers.pricers_fast import black_call_fast, black_put_fast
-
+from price_faster import calibrate_jw7
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +276,48 @@ class JWSS7Volatility(ATMFVolatility):
 
         res = minimize(
             calibrate_jwss7,
+            x0=(0.2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+            method='nelder-mead',  # TODO: CHECK HERE!!
+            bounds=(
+                (0, np.inf),  # sigma_0
+                (None, None),  # (0, np.inf),  # A - CHECK THIS BOUND
+                (None, None),  # (0, np.inf),  # B - CHECK BOUND
+                (None, None),  # (0, np.inf),  # C - CHECK THIS BOUND
+                (None, None),  # (0, np.inf),  # P - CHECK BOUND
+                (None, None),  # (0, np.inf),  # alpha_C - CHECK THIS BOUND
+                (None, None),  # (0, np.inf),  # alpha_P - CHECK BOUND
+            ),
+        )
+
+        # check the results outcome
+
+        return res.x
+
+    @staticmethod
+    def calibrate_params_jw7(
+            mkt_date: datetime.date,
+            S0: float,
+            prices_strikes_cp: List[Tuple[float, float, CallPut]],
+            maturity: datetime.date,
+            r: float,  # interest rate charged.
+    ) -> JWSS7_STRUCT:
+        """Calibrates the prices/strikes for the designated maturity
+            by least-squares.
+
+        :param mkt_date: market date
+        :param S0: current spot price
+        :param prices_strikes_cp: list of prices and strikes you are
+            calibrating, along w/ call/put indicator.
+        :param maturity: maturity of the option.
+        """
+
+        ttm = (maturity - mkt_date).days / 365.25
+
+        def calib_jw7(jw7_p):
+            return calibrate_jw7(tuple(jw7_p), S0, r, ttm, prices_strikes_cp)
+
+        res = minimize(
+            calib_jw7,
             x0=(0.2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
             method='nelder-mead',  # TODO: CHECK HERE!!
             bounds=(
