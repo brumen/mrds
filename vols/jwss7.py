@@ -26,7 +26,7 @@ from mrds.forward_curve import FwdCurve
 from mrds.vols.vols import ATMFVolatility
 from mrds.vols.vols_draw import VolatilityDrawMixin
 from mrds.pricers.pricers_fast import black_call_fast, black_put_fast
-from price_faster import calibrate_jw7
+from price_faster import calibrate_jw7, _vol_jwss7_array
 
 logger = logging.getLogger(__name__)
 
@@ -629,10 +629,11 @@ class JWSS7VolatilityDisplay(JWSS7Volatility, VolatilityDrawMixin):
         call_bend = float(self.slider_call_bend_d.get())
 
         jwss7_params = (sigma_0, skew, smile, put_slope, put_bend, call_slope, call_bend)
-        sigmas = np.array([
-            self._vol_from_jwss7(S0, K, ttm, jwss7_params)
-            for K in K_loglinear
-        ])
+        # sigmas = np.array([
+        #     self._vol_from_jwss7(S0, K, ttm, jwss7_params)
+        #     for K in K_loglinear
+        # ])
+        sigmas = _vol_jwss7_array(S0, K_loglinear, ttm, jwss7_params)
 
         self._ax.clear()
         self._ax.plot(K_loglinear, sigmas)

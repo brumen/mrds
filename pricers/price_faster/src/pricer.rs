@@ -64,6 +64,38 @@ fn _vol_from_jw7(S0: f64, K: f64, ttm: f64, jw7_p: &JWSS7_STRUCT) -> f64 {
     _compute_from_jw7(z, jw7_p)
 }
 
+fn _vol_from_jwss7(
+    s_0: f64,
+    k: f64,
+    ttm: f64,
+    jwss7_p: &JWSS7_STRUCT,  // (f64, f64, f64, f64, f64, f64, f64)
+) -> f64 {
+
+    let sigma_0 = jwss7_p.0.0;
+    let z = (k/s_0).ln() / sigma_0 / ttm.sqrt();
+
+    let jw7_struct = _transform_from_jwss7(jwss7_p);
+
+    _compute_from_jw7(z, &jw7_struct)
+}
+
+#[pyfunction]
+fn _vol_jwss7_array(
+    s_0: f64,
+    k_v: Vec<f64>,
+    ttm: f64,
+    jwss7_p_t: (f64, f64, f64, f64, f64, f64, f64),
+) -> Vec<f64> {
+    let jwss7_p = JWSS7_STRUCT(jwss7_p_t);
+
+    let mut all_sigmas = vec![];
+    for k in k_v {
+        all_sigmas.push(_vol_from_jwss7(s_0, k, ttm, &jwss7_p) );
+    }
+
+    all_sigmas
+}
+
 // enum CallPut {
 //     Call,
 //     Put,
@@ -76,8 +108,6 @@ fn black_fast(S_0: f64,  K: f64, r: f64, sigma: f64, T: f64, call_put: &str) -> 
     let d2 = d1 - sigma * T.sqrt();
 
     let internal = match call_put {
-        //CallPut::Call => S_0 * cdf(d1) - K * cdf(d2),
-        //CallPut::Put => K * cdf(-d2) - S_0 * cdf (-d1),
         "call" => S_0 * cdf(d1) - K * cdf(d2),
         _ => K * cdf(-d2) - S_0 * cdf (-d1),  // put
     };
@@ -121,6 +151,7 @@ fn price_faster(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calibrate_jw7, m)?)?;
     m.add_function(wrap_pyfunction!(black_fast, m)?)?;
     m.add_function(wrap_pyfunction!(cdf, m)?)?;
+    m.add_function(wrap_pyfunction!(_vol_jwss7_array, m)?)?;
     //m.add_function(wrap_pyfunction!(_transform_from_jwss7, m)?)?;
     //m.add_function(wrap_pyfunction!(_vol_from_jw7, m)?)?;
 
