@@ -3,6 +3,7 @@
 cimport cython
 import numpy as np
 cimport numpy as np
+np.import_array()
 
 # declarations of external functions 
 cdef extern from "math.h" nogil:
@@ -20,7 +21,7 @@ cdef extern from "math.h" nogil:
 
 DTYPE_POLY = np.double  # type of poly. coeff entered
 ctypedef np.double_t DTYPE_POLY_t
-DTYPE_ROOTS = np.complex
+DTYPE_ROOTS = np.complex128
 ctypedef np.complex_t DTYPE_ROOTS_t
 DEF FLT_MAX = 3.40282347e38  # artificial constant
 
