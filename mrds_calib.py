@@ -3,33 +3,35 @@
 
 import datetime
 import numpy as np
-from typing import Tuple, List
+import scipy
+from typing import Tuple, List, Optional, Dict
 from logging import getLogger
 from scipy.optimize import minimize, Bounds
 
 from mrds.correlations import corr_hyp_sec_mat
 from mrds.mrds_maths import ComMathsMixin
 from mrds.quartic.quartic_cy import QuadRoots, CubicRoots, QuarticRoots
-
+from mrds.vols.vols_basic import black_vol_inverse
+from mrds.discount import DiscountCurve
+from mrds.mrds_discount import MrdsDiscount
 
 _logger = getLogger(__name__)
 
 
-class MrdsCalibMixin:
+class MrdsCalibMixin(MrdsDiscount):
     """Calibration of one maturity only."""
 
-    def __init__(self, mkt_date: datetime.date):
+    def __init__(self, mkt_date: datetime.date, df=0.99):
 
-        self.mkt_date = mkt_date
-        self.dcf = 252.0
+        dc = DiscountCurve(
+            mkt_date
+        ).discount_function_2  # pre-configured discount curve.
 
-    def __difference_to_market_date(self, fwd_date: datetime.date) -> float:
-        """Computes the difference to market date.
+        super().__init__(mkt_date, dc)  # from MrdsDiscount
 
-        :param fwd_date: date to compute the distance to market date.
-        """
-
-        return (fwd_date - self.mkt_date).days / self.dcf
+        # (k1, k2), (s1, s2), rho = self._ksr
+        self._ksr: Optional[Tuple[float, float, float, float, float]] = None
+        self.black_vol_inverse_tol = 1e-4
 
     def __V_one_factor(
         self,
@@ -60,7 +62,7 @@ class MrdsCalibMixin:
             beta**2
             * sigma**2
             / (2.0 * kappa)
-            * np.exp(-2.0 * kappa * self.__difference_to_market_date(fwd_date))
+            * np.exp(-2.0 * kappa * self._difference_to_market_date(fwd_date))
             * (np.exp(2.0 * kappa * t_1) - np.exp(2.0 * kappa * t_0))
         )
 
@@ -110,8 +112,8 @@ class MrdsCalibMixin:
         if kappa_12 == 0.0:
             return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 * (t_1 - t_0)
 
-        T_0 = self.__difference_to_market_date(fwd_date_1)
-        T_1 = self.__difference_to_market_date(fwd_date_2)
+        T_0 = self._difference_to_market_date(fwd_date_1)
+        T_1 = self._difference_to_market_date(fwd_date_2)
 
         if t_0 > T_0:
             return 0.0
@@ -156,7 +158,21 @@ class MrdsCalibMixin:
                 self.mkt_date,
                 fwd_date,
             )
-            / self.__difference_to_market_date(fwd_date)
+            / self._difference_to_market_date(fwd_date)
+        )
+
+    def black_vol_current(self, fwd_date: datetime.date) -> Optional[float]:
+        """Returns current black vol if calibrated, otherwise None."""
+
+        if self._ksr is None:
+            return None
+
+        k1, k2, s1, s2, rho = self._ksr
+        return self.black_vol(
+            fwd_date,
+            (k1, k2),
+            (s1, s2),
+            np.array([[1.0, rho], [rho, 1.0]]),
         )
 
     def __fwd_square_vol(
@@ -192,9 +208,9 @@ class MrdsCalibMixin:
 
         nb_factors = 2  # self.nb_factors_for_asset(asset)
 
-        t_1 = self.__difference_to_market_date(fwd_date_1)
-        t_2 = self.__difference_to_market_date(fwd_date_2)
-        T = self.__difference_to_market_date(fwd_tenor)
+        t_1 = self._difference_to_market_date(fwd_date_1)
+        t_2 = self._difference_to_market_date(fwd_date_2)
+        T = self._difference_to_market_date(fwd_tenor)
 
         direct_terms = sum(
             [
@@ -228,7 +244,7 @@ class MrdsCalibMixin:
         self,
         # asset: str, tenors=None,
         fwd_tenor: datetime.date,
-        atm_vol: float,
+        market_atm_vol: float,
         kappa_vec: Tuple[float, float],
         sigma_vec: Tuple[float, float],
         rho: float,
@@ -245,32 +261,13 @@ class MrdsCalibMixin:
         # tenors_used = tenors if tenors else self.vol_curve_names(asset).tenors
 
         black_vol = self.black_vol(
-            # asset,
             fwd_tenor,
             kappa_vec,
             sigma_vec,
             np.array([[1.0, rho], [rho, 1.0]]),
-            # self._kappa_vec(asset),
-            # self._sigma_vec(asset),
-            # self._factor_corr_mat(asset, asset),
         )
 
-        return atm_vol / black_vol
-
-        # return np.array(
-        #     [self.vol_curve_names(asset).atm_vol(tenor) for tenor in tenors_used]
-        # ) / np.array(
-        #     [
-        #         self.black_vol(
-        #             asset,
-        #             tenor,
-        #             self._kappa_vec(asset),
-        #             self._sigma_vec(asset),
-        #             self._factor_corr_mat(asset, asset),
-        #         )
-        #         for tenor in tenors_used
-        #     ]
-        # )
+        return market_atm_vol / black_vol
 
     @staticmethod
     def __integr_analy(
@@ -390,11 +387,45 @@ class MrdsCalibMixin:
             np.inf,
         )[0]
 
-    def _polynomial_european(
+    def _skew_params(
         self,
-        asset: str,
         C_vec: np.array,
         fwd_date: datetime.date,
+        fwd_value: float,
+    ) -> tuple:
+        """Given the C parameters, returns the parameters for the
+            option value computation using the polynomial approach.
+
+        :param asset: asset for which skew parameters are computed.
+        :param C_vec: vector of calibrated skew parameters, [c0, c1, c2]
+        :param fwd_value: forward value for tenor fwd_date
+        :returns: a tuple of A0, A1, A2, A3, A4, V used in
+            the _polynomial_european method.
+        """
+
+        cc1, cc2, cc3 = C_vec
+
+        # integrated volatility
+        v = self.black_vol_current(fwd_date) * np.sqrt(
+            self._difference_to_market_date(fwd_date)
+        )
+
+        f0t = fwd_value  # self.fwd_curve_names(asset).fwd_value(fwd_date)
+
+        return (
+            (1.0 - cc1 * v**2 / 2.0 + cc3 * v**4 / 8.0) * f0t,
+            (1.0 - cc2 * v**2 / 2.0) * f0t,
+            (cc1 / 2.0 - cc3 * v**2 / 4.0) * f0t,
+            (cc2 / 6.0) * f0t,
+            (cc3 / 24.0) * f0t,
+            v,
+        )
+
+    def _polynomial_european(
+        self,
+        C_vec: np.array,
+        fwd_date: datetime.date,
+        fwd_value: float,
         strike: float,
         call_put_ind: int,
         ttm: float,
@@ -408,11 +439,12 @@ class MrdsCalibMixin:
         :param strike: strike of the option
         :param call_put_ind: indicator whether this is a call (1) or a put (-1)
         :param ttm: time to maturity of the option.
-        :param debug_mode: whether to compute the polynomial european option numerically or analytically.
+        :param debug_mode: whether to compute the polynomial european
+            option numerically or analytically.
         """
 
         # obtaining the coefficients
-        A0, A1, A2, A3, A4, V = self._skew_params(asset, C_vec, fwd_date)
+        A0, A1, A2, A3, A4, V = self._skew_params(C_vec, fwd_date, fwd_value)
 
         if call_put_ind == 1:
             A0 -= strike
@@ -444,7 +476,7 @@ class MrdsCalibMixin:
         #    return disc_fact * self.__integr_num(Asigma, call_put_ind, strike)
         # else:  # production mode
 
-        return self.DF(ttm) * self.__class__.__integr_analy(
+        return self.DF(fwd_date) * self.__class__.__integr_analy(
             real_roots / V, A0, A1, A2, A3, A4, V
         )
 
@@ -606,6 +638,7 @@ class MrdsCalibMixin:
         if pr_solve.success:
             result = pr_solve.x
             kappa_1, kappa_2, sigma_1, sigma_2, rho = result
+            self._ksr = result
             return {
                 "kappa_1": kappa_1,
                 "kappa_2": kappa_2,
@@ -616,6 +649,7 @@ class MrdsCalibMixin:
 
         # problem is not feasible: TODO: FOR NOW RETURN DEFAULT VALUES
         kappa_1, kappa_2, sigma_1, sigma_2, rho = init_kappa_sigma_rho
+        self._ksr = init_kappa_sigma_rho
         return {
             "kappa_1": kappa_1,
             "kappa_2": kappa_2,
@@ -624,9 +658,192 @@ class MrdsCalibMixin:
             "rho": rho,
         }
 
+    def __deltas_to_strikes(
+        self,
+        tenor_date: datetime.date,
+        delta_vec_list: np.array,
+        atm_vol: float,
+        fwd_value: float,
+    ) -> np.array:
+        """Converts deltas to strikes for particular asset and tenor.
+
+        :param atm_vol: atm vol for the tenor_date.
+        :param tenor_date: tenor considered.
+        :param fwd_value: forward value for tenor_date
+        :returns: a vector of deltas from the strikes given in self.delta_vec_list
+        """
+
+        integrated_vol = atm_vol * np.sqrt(self._difference_to_market_date(tenor_date))
+
+        return (
+            np.exp(
+                (scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol)
+                * integrated_vol
+            )
+            * fwd_value
+        )
+
+    def __model_vol_surface(
+        self,
+        C_vec,
+        fwd_date: datetime.date,
+        deltas: np.array,
+        fwd_value: float,
+    ) -> List[float]:
+        """Computes model vols for asset, C_vec and forward date fwd_date.
+
+        :param asset: commodity considered.
+        :param C_vec: skew vector
+        :param fwd_date: forward date for which the model vols are computed.
+        :param deltas: deltas to be used for calibration.
+        :returns: list of volatilities for deltas for the particular parameters.
+        """
+
+        deltas_used = deltas  # if deltas else self._default_deltas_for_skew()
+        atm_vol = self.black_vol_current(fwd_date)  # TODO: CHECK IF THIS IS CORRECT
+
+        strikes = self.__deltas_to_strikes(fwd_date, deltas_used, atm_vol, fwd_value)
+        # fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
+        cp_ind = np.array([1 if strike >= fwd_value else -1 for strike in strikes])
+
+        option_tenor = fwd_date  # self.__option_tenor_for_fwd_tenor(
+        # asset, fwd_date
+        # )  # option tenor corresponding to fwd_date
+        ttm_numerical = self._difference_to_market_date(option_tenor)
+        option_prices = [
+            self._polynomial_european(
+                C_vec, fwd_date, fwd_value, strike, cp, ttm_numerical
+            )
+            for strike, cp in zip(strikes, cp_ind)
+        ]
+        # if option prices are 0 -> correct to MIN_OPTION_PRICE
+        option_prices = [
+            option_price if option_price > 0.0 else self._MIN_OPTION_PRICE
+            for option_price in option_prices
+        ]
+        discount_fact = self.DF(option_tenor)
+
+        # numerical value of the option tenor
+        option_tenor_num = self._difference_to_market_date(option_tenor)
+        return [
+            black_vol_inverse(
+                fwd_value,
+                strike,
+                opt_price,
+                option_tenor_num,
+                discount_fact,
+                call_put_ind,
+                self.black_vol_inverse_tol,
+            )
+            for opt_price, strike, call_put_ind in zip(option_prices, strikes, cp_ind)
+        ]
+
+    def _calibrate_skew_one_date(
+        self,
+        fwd_date: datetime.date,
+        deltas_implied_vols: List[Tuple[float, float]],
+        fwd_value: float,
+    ) -> np.array:
+        """Optimization function to minimize over the fwd_dates.
+
+        :param fwd_date: forward date for which the skew calibration is done.
+        :param deltas_implied_vols: list of tuples of (delta, implied_vol)
+            for fwd_date.
+        :param fwd_value: forward value for that
+        """
+
+        deltas = [x[0] for x in deltas_implied_vols]
+        implied_vols = [x[1] for x in deltas_implied_vols]
+
+        # diff_to_mkt_date = self._difference_to_market_date(fwd_date)
+        # fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
+        # implied_vols = np.array(
+        #    [
+        #        self.vol_curve_names(asset).implied_vol(
+        #            fwd_date, np.exp(delta) * fwd_value, diff_to_mkt_date
+        #        )
+        #        for delta in deltas_used
+        #    ]
+        # )
+
+        _logger.debug(f"Calibrating skew params. for date {fwd_date}.")
+        initial_guess = np.array([1.0, 0.0, 0.0])
+        c_vec_sol = minimize(
+            lambda C_vec: scipy.linalg.norm(
+                np.array(self.__model_vol_surface(C_vec, fwd_date, deltas, fwd_value))
+                - implied_vols
+            ),
+            initial_guess,
+        )
+
+        if c_vec_sol.success:
+            return c_vec_sol.x  # 3 elements
+
+        # solution not feasible  # TODO: MAYBE THERE IS SOMETHING MORE TO DO HERE
+        return initial_guess
+
+    def _calibrate_skew_dates(
+        self, asset: str, fwd_dates: List[datetime.date], deltas: List[float] = None
+    ) -> Dict[datetime.date, np.array]:
+        """Optimization function to minimize over the fwd_dates.
+
+        :param asset: asset for which the skew function is calibrates, e.g. ('WTI')
+        :param fwd_dates: list of forward dates for calibration of the skew.
+        :param deltas: deltas for which to calibrate the skew
+        """
+
+        return {
+            fwd_date: self._calibrate_skew_one_date(asset, fwd_date, deltas=deltas)
+            for fwd_date in fwd_dates
+        }
+
+    def _c_vec_calibrate(self, asset: str, fwd_dates: List[datetime.date]) -> None:
+        """Calibrates the dates that are not yet calibrated for the asset.
+
+        :param asset: the asset to calibrate, such as 'wti'
+        :param fwd_dates: forward dates for which to calibrate
+        """
+
+        if asset in self._C_vec:
+            already_calibrated_dates = set(self._C_vec[asset].keys())
+            to_be_calibrated = set(fwd_dates).difference(already_calibrated_dates)
+
+        else:
+            to_be_calibrated = fwd_dates
+
+        self._c_vec_calibrate_force(asset, to_be_calibrated)
+
+    def _c_vec_calibrate_force(
+        self, asset: str, to_be_calibrated: List[datetime.date]
+    ) -> None:
+        """Calibrates the dates to_be_calibrated. THIS IS REFACTORED, BC IT'S USED IN SUBCLASS.
+
+        :param asset: the asset to calibrate, such as 'wti'
+        :param to_be_calibrated: forward dates for which to calibrate
+        """
+
+        if not self.multi_thread_calib:
+            for calib_date, calib_vec in self._calibrate_skew_dates(
+                asset, to_be_calibrated
+            ).items():
+                self._set_c_vec(
+                    asset, calib_date, calib_vec
+                )  # adding this to the _C_vec
+
+        else:  # multithreaded part
+            with Pool(processes=cpu_count()) as pool:
+                nb_tenors = len(to_be_calibrated)
+                C_res = pool.map(
+                    calibrate_skew_dates_wrap,
+                    zip([self] * nb_tenors, [asset] * nb_tenors, to_be_calibrated),
+                )
+            for calib_date, calib_vec in zip(to_be_calibrated, C_res):
+                self._set_c_vec(asset, calib_date, calib_vec)
+
 
 def _example_one():
     mkt_date = datetime.date(2026, 1, 11)
+
     atm_vols = [
         (datetime.date(2026, 2, 1), 0.4),
         (datetime.date(2026, 3, 1), 0.34),
@@ -639,9 +856,39 @@ def _example_one():
     ]
 
     mrd1 = MrdsCalibMixin(mkt_date)
-    r1 = mrd1._kappa_sigma_rho(atm_vols)
+    ksr = mrd1._kappa_sigma_rho(atm_vols)
+    # compute betas
+    k1 = ksr["kappa_1"]
+    k2 = ksr["kappa_2"]
+    s1 = ksr["sigma_1"]
+    s2 = ksr["sigma_2"]
+    rho = ksr["rho"]
+    betas = [
+        mrd1._beta_T(fwd_tenor, market_atm_vol, (k1, k2), (s1, s2), rho)
+        for fwd_tenor, market_atm_vol in atm_vols
+    ]
 
-    print(r1)
+    print(ksr)
+    print(betas)
+
+    fwd_value = 100.0
+    deltas_implied_vols = [
+        (0.9, 0.5),
+        (0.8, 0.4),
+        (0.6, 0.35),
+        (0.5, 0.28),
+        (0.4, 0.4),
+        (0.3, 0.47),
+        (0.2, 0.58),
+    ]
+
+    skew_result = mrd1._calibrate_skew_one_date(
+        datetime.date(2026, 2, 1),
+        deltas_implied_vols,
+        fwd_value,
+    )
+
+    print(skew_result)
 
 
 if __name__ == "__main__":

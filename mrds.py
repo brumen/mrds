@@ -28,17 +28,12 @@ from mrds.forward_curve import FwdCurve
 from mrds.discount import DiscountCurve
 from mrds.tolling.opd.opd_avx import skew_fom
 from mrds.mrds_calib import MrdsCalibMixin
+from mrds.errors import ComSkewError
 
 
 logging.basicConfig(level=DEBUG)  # TODO: CHECK THIS HERE
 logger = getLogger(__name__)
 logger.setLevel(INFO)
-
-
-class ComSkewError(Exception):
-    """Base class for ComSkew model exceptions."""
-
-    pass
 
 
 def calibrate_skew_dates_wrap(arg, **kwarg):

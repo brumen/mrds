@@ -2,15 +2,15 @@
 
 import logging
 import mrds.config as config
-import numpy       as np
-import matplotlib  as mpl
+import numpy as np
+import matplotlib as mpl
 
-from typing              import List
-from numpy               import double, log, exp, sqrt
-from scipy.interpolate   import splev, splrep  # spline package
+from typing import List
+from numpy import double, log, exp, sqrt
+from scipy.interpolate import splev, splrep  # spline package
 from mrds.vols.vols_fast import black_vol_inverse_normalized
 
-mpl.use('TkAgg')
+mpl.use("TkAgg")
 
 
 if config.CUDA_PRESENT:
@@ -23,8 +23,9 @@ if config.CUDA_PRESENT:
 logger = logging.Logger(__name__)
 
 
-def interpolate_fwd_vols(fwd_tenors, fwd_prices, vol_tenors, vol_vols,
-                         fwd_tenors_wanted, vol_tenors_wanted):
+def interpolate_fwd_vols(
+    fwd_tenors, fwd_prices, vol_tenors, vol_vols, fwd_tenors_wanted, vol_tenors_wanted
+):
     """
     interpolates by spline between the tenors (both prices and vols)
       fwd_tenors ... vector of tenors
@@ -34,7 +35,9 @@ def interpolate_fwd_vols(fwd_tenors, fwd_prices, vol_tenors, vol_vols,
       columns for all parameters
     """
 
-    fwd_function = lambda t: splev(t, splrep(fwd_tenors, fwd_prices))  # interpol. prices
+    fwd_function = lambda t: splev(
+        t, splrep(fwd_tenors, fwd_prices)
+    )  # interpol. prices
     res = [fwd_function(fwd_tenors_wanted)]  # result, part 1
     # append an empty zero matrix
     res.append(np.zeros((len(vol_tenors_wanted), vol_vols.shape[1])))
@@ -46,31 +49,24 @@ def interpolate_fwd_vols(fwd_tenors, fwd_prices, vol_tenors, vol_vols,
     return res
 
 
-def black_vol_inverse_vec( F : float
-                         , K_vec : np.array
-                         , p_vec : np.array
-                         , dt : float
-                         , DF : float
-                         , theta
-                         , tol : float ) -> np.array:
-    """ Inverse black vol for a vector of strikes, and a vector or prices.
+def black_vol_inverse_vec(
+    F: float, K_vec: np.array, p_vec: np.array, dt: float, DF: float, theta, tol: float
+) -> np.array:
+    """Inverse black vol for a vector of strikes, and a vector or prices.
 
     :param F: current forward vol.
     :param K_vec: vector of strikes.
     """
 
-    return [black_vol_inverse(F, K, p, dt, DF, theta, tol)
-            for K, p in zip(K_vec, p_vec)]
+    return [
+        black_vol_inverse(F, K, p, dt, DF, theta, tol) for K, p in zip(K_vec, p_vec)
+    ]
 
 
-def black_vol_inverse( F         : float
-                     , K         : float
-                     , p         : float
-                     , dt        : float
-                     , DF        : float
-                     , theta     : int
-                     , tolerance : float ):
-    """ Computation of black vol from option price.
+def black_vol_inverse(
+    F: float, K: float, p: float, dt: float, DF: float, theta: int, tolerance: float
+):
+    """Computation of black vol from option price.
 
     :param F: forward price
     :param K: strike price
@@ -81,14 +77,16 @@ def black_vol_inverse( F         : float
     :param tolerance: tolerance for vol search.
     """
 
-    return black_vol_inverse_normalized( double(p) / (DF * sqrt(double(F) * double(K)))
-                                       , log(double(F) / double(K))
-                                       , theta
-                                       , tolerance) / sqrt(dt)
+    return black_vol_inverse_normalized(
+        double(p) / (DF * sqrt(double(F) * double(K))),
+        log(double(F) / double(K)),
+        theta,
+        tolerance,
+    ) / sqrt(dt)
 
 
-def sam_int(s : float, t : float, T_i : float, beta : float, sigma_L : float) -> float:
-    """ Samuelson volatility function.
+def sam_int(s: float, t: float, T_i: float, beta: float, sigma_L: float) -> float:
+    """Samuelson volatility function.
         Computes the squared integral of samuelson behavior
            \int _s ^t (e^{-B(T_i - u)} + sigma_L )^2 du
 
@@ -100,22 +98,19 @@ def sam_int(s : float, t : float, T_i : float, beta : float, sigma_L : float) ->
     :returns: integrated samuelson volatility over a period.
     """
 
-    t1 = exp(-2.0 * beta * (T_i - t)) / (2.0 * beta) - \
-        exp(-2.0 * beta * (T_i - s)) / (2.0 * beta)
+    t1 = exp(-2.0 * beta * (T_i - t)) / (2.0 * beta) - exp(-2.0 * beta * (T_i - s)) / (
+        2.0 * beta
+    )
     t2 = sigma_L**2 * (t - s)
-    t3 = 2.0 * sigma_L / beta * \
-        (exp(-beta * (T_i - t)) - exp(-beta * (T_i - s)))
+    t3 = 2.0 * sigma_L / beta * (exp(-beta * (T_i - t)) - exp(-beta * (T_i - s)))
 
     return sqrt((t1 + t2 + t3) / (t - s))
 
 
-def forward_vols_sam( sigma   : np.array
-                    , T       : float
-                    , Ti      : np.array
-                    , taui    : np.array
-                    , beta    : float
-                    , sigma_L : float) -> List[float]:
-    """ Forward vols in the Samuelson model.
+def forward_vols_sam(
+    sigma: np.array, T: float, Ti: np.array, taui: np.array, beta: float, sigma_L: float
+) -> List[float]:
+    """Forward vols in the Samuelson model.
 
     :param sigma: (atm) vols for maturities Ti
     :param T: forward time
@@ -126,5 +121,9 @@ def forward_vols_sam( sigma   : np.array
     :returns: samuelson volatilities using the samuelson parametrization.
     """
 
-    return [sigma * sam_int(0., T, Ti_elt, beta, sigma_L) / sam_int(0., taui_elt, Ti_elt, beta, sigma_L)
-            for Ti_elt, taui_elt in zip(Ti, taui) ]
+    return [
+        sigma
+        * sam_int(0.0, T, Ti_elt, beta, sigma_L)
+        / sam_int(0.0, taui_elt, Ti_elt, beta, sigma_L)
+        for Ti_elt, taui_elt in zip(Ti, taui)
+    ]
