@@ -7,6 +7,7 @@ import scipy
 from typing import Tuple, List, Optional, Dict
 from logging import getLogger
 from scipy.optimize import minimize, Bounds
+from time import sleep
 
 from mrds.correlations import corr_hyp_sec_mat
 from mrds.mrds_maths import ComMathsMixin
@@ -406,11 +407,9 @@ class MrdsCalibMixin(MrdsDiscount):
         cc1, cc2, cc3 = C_vec
 
         # integrated volatility
-        v = self.black_vol_current(fwd_date) * np.sqrt(
-            self._difference_to_market_date(fwd_date)
-        )
-
-        f0t = fwd_value  # self.fwd_curve_names(asset).fwd_value(fwd_date)
+        ttm = self._difference_to_market_date(fwd_date)
+        v = self.black_vol_current(fwd_date) * np.sqrt(ttm)
+        f0t = fwd_value
 
         return (
             (1.0 - cc1 * v**2 / 2.0 + cc3 * v**4 / 8.0) * f0t,
@@ -482,7 +481,6 @@ class MrdsCalibMixin(MrdsDiscount):
 
     def __distance_model_market_black_vol(
         self,
-        # asset: str,
         atm_vols: List[float],
         kappa_vec: np.array,
         sigma_vec: np.array,
@@ -675,13 +673,18 @@ class MrdsCalibMixin(MrdsDiscount):
 
         integrated_vol = atm_vol * np.sqrt(self._difference_to_market_date(tenor_date))
 
-        return (
-            np.exp(
-                (scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol)
-                * integrated_vol
-            )
-            * fwd_value
+        return fwd_value / np.exp(
+            (scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol)
+            * integrated_vol
         )
+
+        # return (
+        #     np.exp(
+        #         (scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol)
+        #         * integrated_vol
+        #     )
+        #     * fwd_value
+        # )
 
     def __model_vol_surface(
         self,
@@ -703,9 +706,9 @@ class MrdsCalibMixin(MrdsDiscount):
         atm_vol = self.black_vol_current(fwd_date)  # TODO: CHECK IF THIS IS CORRECT
 
         strikes = self.__deltas_to_strikes(fwd_date, deltas_used, atm_vol, fwd_value)
+
         # fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
         cp_ind = np.array([1 if strike >= fwd_value else -1 for strike in strikes])
-
         option_tenor = fwd_date  # self.__option_tenor_for_fwd_tenor(
         # asset, fwd_date
         # )  # option tenor corresponding to fwd_date
@@ -721,11 +724,12 @@ class MrdsCalibMixin(MrdsDiscount):
             option_price if option_price > 0.0 else self._MIN_OPTION_PRICE
             for option_price in option_prices
         ]
+        # print("OPTION PRICES = ", option_prices)
         discount_fact = self.DF(option_tenor)
 
         # numerical value of the option tenor
         option_tenor_num = self._difference_to_market_date(option_tenor)
-        return [
+        model_vols = [
             black_vol_inverse(
                 fwd_value,
                 strike,
@@ -737,6 +741,9 @@ class MrdsCalibMixin(MrdsDiscount):
             )
             for opt_price, strike, call_put_ind in zip(option_prices, strikes, cp_ind)
         ]
+        # print("C VEC:", C_vec)
+        # print("MODEL VOLS = ", model_vols)
+        return model_vols
 
     def _calibrate_skew_one_date(
         self,
@@ -755,24 +762,20 @@ class MrdsCalibMixin(MrdsDiscount):
         deltas = [x[0] for x in deltas_implied_vols]
         implied_vols = [x[1] for x in deltas_implied_vols]
 
-        # diff_to_mkt_date = self._difference_to_market_date(fwd_date)
-        # fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
-        # implied_vols = np.array(
-        #    [
-        #        self.vol_curve_names(asset).implied_vol(
-        #            fwd_date, np.exp(delta) * fwd_value, diff_to_mkt_date
-        #        )
-        #        for delta in deltas_used
-        #    ]
-        # )
-
         _logger.debug(f"Calibrating skew params. for date {fwd_date}.")
-        initial_guess = np.array([1.0, 0.0, 0.0])
+        initial_guess = np.array(
+            [3.0, 100.0, 20.0]
+        )  # possible guess, try w/ multiple guesses.
+
+        def model_minus_market(C_attempt):
+            model_vols = np.array(
+                self.__model_vol_surface(C_attempt, fwd_date, deltas, fwd_value)
+            )
+            diff = scipy.linalg.norm(model_vols - implied_vols)
+            return diff
+
         c_vec_sol = minimize(
-            lambda C_vec: scipy.linalg.norm(
-                np.array(self.__model_vol_surface(C_vec, fwd_date, deltas, fwd_value))
-                - implied_vols
-            ),
+            model_minus_market,
             initial_guess,
         )
 
