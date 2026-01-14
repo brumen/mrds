@@ -13,7 +13,7 @@ from scipy.optimize import minimize, Bounds
 from logging import getLogger, DEBUG, INFO
 from multiprocessing import Pool, cpu_count
 from functools import lru_cache
-from typing import List, Dict, Union, Callable
+from typing import List, Dict, Union, Callable, Tuple
 
 # mrds imports
 from mrds.mrds_maths import ComMathsMixin
@@ -488,6 +488,104 @@ class ComSkew(ComMathsMixin, ComSkewDefaultsMixin, MrdsCalibMixin):
         utm[utm == 1] = theta_vector
 
         return utm + utm.transpose() + utm_diag_ones
+
+    def __V_one_factor(
+        self,
+        kappa: float,
+        sigma: float,
+        beta: float,
+        # factor_nb: int,
+        fwd_date: datetime.date,
+        t_0: float,
+        t_1: float,
+    ) -> float:
+        """Computes integrated volatility V only for one factor (factor_nb).
+
+        :param factor_nb: factor to consider (0, 1,...)
+        :param fwd_date: forward date
+        :param t_0: integrated volatility start time (float)
+        :param t_1: integrated vol end time (float)
+        """
+
+        # kappa = self._kappa_vec(asset)[factor_nb]
+        # sigma = self._sigma_vec(asset)[factor_nb]
+        # beta = self._beta_T(asset, [fwd_date])[0]  # number, not vector
+
+        if kappa == 0.0:
+            return beta**2 * sigma**2 * (t_1 - t_0)
+
+        return (
+            beta**2
+            * sigma**2
+            / (2.0 * kappa)
+            * np.exp(-2.0 * kappa * self._difference_to_market_date(fwd_date))
+            * (np.exp(2.0 * kappa * t_1) - np.exp(2.0 * kappa * t_0))
+        )
+
+    def _V_cross_factor(
+        self,
+        # asset: str
+        factor_1: int,
+        factor_2: int,
+        kv: Tuple[float, float],
+        sv: Tuple[float, float],
+        rho_12: float,
+        beta_1: float,
+        beta_2: float,
+        fwd_date_1: datetime.date,
+        fwd_date_2: datetime.date,
+        t_0: float,
+        t_1: float,
+    ):
+        """Computes cross integrated vol. V between factors factor_1 and factor_2.
+             Integrate between t_0 and t_1 for forward dates fwd_date_1, fwd_date_2.
+
+        :param kv: kappa vector, composed of kappa_1, and kappa_2
+        :param sv: sigma vector, composed of sigma_1, sigma_2
+        :param rho_12: correlation factor
+        :param factor_1: first factor to consider (0 or 1)
+        :param factor_2: second factor to consider (0 or 1)
+        :param fwd_date_1: forward date_1
+        :param fwd_date_2: forward date 2
+        :param t_0: integrated volatility start time (float) t_0 < t_1
+        :param t_1: integrated vol end time (float); t_1 > t_0
+        """
+
+        assert t_0 <= t_1, f"Integration times {t_0} and {t_1} are not ordered."
+
+        # kv = self._kappa_vec(asset)
+        # sv = self._sigma_vec(asset)
+
+        kappa_1 = kv[factor_1]
+        kappa_2 = kv[factor_2]
+        kappa_12 = kappa_1 + kappa_2
+        sigma_1 = sv[factor_1]
+        sigma_2 = sv[factor_2]
+        # rho_12 = self._factor_corr_mat(asset, asset)[factor_1, factor_2]
+        # beta_1 = self._beta_T(asset, [fwd_date_1])[0]  # one forward date
+        # beta_2 = self._beta_T(asset, [fwd_date_2])[0]
+
+        if kappa_12 == 0.0:
+            return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 * (t_1 - t_0)
+
+        T_0 = self._difference_to_market_date(fwd_date_1)
+        T_1 = self._difference_to_market_date(fwd_date_2)
+
+        if t_0 > T_0:
+            return 0.0
+
+        # t_0 < T_0
+        # integrate two functions either until T_1 or t_1
+        return (
+            rho_12
+            * beta_1
+            * beta_2
+            * sigma_1
+            * sigma_2
+            / kappa_12
+            * np.exp(-kappa_1 * T_0 - kappa_2 * T_1)
+            * (np.exp(kappa_12 * min(T_1, t_1)) - np.exp(kappa_12 * t_0))
+        )
 
     def __black_corr_within_curve(
         self, asset: str, fwd_date_1: datetime.date, fwd_date_2: datetime.date

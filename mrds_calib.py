@@ -7,7 +7,6 @@ import scipy
 from typing import Tuple, List, Optional, Dict
 from logging import getLogger
 from scipy.optimize import minimize, Bounds
-from time import sleep
 
 from mrds.correlations import corr_hyp_sec_mat
 from mrds.mrds_maths import ComMathsMixin
@@ -34,107 +33,8 @@ class MrdsCalibMixin(MrdsDiscount):
         self._ksr: Optional[Tuple[float, float, float, float, float]] = None
         self.black_vol_inverse_tol = 1e-4
 
-    def __V_one_factor(
-        self,
-        kappa: float,
-        sigma: float,
-        beta: float,
-        # factor_nb: int,
-        fwd_date: datetime.date,
-        t_0: float,
-        t_1: float,
-    ) -> float:
-        """Computes integrated volatility V only for one factor (factor_nb).
-
-        :param factor_nb: factor to consider (0, 1,...)
-        :param fwd_date: forward date
-        :param t_0: integrated volatility start time (float)
-        :param t_1: integrated vol end time (float)
-        """
-
-        # kappa = self._kappa_vec(asset)[factor_nb]
-        # sigma = self._sigma_vec(asset)[factor_nb]
-        # beta = self._beta_T(asset, [fwd_date])[0]  # number, not vector
-
-        if kappa == 0.0:
-            return beta**2 * sigma**2 * (t_1 - t_0)
-
-        return (
-            beta**2
-            * sigma**2
-            / (2.0 * kappa)
-            * np.exp(-2.0 * kappa * self._difference_to_market_date(fwd_date))
-            * (np.exp(2.0 * kappa * t_1) - np.exp(2.0 * kappa * t_0))
-        )
-
-    def _V_cross_factor(
-        self,
-        # asset: str
-        factor_1: int,
-        factor_2: int,
-        kv: Tuple[float, float],
-        sv: Tuple[float, float],
-        rho_12: float,
-        beta_1: float,
-        beta_2: float,
-        fwd_date_1: datetime.date,
-        fwd_date_2: datetime.date,
-        t_0: float,
-        t_1: float,
-    ):
-        """Computes cross integrated vol. V between factors factor_1 and factor_2.
-             Integrate between t_0 and t_1 for forward dates fwd_date_1, fwd_date_2.
-
-        :param kv: kappa vector, composed of kappa_1, and kappa_2
-        :param sv: sigma vector, composed of sigma_1, sigma_2
-        :param rho_12: correlation factor
-        :param factor_1: first factor to consider (0 or 1)
-        :param factor_2: second factor to consider (0 or 1)
-        :param fwd_date_1: forward date_1
-        :param fwd_date_2: forward date 2
-        :param t_0: integrated volatility start time (float) t_0 < t_1
-        :param t_1: integrated vol end time (float); t_1 > t_0
-        """
-
-        assert t_0 <= t_1, f"Integration times {t_0} and {t_1} are not ordered."
-
-        # kv = self._kappa_vec(asset)
-        # sv = self._sigma_vec(asset)
-
-        kappa_1 = kv[factor_1]
-        kappa_2 = kv[factor_2]
-        kappa_12 = kappa_1 + kappa_2
-        sigma_1 = sv[factor_1]
-        sigma_2 = sv[factor_2]
-        # rho_12 = self._factor_corr_mat(asset, asset)[factor_1, factor_2]
-        # beta_1 = self._beta_T(asset, [fwd_date_1])[0]  # one forward date
-        # beta_2 = self._beta_T(asset, [fwd_date_2])[0]
-
-        if kappa_12 == 0.0:
-            return rho_12 * beta_1 * beta_2 * sigma_1 * sigma_2 * (t_1 - t_0)
-
-        T_0 = self._difference_to_market_date(fwd_date_1)
-        T_1 = self._difference_to_market_date(fwd_date_2)
-
-        if t_0 > T_0:
-            return 0.0
-
-        # t_0 < T_0
-        # integrate two functions either until T_1 or t_1
-        return (
-            rho_12
-            * beta_1
-            * beta_2
-            * sigma_1
-            * sigma_2
-            / kappa_12
-            * np.exp(-kappa_1 * T_0 - kappa_2 * T_1)
-            * (np.exp(kappa_12 * min(T_1, t_1)) - np.exp(kappa_12 * t_0))
-        )
-
     def black_vol(
         self,
-        # asset: str,
         fwd_date: datetime.date,
         kappa_vec: np.array,
         sigma_vec: np.array,
@@ -142,7 +42,6 @@ class MrdsCalibMixin(MrdsDiscount):
     ):
         """Computes the model black vol until fwd_date.
 
-        :param asset: asset for which this is computed, e.g. 'WTI'
         :param fwd_date: forward date for which the vol is computed.
         :param kappa_vec: kappa of the model.
         :param sigma_vec: sigma of the model.
@@ -151,7 +50,6 @@ class MrdsCalibMixin(MrdsDiscount):
 
         return np.sqrt(
             self.__fwd_square_vol(
-                # asset,
                 kappa_vec,
                 sigma_vec,
                 corr_matrix,
@@ -178,7 +76,6 @@ class MrdsCalibMixin(MrdsDiscount):
 
     def __fwd_square_vol(
         self,
-        # asset: str,
         kappa: np.array,
         sigma: np.array,
         corr_matrix: np.array,
@@ -207,7 +104,7 @@ class MrdsCalibMixin(MrdsDiscount):
             fwd_date_1, fwd_date_2
         ), f"Forward tenor {fwd_tenor} should be bigger than both integration tenors {fwd_date_1}, {fwd_date_2}"
 
-        nb_factors = 2  # self.nb_factors_for_asset(asset)
+        nb_factors = 2
 
         t_1 = self._difference_to_market_date(fwd_date_1)
         t_2 = self._difference_to_market_date(fwd_date_2)
@@ -499,11 +396,6 @@ class MrdsCalibMixin(MrdsDiscount):
         :returns: square root of the distance between market and model numbers.
         """
 
-        # either use fwd_tenors provided, or use the fwd tenors from the fwd curve.
-        # fwd_tenors_used = (
-        #     fwd_tenors if fwd_tenors else self.fwd_curve_names(asset).fwd_tenors
-        # )
-
         model_vols = [
             self.black_vol(
                 # asset,
@@ -514,11 +406,6 @@ class MrdsCalibMixin(MrdsDiscount):
             )
             for fwd_date in fwd_tenors
         ]
-
-        # market_vol_curve = self.vol_curve_names(asset)
-        # market_vol = [
-        #     market_vol_curve.atm_vol(fwd_date) for fwd_date in fwd_tenors_used
-        # ]
 
         return sum(
             [
@@ -678,14 +565,6 @@ class MrdsCalibMixin(MrdsDiscount):
             * integrated_vol
         )
 
-        # return (
-        #     np.exp(
-        #         (scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol)
-        #         * integrated_vol
-        #     )
-        #     * fwd_value
-        # )
-
     def __model_vol_surface(
         self,
         C_vec,
@@ -724,7 +603,6 @@ class MrdsCalibMixin(MrdsDiscount):
             option_price if option_price > 0.0 else self._MIN_OPTION_PRICE
             for option_price in option_prices
         ]
-        # print("OPTION PRICES = ", option_prices)
         discount_fact = self.DF(option_tenor)
 
         # numerical value of the option tenor
@@ -741,8 +619,6 @@ class MrdsCalibMixin(MrdsDiscount):
             )
             for opt_price, strike, call_put_ind in zip(option_prices, strikes, cp_ind)
         ]
-        # print("C VEC:", C_vec)
-        # print("MODEL VOLS = ", model_vols)
         return model_vols
 
     def _calibrate_skew_one_date(
@@ -871,8 +747,8 @@ def _example_one():
         for fwd_tenor, market_atm_vol in atm_vols
     ]
 
-    print(ksr)
-    print(betas)
+    print("KSR:", ksr)
+    print("BETAS:", betas)
 
     fwd_value = 100.0
     deltas_implied_vols = [
@@ -891,7 +767,7 @@ def _example_one():
         fwd_value,
     )
 
-    print(skew_result)
+    print("C_VEC:", skew_result)
 
 
 if __name__ == "__main__":
