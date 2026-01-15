@@ -4,9 +4,11 @@
 import datetime
 import numpy as np
 import scipy
+import logging
 from typing import Tuple, List, Optional, Dict
 from logging import getLogger
-from scipy.optimize import minimize, Bounds
+from scipy.optimize import minimize, Bounds, OptimizeResult
+import matplotlib.pyplot as plt
 
 from mrds.correlations import corr_hyp_sec_mat
 from mrds.mrds_maths import ComMathsMixin
@@ -15,6 +17,9 @@ from mrds.vols.vols_basic import black_vol_inverse
 from mrds.discount import DiscountCurve
 from mrds.mrds_discount import MrdsDiscount
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", force=True
+)
 _logger = getLogger(__name__)
 
 
@@ -31,6 +36,8 @@ class MrdsCalibMixin(MrdsDiscount):
 
         # (k1, k2), (s1, s2), rho = self._ksr
         self._ksr: Optional[Tuple[float, float, float, float, float]] = None
+        self._c_vec = {}  # : Optional[Tuple[float, float, float]] = None
+        self.__beta_T = {}
         self.black_vol_inverse_tol = 1e-4
 
     def black_vol(
@@ -63,11 +70,13 @@ class MrdsCalibMixin(MrdsDiscount):
     def black_vol_current(self, fwd_date: datetime.date) -> Optional[float]:
         """Returns current black vol if calibrated, otherwise None."""
 
-        if self._ksr is None:
+        if self._ksr is None or self.__beta_T.get(fwd_date) is None:
             return None
 
         k1, k2, s1, s2, rho = self._ksr
-        return self.black_vol(
+        beta_T = self.__beta_T.get(fwd_date)
+
+        return beta_T * self.black_vol(
             fwd_date,
             (k1, k2),
             (s1, s2),
@@ -165,7 +174,8 @@ class MrdsCalibMixin(MrdsDiscount):
             np.array([[1.0, rho], [rho, 1.0]]),
         )
 
-        return market_atm_vol / black_vol
+        self.__beta_T[fwd_tenor] = market_atm_vol / black_vol
+        return self.__beta_T[fwd_tenor]
 
     @staticmethod
     def __integr_analy(
@@ -570,7 +580,7 @@ class MrdsCalibMixin(MrdsDiscount):
         C_vec,
         fwd_date: datetime.date,
         deltas: np.array,
-        fwd_value: float,
+        # fwd_value: float,
     ) -> List[float]:
         """Computes model vols for asset, C_vec and forward date fwd_date.
 
@@ -584,6 +594,7 @@ class MrdsCalibMixin(MrdsDiscount):
         deltas_used = deltas  # if deltas else self._default_deltas_for_skew()
         atm_vol = self.black_vol_current(fwd_date)  # TODO: CHECK IF THIS IS CORRECT
 
+        fwd_value = 100.0  # unimportant
         strikes = self.__deltas_to_strikes(fwd_date, deltas_used, atm_vol, fwd_value)
 
         # fwd_value = self.fwd_curve_names(asset).fwd_value(fwd_date)
@@ -625,8 +636,8 @@ class MrdsCalibMixin(MrdsDiscount):
         self,
         fwd_date: datetime.date,
         deltas_implied_vols: List[Tuple[float, float]],
-        fwd_value: float,
-    ) -> np.array:
+        initial_guess=(1.0, 0.0, 0.0),
+    ) -> Tuple[np.array, float]:
         """Optimization function to minimize over the fwd_dates.
 
         :param fwd_date: forward date for which the skew calibration is done.
@@ -636,30 +647,87 @@ class MrdsCalibMixin(MrdsDiscount):
         """
 
         deltas = [x[0] for x in deltas_implied_vols]
+        # weights = np.array([1.0 - np.abs(delta - 0.5) for delta in deltas])
         implied_vols = [x[1] for x in deltas_implied_vols]
 
         _logger.debug(f"Calibrating skew params. for date {fwd_date}.")
-        initial_guess = np.array(
-            [3.0, 100.0, 20.0]
-        )  # possible guess, try w/ multiple guesses.
+        # initial_guess = np.array(
+        #     [3.0, 100.0, 20.0]
+        # )  # possible guess, try w/ multiple guesses.
+        initial_guess = np.array(initial_guess)
 
         def model_minus_market(C_attempt):
-            model_vols = np.array(
-                self.__model_vol_surface(C_attempt, fwd_date, deltas, fwd_value)
-            )
-            diff = scipy.linalg.norm(model_vols - implied_vols)
+            model_vols = np.array(self.__model_vol_surface(C_attempt, fwd_date, deltas))
+            diff = scipy.linalg.norm((model_vols - implied_vols))  # weighted by delta
             return diff
 
-        c_vec_sol = minimize(
+        c_vec_sol: OptimizeResult = minimize(
             model_minus_market,
             initial_guess,
         )
 
         if c_vec_sol.success:
-            return c_vec_sol.x  # 3 elements
+            return (c_vec_sol.x, c_vec_sol.fun)  # 3 elements
 
         # solution not feasible  # TODO: MAYBE THERE IS SOMETHING MORE TO DO HERE
-        return initial_guess
+        return (initial_guess, np.inf)
+
+    def calibrate_skew(
+        self,
+        fwd_date: datetime.date,
+        deltas_implied_vols: List[Tuple[float, float]],
+    ) -> np.array:
+
+        initial_vals = [
+            (1.0, 0.0, 0.0),
+            (1.0, 10.0, 20.0),
+            (3.0, 100.0, 20.0),
+        ]
+
+        c_res, residual_val = self._calibrate_skew_one_date(
+            fwd_date,
+            deltas_implied_vols,
+            initial_guess=initial_vals[0],
+        )
+        _logger.info(f"First: {c_res}, {residual_val}")
+        self._c_vec[fwd_date] = c_res
+
+        for initial_val in initial_vals[1:]:
+            c_res, residual_val_new = self._calibrate_skew_one_date(
+                fwd_date,
+                deltas_implied_vols,
+                initial_guess=initial_val,
+            )
+            _logger.info(f"Next: {c_res}, {residual_val_new}")
+            if residual_val_new < residual_val:
+                residual_val = residual_val_new
+                self._c_vec[fwd_date] = c_res
+
+        _logger.info(f"C VEC: {self._c_vec}")
+        return self._c_vec[fwd_date]
+
+    def plot_fit(
+        self, deltas_implied_vols: List[Tuple[float, float]], fwd_date: datetime.date
+    ):
+        """
+
+        :param deltas_implied_vols: list of tuples of (delta, implied_vol)
+            for fwd_date.
+        """
+
+        if self._c_vec.get(fwd_date) is None or self._ksr is None:
+            return None
+
+        deltas = [x[0] for x in deltas_implied_vols]
+        implied_vols = [x[1] for x in deltas_implied_vols]
+
+        model_vols = np.array(
+            self.__model_vol_surface(self._c_vec.get(fwd_date), fwd_date, deltas)
+        )
+
+        plt.plot(deltas, implied_vols)
+        plt.plot(deltas, model_vols)
+        plt.show()
 
     def _calibrate_skew_dates(
         self, asset: str, fwd_dates: List[datetime.date], deltas: List[float] = None
@@ -742,32 +810,30 @@ def _example_one():
     s1 = ksr["sigma_1"]
     s2 = ksr["sigma_2"]
     rho = ksr["rho"]
-    betas = [
-        mrd1._beta_T(fwd_tenor, market_atm_vol, (k1, k2), (s1, s2), rho)
-        for fwd_tenor, market_atm_vol in atm_vols
-    ]
+    fwd_tenor = datetime.date(2026, 2, 1)
+    for fwd_tenor_1, atm_vol_1 in atm_vols:
+        _ = mrd1._beta_T(fwd_tenor_1, atm_vol_1, (k1, k2), (s1, s2), rho)
 
-    print("KSR:", ksr)
-    print("BETAS:", betas)
-
-    fwd_value = 100.0
     deltas_implied_vols = [
-        (0.9, 0.5),
-        (0.8, 0.4),
-        (0.6, 0.35),
-        (0.5, 0.28),
-        (0.4, 0.4),
+        (0.9, 0.6),
+        (0.8, 0.5),
+        (0.6, 0.41),
+        (0.5, 0.4),
+        (0.4, 0.43),
         (0.3, 0.47),
         (0.2, 0.58),
     ]
 
-    skew_result = mrd1._calibrate_skew_one_date(
-        datetime.date(2026, 2, 1),
+    skew_result = mrd1.calibrate_skew(
+        fwd_tenor,
         deltas_implied_vols,
-        fwd_value,
     )
 
     print("C_VEC:", skew_result)
+    mrd1.plot_fit(
+        deltas_implied_vols,
+        fwd_tenor,
+    )
 
 
 if __name__ == "__main__":
