@@ -5,10 +5,13 @@ import datetime
 import numpy as np
 import scipy
 import logging
+import matplotlib.pyplot as plt
+from scipy.stats import norm
 from typing import Tuple, List, Optional, Dict
 from logging import getLogger
 from scipy.optimize import minimize, Bounds, OptimizeResult
-import matplotlib.pyplot as plt
+from multiprocessing import Pool, cpu_count
+from pydantic import BaseModel
 
 from mrds.correlations import corr_hyp_sec_mat
 from mrds.mrds_maths import ComMathsMixin
@@ -23,8 +26,16 @@ logging.basicConfig(
 _logger = getLogger(__name__)
 
 
+class MrdsModel(BaseModel):
+    ksr: Tuple[Tuple[float, float], Tuple[float, float], float]
+    expiries: List[datetime.date]
+    skews: Dict[datetime.date, Tuple[float, float, float]]
+    betas: Dict[datetime.date, float]
+
 class MrdsCalibMixin(MrdsDiscount):
     """Calibration of one maturity only."""
+
+    _MIN_OPTION_PRICE = 1.e-2
 
     def __init__(self, mkt_date: datetime.date, df=0.99):
 
@@ -37,8 +48,31 @@ class MrdsCalibMixin(MrdsDiscount):
         # (k1, k2), (s1, s2), rho = self._ksr
         self._ksr: Optional[Tuple[float, float, float, float, float]] = None
         self._c_vec = {}  # : Optional[Tuple[float, float, float]] = None
-        self.__beta_T = {}
+        self._beta_T = {}
         self.black_vol_inverse_tol = 1e-4
+
+    @classmethod
+    def from_mrds_model(
+        cls, 
+        mkt_date: datetime.date, 
+        mrds_model: MrdsModel,
+    ):
+        """Reconstructs the MrdsCalibMixin model from the mrds_model and 
+            mkt_date.
+        """
+
+        mrds_obj = cls(mkt_date=mkt_date)
+        mrds_moj._ksr = (
+            mrds_model.ksr[0][0], 
+            mrds_model.ksr[0][1], 
+            mrds_model.ksr[1][0], 
+            mrds_model.ksr[1][1], 
+            mrds_model.ksr[2],
+        )
+        mrds_obj._c_vec = mrds_model.skews
+        mrds_obj._beta_T = mrds_model.betas
+
+        return mrds_obj
 
     def black_vol(
         self,
@@ -70,11 +104,11 @@ class MrdsCalibMixin(MrdsDiscount):
     def black_vol_current(self, fwd_date: datetime.date) -> Optional[float]:
         """Returns current black vol if calibrated, otherwise None."""
 
-        if self._ksr is None or self.__beta_T.get(fwd_date) is None:
+        if self._ksr is None or self._beta_T.get(fwd_date) is None:
             return None
 
         k1, k2, s1, s2, rho = self._ksr
-        beta_T = self.__beta_T.get(fwd_date)
+        beta_T = self._beta_T.get(fwd_date)
 
         return beta_T * self.black_vol(
             fwd_date,
@@ -147,9 +181,8 @@ class MrdsCalibMixin(MrdsDiscount):
 
     # TODO: HERE SHOULD BE CHANGED TO ADD THIS CACHE
     # @lru_cache(maxsize=_BETA_T_CACHE_SIZE)
-    def _beta_T(
+    def beta_T_calib(
         self,
-        # asset: str, tenors=None,
         fwd_tenor: datetime.date,
         market_atm_vol: float,
         kappa_vec: Tuple[float, float],
@@ -174,8 +207,8 @@ class MrdsCalibMixin(MrdsDiscount):
             np.array([[1.0, rho], [rho, 1.0]]),
         )
 
-        self.__beta_T[fwd_tenor] = market_atm_vol / black_vol
-        return self.__beta_T[fwd_tenor]
+        self._beta_T[fwd_tenor] = market_atm_vol / black_vol
+        return self._beta_T[fwd_tenor]
 
     @staticmethod
     def __integr_analy(
@@ -571,9 +604,21 @@ class MrdsCalibMixin(MrdsDiscount):
         integrated_vol = atm_vol * np.sqrt(self._difference_to_market_date(tenor_date))
 
         return fwd_value / np.exp(
-            (scipy.stats.norm.ppf(delta_vec_list) - 0.5 * integrated_vol)
+            (norm.ppf(delta_vec_list) - 0.5 * integrated_vol)
             * integrated_vol
         )
+
+    @staticmethod
+    def strike_to_delta(strike: float, stock_price: float, atm_vol: float, ttm: float):
+        """Converts the strike to delta."""
+
+        # TODO: CHECK THIS PART
+        delta = norm.cdf(
+            (np.log(stock_price/strike) + 0.5 * atm_vol**2 * np.sqrt(ttm))/
+            (atm_vol * np.sqrt(ttm))
+        )
+
+        return delta
 
     def __model_vol_surface(
         self,
@@ -658,8 +703,11 @@ class MrdsCalibMixin(MrdsDiscount):
 
         def model_minus_market(C_attempt):
             model_vols = np.array(self.__model_vol_surface(C_attempt, fwd_date, deltas))
-            diff = scipy.linalg.norm((model_vols - implied_vols))  # weighted by delta
-            return diff
+            try: 
+                return scipy.linalg.norm((model_vols - implied_vols))  # weighted by delta
+            except Exception as e:
+                _logger.error(f"Problem computing model vols {model_vols}: {e}")
+                return np.inf
 
         c_vec_sol: OptimizeResult = minimize(
             model_minus_market,
@@ -689,7 +737,7 @@ class MrdsCalibMixin(MrdsDiscount):
             deltas_implied_vols,
             initial_guess=initial_vals[0],
         )
-        _logger.info(f"First: {c_res}, {residual_val}")
+        _logger.debug(f"First attempt at C: {c_res}, {residual_val}")
         self._c_vec[fwd_date] = c_res
 
         for initial_val in initial_vals[1:]:
@@ -698,12 +746,11 @@ class MrdsCalibMixin(MrdsDiscount):
                 deltas_implied_vols,
                 initial_guess=initial_val,
             )
-            _logger.info(f"Next: {c_res}, {residual_val_new}")
+            _logger.debug(f"Next attempt at C: {c_res}, {residual_val_new}")
             if residual_val_new < residual_val:
                 residual_val = residual_val_new
                 self._c_vec[fwd_date] = c_res
 
-        _logger.info(f"C VEC: {self._c_vec}")
         return self._c_vec[fwd_date]
 
     def plot_fit(
@@ -729,63 +776,36 @@ class MrdsCalibMixin(MrdsDiscount):
         plt.plot(deltas, model_vols)
         plt.show()
 
-    def _calibrate_skew_dates(
-        self, asset: str, fwd_dates: List[datetime.date], deltas: List[float] = None
+    def calibrate_dates(
+        self,
+        fwd_dates: List[datetime.date],
+        deltas_implied_vols: Dict[datetime.date, List[Tuple[float, float]]],
+        multi_threaded: bool = False,
     ) -> Dict[datetime.date, np.array]:
         """Optimization function to minimize over the fwd_dates.
 
-        :param asset: asset for which the skew function is calibrates, e.g. ('WTI')
         :param fwd_dates: list of forward dates for calibration of the skew.
-        :param deltas: deltas for which to calibrate the skew
+        :param deltas_implied_vols: key is the fwd date, value is the
+           deltas_implied_vols for that date.
+        :param multi_threaded: indicator whether to use multi-threaded.
         """
 
-        return {
-            fwd_date: self._calibrate_skew_one_date(asset, fwd_date, deltas=deltas)
-            for fwd_date in fwd_dates
-        }
-
-    def _c_vec_calibrate(self, asset: str, fwd_dates: List[datetime.date]) -> None:
-        """Calibrates the dates that are not yet calibrated for the asset.
-
-        :param asset: the asset to calibrate, such as 'wti'
-        :param fwd_dates: forward dates for which to calibrate
-        """
-
-        if asset in self._C_vec:
-            already_calibrated_dates = set(self._C_vec[asset].keys())
-            to_be_calibrated = set(fwd_dates).difference(already_calibrated_dates)
-
-        else:
-            to_be_calibrated = fwd_dates
-
-        self._c_vec_calibrate_force(asset, to_be_calibrated)
-
-    def _c_vec_calibrate_force(
-        self, asset: str, to_be_calibrated: List[datetime.date]
-    ) -> None:
-        """Calibrates the dates to_be_calibrated. THIS IS REFACTORED, BC IT'S USED IN SUBCLASS.
-
-        :param asset: the asset to calibrate, such as 'wti'
-        :param to_be_calibrated: forward dates for which to calibrate
-        """
-
-        if not self.multi_thread_calib:
-            for calib_date, calib_vec in self._calibrate_skew_dates(
-                asset, to_be_calibrated
-            ).items():
-                self._set_c_vec(
-                    asset, calib_date, calib_vec
-                )  # adding this to the _C_vec
-
-        else:  # multithreaded part
-            with Pool(processes=cpu_count()) as pool:
-                nb_tenors = len(to_be_calibrated)
-                C_res = pool.map(
-                    calibrate_skew_dates_wrap,
-                    zip([self] * nb_tenors, [asset] * nb_tenors, to_be_calibrated),
+        if not multi_threaded:
+            return {
+                fwd_date: self.calibrate_skew(
+                    fwd_date, deltas_implied_vols=deltas_implied_vols.get(fwd_date)
                 )
-            for calib_date, calib_vec in zip(to_be_calibrated, C_res):
-                self._set_c_vec(asset, calib_date, calib_vec)
+                for fwd_date in fwd_dates
+            }
+
+        # multi-threaded version.
+        with Pool(processes=cpu_count()) as pool:
+            _ = pool.map(
+                self.calibrate_skew,
+                zip(
+                    fwd_dates,
+                ),
+            )
 
 
 def _example_one():
